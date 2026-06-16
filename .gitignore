@@ -25,7 +25,14 @@ pnpm-debug.log*
 test-patch.txt
 
 # Sessions
+
+# GitHub 外部引入的技能（非项目原创代码）
+src/tools/inner_skills/github-*/
 sessions/
 
 # Trained data
 *.traineddata
+
+# Cloned skill repos
+repos/
+

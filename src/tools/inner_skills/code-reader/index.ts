@@ -12,7 +12,7 @@ import {
   scanningScript,
   jumpToDefinition,
   codeReaderPromptGet,
-} from './read-code';
+} from './scripts/read-code';
 
 const tools: Record<string, any> = {
   scanning_function: scanningFunction,

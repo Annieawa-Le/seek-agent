@@ -3,11 +3,11 @@
  *
  * 提供四个持久化工具，用于在磁盘和会话内存之间传输 todo 数据。
  */
-import { todoSave } from './todo-save';
-import { todoLoad } from './todo-load';
-import { todoListSaved } from './todo-list-saved';
-import { todoDeleteSaved } from './todo-delete-saved';
-import { todoManagerPromptGet } from './prompt-get';
+import { todoSave } from './scripts/todo-save';
+import { todoLoad } from './scripts/todo-load';
+import { todoListSaved } from './scripts/todo-list-saved';
+import { todoDeleteSaved } from './scripts/todo-delete-saved';
+import { todoManagerPromptGet } from './scripts/prompt-get';
 
 const tools: Record<string, any> = {
   'todo_save': todoSave,

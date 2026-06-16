@@ -6,7 +6,7 @@ import {
   createSkill,
   listSkills,
   skillCreatorPromptGet,
-} from './create-skill';
+} from './scripts/create-skill';
 
 const tools: Record<string, any> = {
   create_skill: createSkill,
