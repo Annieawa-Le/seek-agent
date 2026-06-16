@@ -12,7 +12,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
-import { readdirSync, statSync } from 'fs';
+import { readdirSync, readFileSync, statSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -199,6 +199,42 @@ ipcMain.handle('fs:readGitStatus', async () => {
   } catch (err) {
     return { error: err.message };
   }
+
+// ─── 渲染进程请求：读取 sessions 列表 ───
+ipcMain.handle('fs:listSessions', async () => {
+  const sessionsDir = join(ROOT, 'sessions');
+  try {
+    const files = readdirSync(sessionsDir, { withFileTypes: true });
+    const sessions = [];
+    for (const file of files) {
+      if (!file.name.endsWith('.json')) continue;
+      const fullPath = join(sessionsDir, file.name);
+      try {
+        const data = JSON.parse(readFileSync(fullPath, 'utf8'));
+        const msgCount = data.agentMessages ? data.agentMessages.length : 0;
+        const lastMsg = msgCount > 0 ? data.agentMessages[msgCount - 1] : null;
+        const preview = lastMsg && lastMsg.content
+          ? lastMsg.content.replace(/<[^>]+>/g, '').slice(0, 80).replace(/\n/g, ' ')
+          : '';
+        sessions.push({
+          name: file.name.replace('.json', ''),
+          timestamp: data.timestamp || null,
+          messageCount: msgCount,
+          preview,
+        });
+      } catch {
+        // 跳过无法解析的 JSON
+      }
+    }
+    sessions.sort((a, b) => {
+      if (a.timestamp && b.timestamp) return b.timestamp.localeCompare(a.timestamp);
+      return a.name.localeCompare(b.name);
+    });
+    return sessions;
+  } catch (err) {
+    return { error: err.message };
+  }
+});
 });
 // ═════════════════════════════════════════════════════
 // 应用生命周期
@@ -223,4 +259,5 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (agentProcess) { agentProcess.kill(); agentProcess = null; }
 });
+
 

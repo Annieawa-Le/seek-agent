@@ -30,19 +30,21 @@
       <div id="body-row">
         <!-- 左侧导航栏 -->
         <aside id="left-sidebar">
-          <div id="sessions-section">
-            <div class="sidebar-section-header">
-              <span class="section-title">Sessions</span>
-              <div class="section-actions">
-                <button class="section-action-btn" title="面板/分屏">⊞</button>
-                <button class="section-action-btn" title="搜索">🔍</button>
-              </div>
+          <div class="sidebar-section-header">
+            <span class="section-title">Sessions</span>
+            <div class="section-actions">
+              <button class="section-action-btn" title="面板/分屏">⊞</button>
+              <button class="section-action-btn" title="搜索">🔍</button>
             </div>
-            <button id="new-session-btn" class="new-session-btn">
-              <span class="ns-icon">+</span>
-              <span class="ns-text">New</span>
-              <span class="ns-shortcut">Ctrl+N</span>
-            </button>
+          </div>
+          <button id="new-session-btn" class="new-session-btn">
+            <span class="ns-icon">+</span>
+            <span class="ns-text">New</span>
+            <span class="ns-shortcut">Ctrl+N</span>
+          </button>
+          <div id="session-list" class="session-list">
+            <!-- 由 renderer.js 加载 -->
+          </div>
           </div>
           <!-- 中间空白区域填充 -->
           <div id="sidebar-spacer"></div>
@@ -150,6 +152,7 @@
   <script src="renderer.js"></script>
 </body>
 </html>
+
 
 
 

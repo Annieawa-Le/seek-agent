@@ -119,6 +119,44 @@ function initLeftSidebar() {
   }
 }
 
+/** 加载会话列表 */
+async function loadSessions() {
+  const container = document.getElementById('session-list');
+  if (!container) return;
+  try {
+    container.innerHTML = '<div class="session-loading">加载中…</div>';
+    const sessions = await api.listSessions();
+    if (sessions && sessions.error) {
+      container.innerHTML = '<div class="session-empty">' + escapeHtml(sessions.error) + '</div>';
+      return;
+    }
+    if (!sessions || sessions.length === 0) {
+      container.innerHTML = '<div class="session-empty">暂无会话</div>';
+      return;
+    }
+    let html = '';
+    for (const s of sessions) {
+      const timeStr = s.timestamp ? new Date(s.timestamp).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      html += '<div class="session-item" data-name="' + escapeHtml(s.name) + '">';
+      html += '  <div class="session-name">' + escapeHtml(s.name) + '</div>';
+      html += '  <div class="session-meta">' + s.messageCount + ' msgs' + (timeStr ? ' · ' + timeStr : '') + '</div>';
+      if (s.preview) {
+        html += '  <div class="session-preview">' + escapeHtml(s.preview.slice(0, 60)) + '</div>';
+      }
+      html += '</div>';
+    }
+    container.innerHTML = html;
+    container.querySelectorAll('.session-item').forEach(el => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll('.session-item').forEach(i => i.classList.remove('active'));
+        el.classList.add('active');
+      });
+    });
+  } catch (err) {
+    container.innerHTML = '<div class="session-empty">加载失败: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
 /** 根据 key 返回子选项 HTML */
 function getCustomSubItems(key) {
   const subMap = {
@@ -1168,9 +1206,17 @@ if (document.querySelector('#left-sidebar')) {
 }
 
 // 初始化右侧面板
+
+// 加载会话列表
+if (document.getElementById('session-list')) {
+  loadSessions();
+}
 if (document.querySelector('.panel-tab')) {
   initRightPanel();
 }
+
+
+
 
 
 

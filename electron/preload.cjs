@@ -65,7 +65,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restart: () => {
     ipcRenderer.send('renderer:restart');
   },
-  },
 
   // ─── 文件系统 API ───
 
@@ -78,5 +77,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readGitStatus: async () => {
     return ipcRenderer.invoke('fs:readGitStatus');
   },
+
+  /** 读取 sessions 列表 */
+  listSessions: async () => {
+    return ipcRenderer.invoke('fs:listSessions');
+  },
 });
+
+
 
