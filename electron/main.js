@@ -199,6 +199,7 @@ ipcMain.handle('fs:readGitStatus', async () => {
   } catch (err) {
     return { error: err.message };
   }
+});
 
 // ─── 渲染进程请求：读取 sessions 列表 ───
 ipcMain.handle('fs:listSessions', async () => {
@@ -235,7 +236,6 @@ ipcMain.handle('fs:listSessions', async () => {
     return { error: err.message };
   }
 });
-});
 // ═════════════════════════════════════════════════════
 // 应用生命周期
 // ═════════════════════════════════════════════════════
@@ -259,5 +259,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (agentProcess) { agentProcess.kill(); agentProcess = null; }
 });
+
+
 
 
