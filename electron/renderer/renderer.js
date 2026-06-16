@@ -874,55 +874,161 @@ function handleAgentMessage(msg) {
 }
 
 // ════════════════════════════════════════════════════════
-// 信息面板渲染
+// 信息面板 — 仅更新面板数据，不再覆盖 #panel-content
 // ════════════════════════════════════════════════════════
 function updateInfoPanel() {
-  var el = document.getElementById('panel-content');
-  if (!el) return;
+  // 数据已由各调用点追踪，保留函数签名兼容调用
+  // DOM 渲染交由右侧面板标签切换管理
+  // 可通过 statusText 展示关键信息
+  const el = document.getElementById('status-text');
+  if (el && panelState.totalMessages > 0) {
+    // 可选：状态栏显示消息统计
+  }
+}
 
-  // 状态
-  var statusClass = 'idle';
-  var statusLabel = '空闲';
-  if (listenActive) { statusClass = 'listen'; statusLabel = '审查中'; }
-  else if (processing) { statusClass = 'busy'; statusLabel = '处理中'; }
+// ════════════════════════════════════════════════════════
+// 右侧面板 — 标签切换 & 文件树 / Git 变更
+// ════════════════════════════════════════════════════════
 
-  // 上下文
-  var ctxStr = panelState.contextChars > 0
-    ? (panelState.contextChars >= 10000
-      ? (panelState.contextChars / 1000).toFixed(1) + 'k'
-      : panelState.contextChars)
-    : '--';
-  var tokenStr = panelState.contextTokens > 0
-    ? panelState.contextTokens + 't'
-    : '';
+let currentTab = 'files';
 
-  var timeStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+/** 初始化右侧面板：绑定标签点击，加载默认标签 */
+function initRightPanel() {
+  const tabs = document.querySelectorAll('.panel-tab');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const targetTab = tab.dataset.tab;
+      if (targetTab === currentTab) return;
+      // 更新标签样式
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentTab = targetTab;
+      loadTabContent(targetTab);
+    });
+  });
+  // 加载默认标签（Files）
+  loadTabContent('files');
+}
 
-  var html = ''
-    + '<div class="panel-section">'
-    + '  <div class="panel-title">信息面板</div>'
-    + '</div>'
-    + '<div class="panel-section">'
-    + '  <div class="panel-row"><span class="panel-label">消息总数</span><span class="panel-value">' + panelState.totalMessages + '</span></div>'
-    + '  <div class="panel-row"><span class="panel-label">用户</span><span class="panel-value">' + panelState.userMessages + '</span></div>'
-    + '  <div class="panel-row"><span class="panel-label">助手</span><span class="panel-value">' + panelState.agentMessages + '</span></div>'
-    + '  <div class="panel-row"><span class="panel-label">工具调用</span><span class="panel-value">' + panelState.toolCallCount + '</span></div>'
-    + '</div>'
-    + '<div class="panel-section">'
-    + '  <div class="panel-title">上下文</div>'
-    + '  <div class="panel-row"><span class="panel-label">字符</span><span class="panel-value">' + ctxStr + '</span></div>'
-    + (tokenStr ? '  <div class="panel-row"><span class="panel-label">Token</span><span class="panel-value">' + tokenStr + '</span></div>' : '')
-    + '</div>'
-    + '<div class="panel-section">'
-    + '  <div class="panel-title">状态</div>'
-    + '  <div class="panel-row"><span class="panel-label"><span class="panel-status-dot ' + statusClass + '"></span>' + statusLabel + '</span></div>'
-    + '</div>'
-    + '<div class="panel-section">'
-    + '  <div class="panel-title">时间</div>'
-    + '  <div class="panel-row"><span class="panel-label">' + timeStr + '</span></div>'
-    + '</div>';
+/** 根据标签名称加载内容 */
+function loadTabContent(tab) {
+  const container = document.getElementById('panel-content');
+  if (!container) return;
+  if (tab === 'files') {
+    container.innerHTML = '<div class="file-tree-loading">加载中…</div>';
+    loadFileTree(container);
+  } else if (tab === 'changes') {
+    container.innerHTML = '<div class="file-tree-loading">加载中…</div>';
+    loadGitChanges(container);
+  }
+}
 
-  el.innerHTML = html;
+/** 加载项目文件树 */
+async function loadFileTree(container) {
+  try {
+    const tree = await api.readFileTree('');
+    if (tree && tree.error) {
+      container.innerHTML = '<div class="panel-empty">' + escapeHtml(tree.error) + '</div>';
+      return;
+    }
+    if (!tree || tree.length === 0) {
+      container.innerHTML = '<div class="panel-empty">项目为空</div>';
+      return;
+    }
+    const html = renderTreeNodes(tree, 0);
+    container.innerHTML = '<div class="file-tree">' + html + '</div>';
+    bindTreeEvents(container);
+  } catch (err) {
+    container.innerHTML = '<div class="panel-empty">加载失败: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+/** 递归渲染文件树节点 */
+function renderTreeNodes(nodes, depth) {
+  let html = '';
+  for (const node of nodes) {
+    if (node.type === 'folder') {
+      html += '<div class="tree-item folder" data-path="' + escapeHtml(node.path) + '">';
+      html += '  <span class="tree-toggle">▶</span>';
+      html += '  <span class="tree-folder-icon">📁</span>';
+      html += '  <span class="tree-name">' + escapeHtml(node.name) + '</span>';
+      html += '</div>';
+      if (node.children && node.children.length > 0) {
+        html += '<div class="tree-children" style="display:none">';
+        html += renderTreeNodes(node.children, depth + 1);
+        html += '</div>';
+      }
+    } else {
+      const tagMap = { js: 'tag-yellow', ts: 'tag-blue', json: 'tag-yellow', npm: 'tag-red', mjs: 'tag-yellow', cjs: 'tag-yellow' };
+      const tagClass = tagMap[node.ext] || '';
+      const tagLabel = node.ext === 'json' ? '{}' : node.ext === 'npmrc' ? 'npm' : node.ext;
+      const showTag = ['js','ts','json','npmrc','mjs','cjs'].includes(node.ext) ? 'tag-yellow' : '';
+      html += '<div class="tree-item file" data-path="' + escapeHtml(node.path) + '">';
+      if (tagClass) {
+        html += '  <span class="tree-tag ' + tagClass + '">' + tagLabel.toUpperCase() + '</span>';
+      } else {
+        html += '  <span class="tree-icon">≡</span>';
+      }
+      html += '  <span class="tree-name">' + escapeHtml(node.name) + '</span>';
+      html += '</div>';
+    }
+  }
+  return html;
+}
+
+/** 绑定文件树的折叠展开事件 */
+function bindTreeEvents(container) {
+  container.querySelectorAll('.tree-item.folder').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const toggle = el.querySelector('.tree-toggle');
+      const children = el.nextElementSibling;
+      if (children && children.classList.contains('tree-children')) {
+        const isHidden = children.style.display === 'none';
+        children.style.display = isHidden ? 'block' : 'none';
+        if (toggle) toggle.textContent = isHidden ? '▼' : '▶';
+      }
+    });
+  });
+  // 文件点击
+  container.querySelectorAll('.tree-item.file').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const path = el.dataset.path;
+      if (path) {
+        // 可选：打开文件
+        console.log('[panel] 点击文件:', path);
+      }
+    });
+  });
+}
+
+/** 加载 Git 变更列表 */
+async function loadGitChanges(container) {
+  try {
+    const changes = await api.readGitStatus();
+    if (changes && changes.error) {
+      container.innerHTML = '<div class="panel-empty">' + escapeHtml(changes.error) + '</div>';
+      return;
+    }
+    if (!changes || changes.length === 0) {
+      container.innerHTML = '<div class="panel-empty">工作区干净，无变更</div>';
+      return;
+    }
+    let html = '<div class="changes-list">';
+    for (const change of changes) {
+      const statusMap = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed', '??': 'untracked' };
+      const cls = statusMap[change.status] || 'unknown';
+      html += '<div class="change-item ' + cls + '" title="' + escapeHtml(change.file) + '">';
+      html += '  <span class="change-status">' + escapeHtml(change.status) + '</span>';
+      html += '  <span class="change-file">' + escapeHtml(change.file) + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = '<div class="panel-empty">加载失败: ' + escapeHtml(err.message) + '</div>';
+  }
 }
 
 // ════════════════════════════════════════════════════════
@@ -992,6 +1098,12 @@ appendMessage({ role: 'blank', content: '' });
 
 // 聚焦输入框
 setTimeout(() => messageInput.focus(), 300);
+
+// 初始化右侧面板
+if (document.querySelector('.panel-tab')) {
+  initRightPanel();
+}
+
 
 
 

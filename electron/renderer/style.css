@@ -426,6 +426,46 @@ html, body {
 }
 
 
+
+/* ─── Changes 列表 & 面板通用 ─── */
+.changes-list {
+  padding: 8px 12px;
+  font-size: 12.5px;
+}
+.change-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  cursor: default;
+}
+.change-item:hover {
+  background: var(--bg-hover);
+}
+.change-status {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.change-item.modified .change-status { color: #f59e0b; }
+.change-item.added .change-status { color: #22c55e; }
+.change-item.deleted .change-status { color: #ef4444; }
+.change-item.untracked .change-status { color: #3b82f6; }
+.change-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-tree-loading, .panel-empty {
+  padding: 24px 12px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
 /* ═══════════════════════════════════════════════════
    消息区域
    ═══════════════════════════════════════════════════ */
@@ -1052,6 +1092,7 @@ html, body {
 @media (max-width: 780px) {
   #left-sidebar { display: none; }
 }
+
 
 
 

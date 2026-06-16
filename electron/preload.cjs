@@ -65,4 +65,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restart: () => {
     ipcRenderer.send('renderer:restart');
   },
+  },
+
+  // ─── 文件系统 API ───
+
+  /** 读取项目文件树 */
+  readFileTree: async (dirPath) => {
+    return ipcRenderer.invoke('fs:readFileTree', dirPath);
+  },
+
+  /** 读取 git 变更状态 */
+  readGitStatus: async () => {
+    return ipcRenderer.invoke('fs:readGitStatus');
+  },
 });
+

@@ -114,45 +114,27 @@
         <!-- 右栏：文件树 -->
         <aside id="info-panel">
           <div class="panel-tabs">
-            <span class="panel-tab inactive">Changes</span>
-            <span class="panel-tab active">Files</span>
+            <span class="panel-tab inactive" data-tab="changes">Changes</span>
+            <span class="panel-tab active" data-tab="files">Files</span>
             <div class="panel-tab-actions">
               <button class="panel-tab-btn" title="搜索">🔍</button>
               <button class="panel-tab-btn" title="面板布局">⊞</button>
             </div>
           </div>
           <div id="panel-content">
-            <div class="file-tree">
-              <div class="tree-item folder expanded" data-path="seek-agent">
-                <span class="tree-toggle">▼</span>
-                <span class="tree-icon">📁</span>
-                <span class="tree-name">seek-agent</span>
-              </div>
-              <div class="tree-children">
-                <div class="tree-item folder" data-path=".todo-data"><span class="tree-toggle">▶</span><span class="tree-icon">📁</span><span class="tree-name">.todo-data</span></div>
-                <div class="tree-item folder" data-path="ai-ide"><span class="tree-toggle">▶</span><span class="tree-icon">📁</span><span class="tree-name">ai-ide</span></div>
-                <div class="tree-item folder" data-path="electron"><span class="tree-toggle">▶</span><span class="tree-icon">📁</span><span class="tree-name">electron</span></div>
-                <div class="tree-item folder" data-path="extension"><span class="tree-toggle">▶</span><span class="tree-icon">📁</span><span class="tree-name">extension</span></div>
-                <div class="tree-item folder" data-path="node_modules"><span class="tree-toggle">▶</span><span class="tree-icon">📁</span><span class="tree-name">node_modules</span></div>
-                <div class="tree-item folder" data-path="packages"><span class="tree-toggle">▶</span><span class="tree-icon">📁</span><span class="tree-name">packages</span></div>
-                <div class="tree-item folder" data-path="sessions"><span class="tree-toggle">▶</span><span class="tree-icon">📁</span><span class="tree-name">sessions</span></div>
-                <div class="tree-item folder" data-path="src"><span class="tree-toggle">▶</span><span class="tree-icon">📁</span><span class="tree-name">src</span></div>
-                <div class="tree-item folder" data-path="webui"><span class="tree-toggle">▶</span><span class="tree-icon">📁</span><span class="tree-name">webui</span></div>
-                <div class="tree-item file" data-path="package.json"><span class="tree-name">package.json</span></div>
-                <div class="tree-item file tag-js" data-path="vite.config.ts"><span class="tree-tag tag-yellow">JS</span><span class="tree-name">vite.config.ts</span></div>
-                <div class="tree-item file" data-path="pnpm-lock.yaml"><span class="tree-name">pnpm-lock.yaml</span></div>
-                <div class="tree-item file" data-path=".gitignore"><span class="tree-name">.gitignore</span></div>
-                <div class="tree-item file tag-ts" data-path="tsconfig.json"><span class="tree-tag tag-blue">TS</span><span class="tree-name">tsconfig.json</span></div>
-              </div>
-            </div>
+            <!-- 由 renderer.js 动态渲染 -->
           </div>
         </aside>
       </div>
 
       <!-- 底部状态栏（横跨三栏） -->
       <div id="main-status">
-        <span class="ms-left">🛡 Default Approvals</span>
+        <span class="ms-left">
+          <span id="status-text" class="status-text"></span>
+          <span id="tools-badge" class="tools-badge" style="display:none"></span>
+        </span>
         <span class="ms-right">📁 Folder &nbsp;│&nbsp; Git Branch</span>
+      </div>
       </div>
     </div>
 
@@ -161,5 +143,7 @@
   <script src="renderer.js"></script>
 </body>
 </html>
+
+
 
 

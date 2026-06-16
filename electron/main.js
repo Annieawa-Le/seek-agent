@@ -12,6 +12,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
+import { readdirSync, statSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -153,6 +154,52 @@ ipcMain.on('renderer:restart', () => {
   startAgent();
 });
 
+
+// ─── 渲染进程请求：读取目录文件树 ───
+ipcMain.handle('fs:readFileTree', async (_e, dirPath) => {
+  const targetDir = dirPath ? resolve(ROOT, dirPath) : ROOT;
+  try {
+    return buildFileTree(targetDir, '');
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+function buildFileTree(dir, relativePath) {
+  const entries = readdirSync(dir, { withFileTypes: true });
+  const children = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') && entry.name !== '.env') continue;
+    if (entry.name === 'node_modules') continue;
+    const fullPath = join(dir, entry.name);
+    const relPath = relativePath ? join(relativePath, entry.name) : entry.name;
+    if (entry.isDirectory()) {
+      const subtree = buildFileTree(fullPath, relPath);
+      children.push({ name: entry.name, path: relPath, type: 'folder', children: subtree });
+    } else {
+      const ext = entry.name.split('.').pop().toLowerCase();
+      children.push({ name: entry.name, path: relPath, type: 'file', ext });
+    }
+  }
+  return children.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+// ─── 渲染进程请求：读取 git 变更 ───
+ipcMain.handle('fs:readGitStatus', async () => {
+  try {
+    const output = execSync('git status --porcelain', { cwd: ROOT, encoding: 'utf8', timeout: 5000 });
+    const lines = output.trim().split('\n').filter(Boolean);
+    return lines.map(line => ({
+      status: line.slice(0, 2).trim(),
+      file: line.slice(3).trim(),
+    }));
+  } catch (err) {
+    return { error: err.message };
+  }
+});
 // ═════════════════════════════════════════════════════
 // 应用生命周期
 // ═════════════════════════════════════════════════════
@@ -176,3 +223,4 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (agentProcess) { agentProcess.kill(); agentProcess = null; }
 });
+
