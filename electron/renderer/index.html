@@ -47,38 +47,45 @@
           <!-- 中间空白区域填充 -->
           <div id="sidebar-spacer"></div>
           <div id="customizations-section">
-            <div class="sidebar-section-header collapsible">
+            <div class="sidebar-section-header collapsible" id="custom-header">
               <span class="section-title">Customizations</span>
-              <span class="collapse-arrow">▼</span>
+              <span class="collapse-arrow" id="custom-arrow">▼</span>
             </div>
             <ul id="custom-list">
-              <li class="custom-item" data-key="agents">
+              <li class="custom-item" data-key="agents" data-expandable="true">
                 <span class="custom-icon">💬</span>
                 <span class="custom-label">Agents</span>
+                <span class="custom-expand">▶</span>
               </li>
-              <li class="custom-item" data-key="skills">
+              <li class="custom-item" data-key="skills" data-expandable="true">
                 <span class="custom-icon">💡</span>
                 <span class="custom-label">Skills</span>
                 <span class="custom-badge">10</span>
+                <span class="custom-expand">▶</span>
               </li>
-              <li class="custom-item" data-key="instructions">
+              <li class="custom-item" data-key="instructions" data-expandable="true">
                 <span class="custom-icon">📄</span>
                 <span class="custom-label">Instructions</span>
+                <span class="custom-expand">▶</span>
               </li>
-              <li class="custom-item" data-key="hooks">
+              <li class="custom-item" data-key="hooks" data-expandable="true">
                 <span class="custom-icon">⚡</span>
                 <span class="custom-label">Hooks</span>
+                <span class="custom-expand">▶</span>
               </li>
-              <li class="custom-item" data-key="mcp">
+              <li class="custom-item" data-key="mcp" data-expandable="true">
                 <span class="custom-icon">📋</span>
                 <span class="custom-label">MCP Servers</span>
                 <span class="custom-badge">2</span>
+                <span class="custom-expand">▶</span>
               </li>
-              <li class="custom-item" data-key="plugins">
+              <li class="custom-item" data-key="plugins" data-expandable="true">
                 <span class="custom-icon">🔌</span>
                 <span class="custom-label">Plugins</span>
+                <span class="custom-expand">▶</span>
               </li>
             </ul>
+          </div>
           </div>
         </aside>
 
@@ -143,6 +150,7 @@
   <script src="renderer.js"></script>
 </body>
 </html>
+
 
 
 

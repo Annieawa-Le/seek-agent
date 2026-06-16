@@ -72,6 +72,69 @@ if (!api) {
 }
 
 // ════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════
+// 左侧栏交互 — Customizations 展开/收起 + 会话
+// ════════════════════════════════════════════════════════
+
+function initLeftSidebar() {
+  // ─── Customizations 条目的展开/收起 ───
+  document.querySelectorAll('.custom-item[data-expandable]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = item.dataset.key;
+      const expand = item.querySelector('.custom-expand');
+      if (!expand) return;
+      // 展开或收起
+      const isExpanded = expand.classList.contains('expanded');
+      // 先收起所有展开项
+      document.querySelectorAll('.custom-expand.expanded').forEach(el => {
+        el.classList.remove('expanded');
+        el.textContent = '▶';
+      });
+      document.querySelectorAll('.custom-subitems').forEach(el => el.remove());
+      if (!isExpanded) {
+        expand.classList.add('expanded');
+        expand.textContent = '▼';
+        // 创建子项容器
+        const sub = document.createElement('div');
+        sub.className = 'custom-subitems';
+        sub.innerHTML = getCustomSubItems(key);
+        item.after(sub);
+      }
+    });
+  });
+
+  // ─── Customizations 区块折叠 ───
+  const customHeader = document.getElementById('custom-header');
+  const customList = document.getElementById('custom-list');
+  if (customHeader && customList) {
+    customHeader.addEventListener('click', (e) => {
+      if (e.target.closest('.custom-item')) return;
+      const isHidden = customList.style.display === 'none';
+      customList.style.display = isHidden ? 'block' : 'none';
+      const arrow = document.getElementById('custom-arrow');
+      if (arrow) arrow.textContent = isHidden ? '▼' : '▶';
+    });
+  }
+}
+
+/** 根据 key 返回子选项 HTML */
+function getCustomSubItems(key) {
+  const subMap = {
+    agents: ['seek-agent', 'custom-agent'],
+    skills: ['code-reader', 'web-accessor', 'html-toolkit', 'image-identifier', 'pdf-reader'],
+    instructions: ['system-prompt', 'user-prompt'],
+    hooks: ['pre-message', 'post-message', 'on-error'],
+    mcp: ['file-server', 'search-server'],
+    plugins: ['plugin-a', 'plugin-b'],
+  };
+  const items = subMap[key] || [];
+  if (items.length === 0) return '<div class="custom-empty">无子项</div>';
+  return items.map(name =>
+    '<div class="custom-subitem"><span class="custom-subicon">·</span>' + escapeHtml(name) + '</div>'
+  ).join('');
+}
 // 工具函数
 // ════════════════════════════════════════════════════════
 function formatTime(ts) {
@@ -962,7 +1025,7 @@ function renderTreeNodes(nodes, depth) {
       const tagMap = { js: 'tag-yellow', ts: 'tag-blue', json: 'tag-yellow', npm: 'tag-red', mjs: 'tag-yellow', cjs: 'tag-yellow' };
       const tagClass = tagMap[node.ext] || '';
       const tagLabel = node.ext === 'json' ? '{}' : node.ext === 'npmrc' ? 'npm' : node.ext;
-      const showTag = ['js','ts','json','npmrc','mjs','cjs'].includes(node.ext) ? 'tag-yellow' : '';
+      html += '<div class="tree-item file" data-path="' + escapeHtml(node.path) + '">';
       html += '<div class="tree-item file" data-path="' + escapeHtml(node.path) + '">';
       if (tagClass) {
         html += '  <span class="tree-tag ' + tagClass + '">' + tagLabel.toUpperCase() + '</span>';
@@ -1099,10 +1162,17 @@ appendMessage({ role: 'blank', content: '' });
 // 聚焦输入框
 setTimeout(() => messageInput.focus(), 300);
 
+// 初始化左侧栏
+if (document.querySelector('#left-sidebar')) {
+  initLeftSidebar();
+}
+
 // 初始化右侧面板
 if (document.querySelector('.panel-tab')) {
   initRightPanel();
 }
+
+
 
 
 
