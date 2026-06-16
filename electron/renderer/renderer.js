@@ -47,10 +47,9 @@ let _toolCallCurrent = 0;
 let _toolCallTotal = 0;
 
 // 用于跟踪是否在流式追加中，避免误触自动滚动
-// 用于跟踪是否在流式追加中，避免误触自动滚动
 let userScrolledUp = false;
 
-// 用于在每轮首次输出前插入空气泡
+// 在每轮首次输出前插入空气泡
 let _pendingAirBubble = false;
 
 // 消息历史 ID 计数器
@@ -734,8 +733,10 @@ function collapseToolMessages(entries) {
 // ════════════════════════════════════════════════════════
 function scrollToBottom() {
   if (userScrolledUp) return;
-  requestAnimationFrame(() => {
-    messageArea.scrollTop = messageArea.scrollHeight;
+  // 使用平滑滚动提升视觉体验
+  messageArea.scrollTo({
+    top: messageArea.scrollHeight,
+    behavior: 'smooth'
   });
 }
 
@@ -1244,4 +1245,7 @@ if (document.getElementById('session-list')) {
 if (document.querySelector('.panel-tab')) {
   initRightPanel();
 }
+
+
+
 

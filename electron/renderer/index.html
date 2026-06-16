@@ -12,7 +12,7 @@
     <!-- 顶部标题栏 -->
     <header id="header">
       <div class="header-left">
-        <span class="header-icon">✨</span>
+        <svg class="header-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         <span class="header-title">Seek Agent</span>
       </div>
       <div class="header-center">
@@ -33,12 +33,12 @@
           <div class="sidebar-section-header">
             <span class="section-title">Sessions</span>
             <div class="section-actions">
-              <button class="section-action-btn" title="面板/分屏">⊞</button>
-              <button class="section-action-btn" title="搜索">🔍</button>
+              <button class="section-action-btn" title="面板/分屏"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button>
+              <button class="section-action-btn" title="搜索"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
             </div>
           </div>
           <button id="new-session-btn" class="new-session-btn">
-            <span class="ns-icon">+</span>
+            <span class="ns-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
             <span class="ns-text">New</span>
             <span class="ns-shortcut">Ctrl+N</span>
           </button>
@@ -54,34 +54,34 @@
             </div>
             <ul id="custom-list">
               <li class="custom-item" data-key="agents" data-expandable="true">
-                <span class="custom-icon">💬</span>
+                <svg class="custom-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
                 <span class="custom-label">Agents</span>
                 <span class="custom-expand">▶</span>
               </li>
               <li class="custom-item" data-key="skills" data-expandable="true">
-                <span class="custom-icon">💡</span>
+                <svg class="custom-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/><path d="M2 22v-2a6 6 0 0 1 6-6h8a6 6 0 0 1 6 6v2"/></svg>
                 <span class="custom-label">Skills</span>
                 <span class="custom-badge">10</span>
                 <span class="custom-expand">▶</span>
               </li>
               <li class="custom-item" data-key="instructions" data-expandable="true">
-                <span class="custom-icon">📄</span>
+                <svg class="custom-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
                 <span class="custom-label">Instructions</span>
                 <span class="custom-expand">▶</span>
               </li>
               <li class="custom-item" data-key="hooks" data-expandable="true">
-                <span class="custom-icon">⚡</span>
+                <svg class="custom-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                 <span class="custom-label">Hooks</span>
                 <span class="custom-expand">▶</span>
               </li>
               <li class="custom-item" data-key="mcp" data-expandable="true">
-                <span class="custom-icon">📋</span>
+                <svg class="custom-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                 <span class="custom-label">MCP Servers</span>
                 <span class="custom-badge">2</span>
                 <span class="custom-expand">▶</span>
               </li>
               <li class="custom-item" data-key="plugins" data-expandable="true">
-                <span class="custom-icon">🔌</span>
+                <svg class="custom-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H4"/><path d="M12 4v16"/></svg>
                 <span class="custom-label">Plugins</span>
                 <span class="custom-expand">▶</span>
               </li>
@@ -124,8 +124,8 @@
             <span class="panel-tab inactive" data-tab="changes">Changes</span>
             <span class="panel-tab active" data-tab="files">Files</span>
             <div class="panel-tab-actions">
-              <button class="panel-tab-btn" title="搜索">🔍</button>
-              <button class="panel-tab-btn" title="面板布局">⊞</button>
+              <button class="panel-tab-btn" title="搜索"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+              <button class="panel-tab-btn" title="面板布局"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button>
             </div>
           </div>
           <div id="panel-content">
@@ -149,6 +149,10 @@
   <script src="renderer.js"></script>
 </body>
 </html>
+
+
+
+
 
 
 
