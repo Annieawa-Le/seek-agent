@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import path from 'node:path';
+import { getWorkspaceRoot } from './workdir';
 import { deskEditManager, DESK_EDIT_TOOLS } from './tools/desk-edit';
 import { getModel, setSystemPrompt } from './model-provider';
 import {
@@ -282,8 +283,12 @@ export class CLIAAgent {
       }
     }
 
-    this.ui.addDivider();
     this.ui.setProcessing(false);
+
+    // ── 自动保存会话（每轮结束）──
+    if (!this.aborted && !this.ui.isAborted) {
+      this.autoSaveSession();
+    }
   }
 
   // ────────────────────────────────────────────────
@@ -814,10 +819,43 @@ export class CLIAAgent {
   setMessages(msgs: ModelMessage[]): void {
     this.messages = msgs;
   }
+
+  // ────────────────────────────────────────────────
+  // 自动保存
+  // ────────────────────────────────────────────────
+
+  /**
+   * 每轮结束后自动保存当前会话到 sessions/ 目录
+   * 使用时间戳文件名，不覆盖已有会话
+   */
+  private autoSaveSession(): void {
+    const messages = this.messages;
+    if (messages.length === 0) return;
+
+    const sessionDir = path.join(getWorkspaceRoot(), 'sessions');
+    if (!fs.existsSync(sessionDir)) {
+      fs.mkdirSync(sessionDir, { recursive: true });
+    }
+
+    const now = new Date();
+    const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const fileName = `session-${ts}.json`;
+    const filePath = path.join(sessionDir, fileName);
+
+    const data = {
+      version: 1,
+      timestamp: now.toISOString(),
+      cwd: process.cwd(),
+      agentMessages: messages,
+    };
+
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch {
+      // 自动保存失败不影响主流程
+    }
+  }
 }
-
-
-
 
 
 
