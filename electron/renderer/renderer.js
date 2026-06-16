@@ -602,6 +602,7 @@ function renderToolCounter(contentEl) {
       }
     });
   }
+}
 
 /** 清理所有残留的「执行中...」工具结果 */
 function clearPendingToolResults() {
@@ -623,7 +624,6 @@ function clearPendingToolResults() {
       if (contentEl) renderToolCounter(contentEl);
     }
   });
-}
 }
 
 /**
@@ -855,18 +855,6 @@ document.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.key === 'w') {
     e.preventDefault();
     api.sendCommand('memory_focus');
-  }
-  // Ctrl+Shift+C 终止
-  if (e.ctrlKey && e.shiftKey && (e.key === 'c' || e.key === 'C')) {
-    e.preventDefault();
-    api.abort();
-    switchToSendMode();
-    streamingAgent = false;
-    document.querySelectorAll('.message.agent.streaming').forEach(el => {
-      el.classList.remove('streaming');
-      el.classList.add('round-ended');
-    });
-    statusText.textContent = '已终止';
   }
 });
 
@@ -1256,54 +1244,4 @@ if (document.getElementById('session-list')) {
 if (document.querySelector('.panel-tab')) {
   initRightPanel();
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
