@@ -117,6 +117,22 @@ function initLeftSidebar() {
       if (arrow) arrow.textContent = isHidden ? '▼' : '▶';
     });
   }
+
+  // ─── New Session 按钮 ───
+  const newBtn = document.getElementById('new-session-btn');
+  if (newBtn) {
+    newBtn.addEventListener('click', () => {
+      if (processing) {
+        api.abort();
+        switchToSendMode();
+        streamingAgent = false;
+      }
+      clearMessages();
+      api.sendCommand('new_session');
+      // 重新加载会话列表
+      if (typeof loadSessions === 'function') loadSessions();
+    });
+  }
 }
 
 /** 加载会话列表 */
@@ -1214,6 +1230,7 @@ if (document.getElementById('session-list')) {
 if (document.querySelector('.panel-tab')) {
   initRightPanel();
 }
+
 
 
 
