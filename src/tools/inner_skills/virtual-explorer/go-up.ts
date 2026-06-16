@@ -1,3 +1,4 @@
+import { formatDirectoryContents } from './list-directory.js';
 import { tool } from 'ai';
 import { z } from 'zod';
 import path from 'path';
@@ -17,7 +18,8 @@ export const goUp = tool({
         return absPath;
       }
 
-      return parentPath;
+      const listing = await formatDirectoryContents(parentPath);
+      return `${parentPath}\n\n${listing}`;
     } catch (error) {
       return `❌ go_up 执行出错: ${(error as Error).message}`;
     }
@@ -47,6 +49,7 @@ export const explorerGoUp = tool({
     }
 
     setExplorerPath(parentPath);
-    return parentPath;
+    const listing = await formatDirectoryContents(parentPath);
+    return `${parentPath}\n\n${listing}`;
   },
 });

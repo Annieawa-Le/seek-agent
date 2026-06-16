@@ -190,6 +190,10 @@ export const searchContent = tool({
   execute: async ({ filePath, content, useRegex }) : Promise<string> => {
     try {
       const resolved = resolvePath(filePath);
+      const stat = await fs.stat(resolved);
+      if (!stat.isFile()) {
+        return `路径 "${filePath}" 是一个目录，不是文件。请在 filePath 参数中传入文件路径。`;
+      }
       const fileContent = await fs.readFile(resolved, 'utf-8');
       const lines = fileContent.split('\n');
       const resultLines: string[] = [];
@@ -229,6 +233,7 @@ export const searchContent = tool({
     }
   },
 });
+
 
 
 

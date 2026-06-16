@@ -415,8 +415,11 @@ function appendMessage(msg) {
   else if (msg.role === 'agent') panelState.agentMessages++;
   updateInfoPanel();
 
-  // agent 消息进来即视为流式开始
+  // agent 消息进来即视为流式开始，先移除所有旧气泡的 streaming 标记
   if (msg.role === 'agent') {
+    document.querySelectorAll('.message.agent.streaming').forEach(function(sib) {
+      sib.classList.remove('streaming');
+    });
     el.classList.add('streaming');
     streamingAgent = true;
   }
@@ -437,6 +440,10 @@ function updateToolInline(msg) {
 
     // 没有气泡，或最后一个已结束 → 创建新气泡
     if (!lastAgent || lastAgent.classList.contains('round-ended')) {
+      // 先清除所有旧气泡的光标
+      document.querySelectorAll('.message.agent.streaming').forEach(function(sib) {
+        sib.classList.remove('streaming');
+      });
       const el = createMessageElement({ role: 'agent', content: '', createdAt: Date.now() });
       messageList.appendChild(el);
       lastAgent = el;
@@ -514,6 +521,7 @@ function updateToolInline(msg) {
       if (contentEl._toolHistoryIndex === contentEl._toolHistory.length - 1) {
         renderToolDisplay(contentEl);
       }
+      
     }
   }
   scrollToBottom();
@@ -939,6 +947,11 @@ function handleAgentMessage(msg) {
         _toolCallCurrent = 0;
         _toolCallTotal = 0;
         switchToStopMode();
+        // 清理旧气泡的 streaming 标记（上一轮可能还有残留光标）
+        document.querySelectorAll('.message.agent.streaming').forEach(function(sib) {
+          sib.classList.remove('streaming');
+          sib.classList.add('round-ended');
+        });
         // 清理上一轮残留的「执行中...」结果
         clearPendingToolResults();
       } else {
@@ -1243,6 +1256,7 @@ if (document.getElementById('session-list')) {
 if (document.querySelector('.panel-tab')) {
   initRightPanel();
 }
+
 
 
 

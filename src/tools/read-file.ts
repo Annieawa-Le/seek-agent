@@ -2,6 +2,8 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import fs from 'fs/promises';
 import { resolvePath } from '../workdir.js';
+import { patchStaging } from './patch-staging.js';
+import { getPreviewBaseLines } from './file-manipulation.js';
 // import { start } from 'repl';
 
 
@@ -49,27 +51,40 @@ export const readCertainLines = tool({
     }
   },
 });
-
 export const readNumline = tool({
   /**
    * read_num_line
    * 读取带行号的特定行范围的文件内容。
    * filePath 是文件的绝对路径或相对当前工作目录的路径。
    * startLine, endLine 分别是 int 类型整数，表示始末行号.
+   * resume 为 true 时行号基于暂存区中所有未应用 patch 模拟后的文件状态，续批模式。
    */
   description: `读取带行号的特定行范围的文件内容。
    filePath 是文件的绝对路径或相对当前工作目录的路径。
-   startLine, endLine 分别是 int 类型整数，表示始末行号.`,
+   startLine, endLine 分别是 int 类型整数，表示始末行号.
+   resume 为 true 时行号基于暂存区中所有未应用 patch 模拟后的文件状态，续批模式。`,
   inputSchema: z.object({
     filePath: z.string(),
     startLine: z.int(),
     endLine: z.int(),
+    resume: z.boolean().optional().default(false).describe('续批模式：基于暂存区所有未应用 patch 模拟后的文件状态'),
   }),
-  execute: async ({ filePath, startLine, endLine }) : Promise<string>=> {
+  execute: async ({ filePath, startLine, endLine, resume }) : Promise<string>=> {
     try {
       const resolved = resolvePath(filePath);
-      const content = await fs.readFile(resolved, 'utf-8');
-      let lines: string[] = content.split('\n');
+
+      // 续批模式：从暂存区获取模拟后的文件状态
+      let lines: string[];
+      if (resume) {
+        const sessionPatches = patchStaging.getByFile(resolved)
+          .filter(p => p.sessionId === patchStaging.getSessionId());
+        const { lines: previewLines } = await getPreviewBaseLines(resolved, true, sessionPatches);
+        lines = previewLines;
+      } else {
+        const content = await fs.readFile(resolved, 'utf-8');
+        lines = content.split('\n');
+      }
+
       let result: string = '';
       for(let i = startLine; i <= endLine; i++){
         // 显示行号，对齐格式
@@ -106,5 +121,8 @@ export const scanFileTool = tool({
     }
   },
 });
+
+
+
 
 

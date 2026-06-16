@@ -65,6 +65,9 @@ const coreTools = {
   memory_shorten: wrapTool('memory_shorten', memoryShorten),
 };
 
+// ── 技能→工具映射（用于卸载） ──
+let skillToolMap: Record<string, string[]> = {};
+
 // ── 自动扫描加载 inner_skills ──
 async function loadInnerSkills(): Promise<Record<string, unknown>> {
   const skillsDir = path.join(__dirname, 'inner_skills');
@@ -108,6 +111,7 @@ async function loadInnerSkills(): Promise<Record<string, unknown>> {
           continue;
         }
         allTools[name] = wrapTool(name, toolImpl);
+        (skillToolMap[dir.name] ??= []).push(name);
       }
       // ── 加载技能的工具翻译（translation.ts） ──
       try {
@@ -170,6 +174,7 @@ setToolRegistry(toolsContainer as any);
 export async function reloadSkills(): Promise<string> {
   const loaded = await loadInnerSkills();
   const report: string[] = [];
+  skillToolMap = {};
   for (const [name, impl] of Object.entries(loaded)) {
     if (name in coreTools || name in toolsContainer) {
       report.push(`  ⏭ 跳过 ${name}（重名）`);
@@ -185,6 +190,45 @@ export async function reloadSkills(): Promise<string> {
   report.push(`共新增 ${report.filter(r => r.includes('✅')).length} 个工具。`);
   return report.join('\n');
 }
+
+// ── 卸载指定技能的所有工具 ──
+/** 卸载指定 inner_skill 的所有工具，返回卸载的工具名列表 */
+export function removeSkill(skillName: string): string[] {
+  const toolNames = skillToolMap[skillName];
+  if (!toolNames || toolNames.length === 0) return [];
+  const removed: string[] = [];
+  for (const name of toolNames) {
+    if (name in coreTools) continue; // 安全防护
+    if (name in toolsContainer) {
+      delete toolsContainer[name];
+      removed.push(name);
+    }
+  }
+  delete skillToolMap[skillName];
+  setToolRegistry(toolsContainer as any);
+  return removed;
+}
+
+// ── 卸载指定名称的工具 ──
+/** 卸载单个工具（不区分归属 skill），返回工具所属 skill 名（如有） */
+export function removeTool(toolName: string): string | null {
+  if (toolName in coreTools) return null; // 核心工具不可卸载
+  if (!(toolName in toolsContainer)) return null;
+  delete toolsContainer[toolName];
+  // 从 skillToolMap 中清理
+  for (const [skill, names] of Object.entries(skillToolMap)) {
+    const idx = names.indexOf(toolName);
+    if (idx !== -1) {
+      names.splice(idx, 1);
+      if (names.length === 0) delete skillToolMap[skill];
+      setToolRegistry(toolsContainer as any);
+      return skill;
+    }
+  }
+  setToolRegistry(toolsContainer as any);
+  return '__anonymous__';
+}
+
 
 
 

@@ -433,6 +433,7 @@ async function getPreviewBaseLines(
 
 // ============================================================
 // 1. create_file - 创建新文件
+export { getPreviewBaseLines, readFileLines, groupIntoBatches, applyBatchToLines };
 // ============================================================
 export const createFile = tool({
   description: `创建一个新文件，并写入 fileContent。
@@ -990,6 +991,8 @@ export const revisePatch = tool({
     return `✅ 已替换第 ${index} 个 patch 为 [${toolName.toUpperCase()}] ${desc}\n■ 暂存区现有 ${patchStaging.size} 个待应用的修改`;
   },
 });
+
+
 
 
 

@@ -1,0 +1,4 @@
+{
+  "enable": true,
+  "description": "图标库查询工具，以 VS Code Codicons 为参考，提供图标名称搜索、别名查找、codepoint 索引和 SVG 资源引用能力。适合需要在前端项目中使用 Codicons 的开发者参考。"
+}

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import fs from 'fs/promises';
 import path from 'path';
 import { getExplorerPath, setExplorerPath } from './explorer-state.js';
+import { formatDirectoryContents } from './list-directory.js';
 
 export const enterSubfolder = tool({
   description: `进入指定路径下的某个子文件夹，返回该子文件夹的规范路径。`,
@@ -20,7 +21,8 @@ export const enterSubfolder = tool({
         return `❌ "${folderName}" 不是目录，无法进入。`;
       }
 
-      return childPath;
+      const listing = await formatDirectoryContents(childPath);
+      return `${childPath}\n\n${listing}`;
     } catch (error) {
       const msg = (error as Error).message;
       if (msg.includes('ENOENT')) {
@@ -51,7 +53,8 @@ export const explorerEnterSubfolder = tool({
         return `❌ "${folderName}" 不是目录，无法进入。`;
       }
       setExplorerPath(childPath);
-      return childPath;
+      const listing = await formatDirectoryContents(childPath);
+      return `${childPath}\n\n${listing}`;
     } catch (error) {
       const msg = (error as Error).message;
       if (msg.includes('ENOENT')) {

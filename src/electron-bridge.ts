@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { ansiToHtml } from './assets/tool-translations-web';
 import { friendlyToolCallLabel } from './assets/tool-translations';
+import type { UIMessage } from './ui';
 
 // ═════════════════════════════════════════════════════
 // 消息类型（与 TerminalUI 的 UIMessage 兼容）
@@ -202,6 +203,26 @@ export class ElectronUIBridge {
  this.send({ type: 'clear-messages' });
  }
 
+  /** 批量替换消息列表（用于加载会话时恢复显示） */
+  replaceMessages(msgs: UIMessage[]): void {
+    this.messages = msgs.map(m => ({
+      role: m.role,
+      content: m.content,
+      createdAt: m.createdAt || Date.now(),
+      subagentName: m.subagentName,
+      collapsed: m.collapsed,
+      toolMeta: m.toolMeta,
+    }));
+    // 通知渲染进程清空并逐个重建
+    this.send({ type: 'clear-messages' });
+    for (const msg of this.messages) {
+      this.send({ type: 'message', role: msg.role, content: msg.content });
+      if (msg.role === 'subagent') {
+        this.send({ type: 'subagent', name: msg.subagentName || '', content: msg.content });
+      }
+    }
+  }
+
  // ═══════════════════════════════════════════════════
  // 状态控制
  // ═══════════════════════════════════════════════════
@@ -303,3 +324,5 @@ export class ElectronUIBridge {
  this.send({ type: 'init-done' });
  }
 }
+
+

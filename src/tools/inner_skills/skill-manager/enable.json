@@ -1,4 +1,4 @@
 {
   "enable": true,
-  "description": "技能管理器，提供 reload_skills 工具，让 AI 或用户在不重启进程的情况下重新加载所有 inner_skills。"
-}
+  "description": "技能管理器，提供 reload_skills（重新加载所有技能）、remove_skill（卸载整个技能）、remove_tool（卸载单个工具）工具，让 AI 或用户在不重启进程的情况下管理 inner_skills。"
+
