@@ -1,0 +1,11 @@
+packages:
+  - 'extension'
+  - 'packages/*'
+allowBuilds:
+  c: true
+  e: true
+  l: true
+  n: true
+  o: true
+  r: true
+  t: true

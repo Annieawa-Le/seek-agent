@@ -1,0 +1,31 @@
+node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Logs
+*.log
+pnpm-debug.log*
+
+# Test artifacts
+test-patch.txt
+
+# Sessions
+sessions/
+
+# Trained data
+*.traineddata

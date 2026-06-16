@@ -1,0 +1,4 @@
+{
+  "enable": true,
+  "description": "GitHub 仓库在线探索与本地 git 操作，支持克隆、提交历史、分支管理和推送"
+}

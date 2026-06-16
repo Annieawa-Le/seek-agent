@@ -1,0 +1,4 @@
+{
+  "enable": true,
+  "description": "读取各 skill 的参考文献，支持文件列表、内容读取、关键词搜索和跨 skill 文件查找"
+}

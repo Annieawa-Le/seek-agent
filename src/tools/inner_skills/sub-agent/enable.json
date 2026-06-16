@@ -1,0 +1,4 @@
+{
+  "enable": true,
+  "description": "子模型管理技能。支持 clone/mission/listen 三种模式创建子 AI 模型，子模型拥有独立调用栈，可通过 a_submission 向主模型提交工作结果。"
+}

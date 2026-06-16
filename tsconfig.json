@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    /* 语言与环境 */
+    "target": "ESNext",
+    // 设置模块系统为 ESNext
+    "module": "ESNext",
+    // 使用 Bundler 模块解析策略 (更灵活，适用于 tsc 不打包的场景)
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],                 // 只包含 ES 类型，无 DOM（因为是 CLI）
+    "resolveJsonModule": true,        // 允许导入 .json 文件
+
+    /* 输出配置 */
+    "outDir": "./dist",                // 编译后的 JS 输出目录
+    "rootDir": "./src",               // 源码根目录
+    "removeComments": true,            // 去除注释（可选）
+
+    /* 类型检查严格性 */
+    "strict": true,                    // 启用所有严格类型检查
+    "noUnusedLocals": true,           // 未使用的局部变量报错
+    "noUnusedParameters": true,       // 未使用的参数报错
+    "noImplicitReturns": true,        // 函数所有分支必须返回值
+    "noFallthroughCasesInSwitch": true,
+
+    /* 模块互操作 */
+    "esModuleInterop": true,           // 更好地兼容 CommonJS 模块
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+
+    /* 其他 */
+    "skipLibCheck": true,              // 跳过依赖库的类型检查（提速）
+    "sourceMap": true,                  // 生成 .map 文件，便于调试
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

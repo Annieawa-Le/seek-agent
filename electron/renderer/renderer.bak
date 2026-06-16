@@ -1,0 +1,804 @@
+/**
+ * electron/renderer/renderer.js — WebUI 前端逻辑
+ *
+ * Electron 主进程通过 preload.js 暴露的 window.electronAPI 通信。
+ * 负责：
+ *   1. 接收 agent 消息并渲染
+ *   2. 用户输入发送
+ *   3. 滚动控制
+ *   4. 快捷键
+ *   5. Markdown 渲染
+ */
+
+// ════════════════════════════════════════════════════════
+// DOM 引用
+// ════════════════════════════════════════════════════════
+const messageList = document.getElementById('message-list');
+const messageArea = document.getElementById('message-area');
+const messageInput = document.getElementById('message-input');
+const sendBtn = document.getElementById('send-btn');
+const statusText = document.getElementById('status-text');
+const statusDot = document.getElementById('status-dot');
+const ctxDisplay = document.getElementById('ctx-display');
+const toolsBadge = document.getElementById('tools-badge');
+const thinkingSpinner = document.getElementById('thinking-spinner');
+
+// ════════════════════════════════════════════════════════
+// 状态
+// ════════════════════════════════════════════════════════
+let connected = false;
+let processing = false;
+let thinkingActive = false;
+let listenActive = false;
+let streamingAgent = false; // 正在流式输出 agent 消息
+
+// ── 信息面板数据追踪 ──
+const panelState = {
+  totalMessages: 0,
+  userMessages: 0,
+  agentMessages: 0,
+  toolCallCount: 0,
+  contextChars: 0,
+  contextTokens: 0,
+};
+
+// 工具调用批次追踪
+let _toolCallCurrent = 0;
+let _toolCallTotal = 0;
+
+// 用于跟踪是否在流式追加中，避免误触自动滚动
+// 用于跟踪是否在流式追加中，避免误触自动滚动
+let userScrolledUp = false;
+
+// 用于在每轮首次输出前插入空气泡
+let _pendingAirBubble = false;
+
+// 消息历史 ID 计数器
+let msgIdCounter = 0;
+
+// 缓存的消息字典（id -> DOM 元素）
+const messageElements = new Map();
+
+// ════════════════════════════════════════════════════════
+// API 检查
+// ════════════════════════════════════════════════════════
+const api = window.electronAPI;
+if (!api) {
+  document.body.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#666;font-family:sans-serif;">
+      <p>未检测到 Electron API，请在 Electron 环境中运行此应用。</p>
+    </div>
+  `;
+}
+
+// ════════════════════════════════════════════════════════
+// 工具函数
+// ════════════════════════════════════════════════════════
+function formatTime(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  return d.toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+/** 简单的 Markdown 转 HTML 渲染 */
+function renderMarkdown(text) {
+  if (!text) return '';
+
+  let html = escapeHtml(text);
+
+  // 代码块（必须优先处理，避免内部被 Markdown 语法破坏）
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+    const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : '';
+    return `<pre${langAttr}><code>${code}</code></pre>`;
+  });
+
+  // 行内代码
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // 标题
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // 引用
+  html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // 无序列表
+  html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+
+  // 有序列表
+  html = html.replace(/^(\d+)\. (.+)$/gm, '<li value="$1">$2</li>');
+
+  // 粗体
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  // 斜体
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // 链接
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // 分割线
+  html = html.replace(/^-{3,}$/gm, '<hr>');
+
+  // 换行（段落）
+  html = html.split('\n').filter(line => line.trim()).map(line => `<p>${line}</p>`).join('\n');
+
+  return html;
+}
+
+/** ANSI 转 HTML（支持 TUI 颜色码）
+ * 先做纯字符串 HTML 转义（避免 DOM textContent 吞掉控制字符），
+ * 再将 ANSI 颜色码转为 HTML 标签。 */
+function renderAnsi(text) {
+  // 手动 HTML 转义，保留控制字符不被 DOM 破坏
+  var escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  return escaped
+    .replace(/\x1b\[94m/g, '<span style="color:#3b82f6">')
+    .replace(/\x1b\[35m/g, '<span style="color:#a855f7">')
+    .replace(/\x1b\[32m/g, '<span style="color:#16a34a">')
+    .replace(/\x1b\[31m/g, '<span style="color:#dc2626">')
+    .replace(/\x1b\[33m/g, '<span style="color:#ca8a04">')
+    .replace(/\x1b\[30m/g, '<span style="color:#374151">')
+    .replace(/\x1b\[1m/g, '<span style="font-weight:600">')
+    .replace(/\x1b\[4m/g, '<span style="text-decoration:underline">')
+    .replace(/\x1b\[0m/g, '</span>')
+    .replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, '')
+    .replace(/(<\/span>)+/g, '</span>');
+}
+
+/** 渲染普通消息内容（纯文本，如工具消息） */
+function renderPlainText(text) {
+  return escapeHtml(text);
+}
+
+// ════════════════════════════════════════════════════════
+// 消息渲染
+// ════════════════════════════════════════════════════════
+let lastMsgId = null;
+
+function createMessageElement(msg) {
+  const el = document.createElement('div');
+  const id = ++msgIdCounter;
+  el.dataset.msgId = id;
+  el.dataset.role = msg.role;
+  messageElements.set(id, el);
+
+  const ts = msg.createdAt || Date.now();
+
+  switch (msg.role) {
+    case 'user': {
+      el.className = 'message user';
+      el.innerHTML = `
+        <div class="message-user-header">
+          <span>你</span>
+          <span class="time">${formatTime(ts)}</span>
+        </div>
+        <div class="content">${renderMarkdown(msg.content)}</div>
+      `;
+      break;
+    }
+
+    case 'agent': {
+      el.className = 'message agent';
+      el.innerHTML = `
+        <div class="message-agent-header">
+          <span>小鲸 AI</span>
+        </div>
+        <div class="content"></div>
+      `;
+      const contentEl = el.querySelector('.content');
+      if (msg.content) {
+        contentEl.dataset.raw = msg.content;
+        contentEl.innerHTML = renderMarkdown(msg.content);
+      }
+      break;
+    }
+
+    case 'tool': {
+      if (msg.doNotRender) {
+        el.style.display = 'none';
+        return el;
+      }
+
+      if (msg.collapsed && msg.toolMeta) {
+        el.className = 'message tool collapsed';
+        const argsStr = Object.entries(msg.toolMeta.args || {})
+          .map(([k, v]) => {
+            const vStr = typeof v === 'string' ? v : JSON.stringify(v);
+            return vStr.length > 40 ? `${k}=${vStr.slice(0, 40)}...` : `${k}=${vStr}`;
+          })
+          .join(', ');
+        el.innerHTML = `
+          <div class="content">
+            <span class="tool-collapse-icon">📎</span>
+            <span class="tool-name">${escapeHtml(msg.toolMeta.toolName)}</span>
+            <span class="tool-args">${escapeHtml(argsStr)}</span>
+          </div>
+        `;
+      } else {
+        el.className = 'message tool' + (msg.toolMeta ? ' call' : ' result');
+        el.innerHTML = `<div class="content">${renderPlainText(msg.content)}</div>`;
+      }
+      break;
+    }
+
+    case 'subagent': {
+      el.className = 'message subagent';
+      el.innerHTML = `
+        <div class="message-subagent-header">💬 ${escapeHtml(msg.subagentName || '子模型')}</div>
+        <div class="content">${renderMarkdown(msg.content)}</div>
+      `;
+      break;
+    }
+
+    case 'system': {
+      el.className = 'message system';
+      el.innerHTML = `<div class="content">${escapeHtml(msg.content)}</div>`;
+      break;
+    }
+
+    case 'divider': {
+      el.className = 'message divider';
+      break;
+    }
+
+    case 'blank': {
+      el.className = 'message blank';
+      break;
+    }
+
+    case 'banner': {
+      el.className = 'message banner';
+      el.innerHTML = `<div class="content" style="user-select:none;">${escapeHtml(msg.content)}</div>`;
+      break;
+    }
+  }
+
+  return el;
+}
+
+function appendMessage(msg) {
+  // 跳过空气泡：无内容的 agent 消息不渲染
+  if (msg.role === 'agent' && !msg.content) return;
+  const el = createMessageElement(msg);
+  if (!el) return;
+  messageList.appendChild(el);
+  lastMsgId = msg.msgId;
+
+  // 更新面板统计
+  panelState.totalMessages++;
+  if (msg.role === 'user') panelState.userMessages++;
+  else if (msg.role === 'agent') panelState.agentMessages++;
+  updateInfoPanel();
+
+  // agent 消息进来即视为流式开始，避免后续工具调用再创建多余气泡
+  if (msg.role === 'agent') {
+    streamingAgent = true;
+  }
+
+  scrollToBottom();
+  return el;
+}
+
+/** 追加文本到最后一条 agent 消息 */
+function appendToLastAgent(text) {
+  const agentMsgs = messageList.querySelectorAll('.message.agent');
+  let lastAgent = agentMsgs.length > 0 ? agentMsgs[agentMsgs.length - 1] : null;
+  if (!lastAgent) {
+    // 还没有 agent 消息，创建一条空的
+    const el = createMessageElement({ role: 'agent', content: '', createdAt: Date.now() });
+    messageList.appendChild(el);
+    lastAgent = el;
+  }
+
+  const contentEl = lastAgent.querySelector('.content');
+  if (contentEl) {
+    // 保存所有工具相关节点（避免被 innerHTML 覆盖）
+    var _tbParams = contentEl.querySelector('.agent-tool-params');
+    var _tbParamsHTML = _tbParams ? _tbParams.outerHTML : '';
+    var _tbContainer = contentEl.querySelector('.agent-tool-container');
+    var _tbContainerHTML = _tbContainer ? _tbContainer.outerHTML : '';
+    var _tbCounter = contentEl.querySelector('.agent-tool-counter');
+    var _tbCounterHTML = _tbCounter ? _tbCounter.outerHTML : '';
+    if (_tbParams) _tbParams.remove();
+    if (_tbContainer) _tbContainer.remove();
+    if (_tbCounter) _tbCounter.remove();
+
+    // 通过 data-raw 累积原始文本
+    const raw = contentEl.dataset.raw || contentEl.textContent;
+    const newRaw = raw + text;
+    contentEl.dataset.raw = newRaw;
+    contentEl.innerHTML = renderMarkdown(newRaw);
+
+    // 按顺序恢复：params -> container -> counter
+    if (_tbParamsHTML) contentEl.insertAdjacentHTML('beforeend', _tbParamsHTML);
+    if (_tbContainerHTML) contentEl.insertAdjacentHTML('beforeend', _tbContainerHTML);
+    if (_tbCounterHTML) contentEl.insertAdjacentHTML('beforeend', _tbCounterHTML);
+  }
+
+  lastAgent.classList.add('streaming');
+  streamingAgent = true;
+  scrollToBottom();
+}
+
+/** 在 agent 气泡内联显示/更新工具调用 */
+function updateToolInline(msg) {
+  const agentMsgs = messageList.querySelectorAll('.message.agent');
+  let lastAgent = agentMsgs.length > 0 ? agentMsgs[agentMsgs.length - 1] : null;
+
+  // 新一轮以工具调用开头：如果最后一条 agent 已完成（不在流式状态）
+  // 且当前是新的工具调用（有 toolMeta），则创建新 agent 气泡
+  if (msg.toolMeta && lastAgent && !streamingAgent && !lastAgent.classList.contains('streaming')) {
+    const el = createMessageElement({ role: 'agent', content: '', createdAt: Date.now() });
+    messageList.appendChild(el);
+    lastAgent = el;
+    lastAgent.classList.add('streaming');
+    streamingAgent = true;
+    panelState.agentMessages++;
+  }
+
+  if (!lastAgent) {
+    const el = createMessageElement({ role: 'agent', content: '', createdAt: Date.now() });
+    messageList.appendChild(el);
+    lastAgent = el;
+    lastAgent.classList.add('streaming');
+    streamingAgent = true;
+    panelState.agentMessages++;
+  }
+  const contentEl = lastAgent.querySelector('.content');
+  if (!contentEl) return;
+
+  // ── 工具调用（有 toolMeta） ──
+  if (msg.toolMeta) {
+    _toolCallCurrent++;
+
+    // 参数区：友好调用标签，无边框底色
+    var paramsEl = contentEl.querySelector('.agent-tool-params');
+    if (!paramsEl) {
+      paramsEl = document.createElement('div');
+      paramsEl.className = 'agent-tool-params';
+      contentEl.appendChild(paramsEl);
+    }
+    // 优先用后端传来的 toolCallHtml，回退到前端 renderAnsi
+    paramsEl.innerHTML = msg.toolCallHtml || renderAnsi(msg.content);
+
+    // 工具容器：独立的圆角矩形，只含 call + result
+    var toolContainer = contentEl.querySelector('.agent-tool-container');
+    if (!toolContainer) {
+      toolContainer = document.createElement('div');
+      toolContainer.className = 'agent-tool-container';
+      contentEl.appendChild(toolContainer);
+    }
+    toolContainer.innerHTML = '<div class="agent-tool-call">📎 ' + escapeHtml(msg.toolMeta.toolName) + '</div>'
+      + '<div class="agent-tool-result" style="opacity:0.6">执行中...</div>';
+
+    // 计数器
+    var counterEl = contentEl.querySelector('.agent-tool-counter');
+    if (!counterEl) {
+      counterEl = document.createElement('div');
+      counterEl.className = 'agent-tool-counter';
+      contentEl.appendChild(counterEl);
+    }
+    var total = _toolCallTotal > 0 ? _toolCallTotal : '?';
+    counterEl.textContent = _toolCallCurrent + '/' + total;
+
+  // ── 工具结果（无 toolMeta） ──
+  } else {
+    var toolContainer = contentEl.querySelector('.agent-tool-container');
+    if (toolContainer) {
+      var resultEl = toolContainer.querySelector('.agent-tool-result');
+      if (resultEl) {
+        // 用后端转换好的 toolResultHtml，回退到前端 renderAnsi
+        resultEl.innerHTML = msg.toolResultHtml || renderAnsi(msg.content);
+        resultEl.style.opacity = '1';
+      } else {
+        toolContainer.innerHTML = '<div class="agent-tool-result">' + (msg.toolResultHtml || renderAnsi(msg.content)) + '</div>';
+      }
+    } else {
+      var toolContainer = document.createElement('div');
+      toolContainer.className = 'agent-tool-container';
+      toolContainer.innerHTML = '<div class="agent-tool-result">' + (msg.toolResultHtml || renderAnsi(msg.content)) + '</div>';
+      contentEl.appendChild(toolContainer);
+    }
+  }
+  scrollToBottom();
+}
+
+/** 移除最后一条 agent 消息 */
+function removeLastAgent() {
+  const agentMsgs = messageList.querySelectorAll('.message.agent');
+  const lastAgent = agentMsgs[agentMsgs.length - 1];
+  if (lastAgent) {
+    lastAgent.remove();
+  }
+  streamingAgent = false;
+}
+
+/** 清空所有消息 */
+function clearMessages() {
+  messageList.innerHTML = '';
+  messageElements.clear();
+  streamingAgent = false;
+  panelState.totalMessages = 0;
+  panelState.userMessages = 0;
+  panelState.agentMessages = 0;
+  panelState.toolCallCount = 0;
+  _toolCallCurrent = 0;
+  _toolCallTotal = 0;
+  updateInfoPanel();
+}
+
+/** 折叠工具消息 */
+function collapseToolMessages(entries) {
+  for (const entry of entries) {
+    const toolMsgs = messageList.querySelectorAll('.message.tool');
+    const target = toolMsgs[entry.msgIndex];
+    if (!target) continue;
+
+    target.className = 'message tool collapsed';
+    const argsStr = Object.entries(entry.args || {})
+      .map(([k, v]) => {
+        const vStr = typeof v === 'string' ? v : JSON.stringify(v);
+        return vStr.length > 40 ? `${k}=${vStr.slice(0, 40)}...` : `${k}=${vStr}`;
+      })
+      .join(', ');
+    target.innerHTML = `
+      <div class="content">
+        <span class="tool-collapse-icon">📎</span>
+        <span class="tool-name">${escapeHtml(entry.toolName)}</span>
+        <span class="tool-args">${escapeHtml(argsStr)}</span>
+      </div>
+    `;
+
+    // 隐藏前面的「调用中」消息
+    const callMsg = toolMsgs[entry.msgIndex - 1];
+    if (callMsg && !callMsg.classList.contains('collapsed') && !callMsg.querySelector('.tool-name')) {
+      callMsg.style.display = 'none';
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// 滚动控制
+// ════════════════════════════════════════════════════════
+function scrollToBottom() {
+  if (userScrolledUp) return;
+  requestAnimationFrame(() => {
+    messageArea.scrollTop = messageArea.scrollHeight;
+  });
+}
+
+messageArea.addEventListener('scroll', () => {
+  const threshold = 100;
+  const atBottom = messageArea.scrollHeight - messageArea.scrollTop - messageArea.clientHeight < threshold;
+  userScrolledUp = !atBottom;
+});
+
+// ════════════════════════════════════════════════════════
+// 输入处理
+// ════════════════════════════════════════════════════════
+function sendMessage() {
+  const text = messageInput.value.trim();
+  if (!text) return;
+
+  messageInput.value = '';
+  resetInputHeight();
+  sendBtn.disabled = true;
+
+  // 本地立即显示
+  appendMessage({ role: 'user', content: text, createdAt: Date.now() });
+
+  // 标记本轮需要插入空气泡
+  _pendingAirBubble = true;
+
+  // 发送到 agent
+  api.sendInput(text);
+}
+
+
+function resetInputHeight() {
+  messageInput.style.height = 'auto';
+  messageInput.style.height = Math.max(36, messageInput.scrollHeight) + 'px';
+}
+
+// 自动调整高度
+messageInput.addEventListener('input', resetInputHeight);
+
+// Enter 发送，Shift+Enter 换行
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+// 发送按钮
+sendBtn.addEventListener('click', sendMessage);
+
+// Ctrl+Enter 也发送
+messageInput.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+// 焦点快捷
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    messageInput.blur();
+  }
+  // Tab 中断所有子 agent
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    api.sendCommand('interrupt_agents');
+  }
+
+  // Ctrl+L 清屏
+  if (e.ctrlKey && e.key === 'l') {
+    e.preventDefault();
+    clearMessages();
+    appendMessage({ role: 'system', content: '已清屏' });
+  }
+  // Ctrl+Q 清理上下文
+  if (e.ctrlKey && e.key === 'q') {
+    e.preventDefault();
+    api.sendCommand('memory_shorten');
+  }
+  // Ctrl+W 折叠
+  if (e.ctrlKey && e.key === 'w') {
+    e.preventDefault();
+    api.sendCommand('memory_focus');
+  }
+});
+
+// ════════════════════════════════════════════════════════
+// Agent 消息处理
+// ════════════════════════════════════════════════════════
+function handleAgentMessage(msg) {
+  switch (msg.type) {
+    case 'message': {
+      switch (msg.role) {
+        case 'user':
+          // 用户消息（来自 agent 的 echo），无需额外处理
+          break;
+        case 'agent':
+          appendMessage({ role: 'agent', content: msg.content, createdAt: Date.now() });
+          break;
+        case 'tool':
+          updateToolInline({ content: msg.content, toolMeta: msg.toolMeta, toolCallHtml: msg.toolCallHtml, toolResultHtml: msg.toolResultHtml });
+          break;
+        case 'system':
+          appendMessage({ role: 'system', content: msg.content, createdAt: Date.now() });
+          break;
+        case 'divider':
+          appendMessage({ role: 'divider', content: '' });
+          break;
+        case 'blank':
+          appendMessage({ role: 'blank', content: '' });
+          break;
+      }
+      break;
+    }
+
+    case 'subagent': {
+      appendMessage({ role: 'subagent', content: msg.content, subagentName: msg.name, createdAt: Date.now() });
+      break;
+    }
+
+    case 'append': {
+      appendToLastAgent(msg.content);
+      break;
+    }
+
+    case 'remove-last-agent': {
+      removeLastAgent();
+      break;
+    }
+
+    case 'collapse-tools': {
+      // 工具已内联在 agent 气泡中，无需外部折叠
+      break;
+    }
+
+    case 'clear-messages': {
+      clearMessages();
+      break;
+    }
+
+    case 'state': {
+      processing = msg.processing;
+      sendBtn.disabled = processing;
+      if (!processing) {
+        streamingAgent = false;
+        // 移除所有 agent 消息的 streaming 标记
+        document.querySelectorAll('.message.agent.streaming').forEach(el => {
+          el.classList.remove('streaming');
+        });
+      }
+      updateStatus();
+      updateInfoPanel();
+      break;
+    }
+
+    case 'context': {
+      const chars = msg.chars;
+      const tokens = msg.tokens;
+      if (tokens > 0) {
+        ctxDisplay.textContent = `ctx: ${tokens}t`;
+        ctxDisplay.title = `字符 ${chars.toLocaleString()}，Token ${tokens.toLocaleString()}`;
+      } else {
+        ctxDisplay.textContent = `ctx: ${chars >= 10000 ? (chars / 1000).toFixed(1) + 'k' : chars}ch`;
+      }
+      break;
+    }
+
+    case 'tool-call': {
+      _toolCallTotal = msg.count;
+      toolsBadge.style.display = 'inline';
+      toolsBadge.textContent = `工具 ${msg.count}`;
+      panelState.toolCallCount = msg.count;
+      // 刷新当前 agent 气泡中的内联计数器
+      var _agEls = document.querySelectorAll('.message.agent');
+      var _lastAg = _agEls[_agEls.length - 1];
+      if (_lastAg) {
+        var _ctEl = _lastAg.querySelector('.agent-tool-counter');
+        if (_ctEl) {
+          _ctEl.textContent = _toolCallCurrent + '/' + _toolCallTotal;
+        }
+      }
+      updateInfoPanel();
+      break;
+    }
+
+    case 'thinking': {
+      thinkingActive = msg.active;
+      if (msg.active) {
+        thinkingSpinner.style.display = 'block';
+      } else {
+        thinkingSpinner.style.display = 'none';
+      }
+      updateStatus();
+      break;
+    }
+
+    case 'listen': {
+      listenActive = msg.name !== null;
+      updateStatus();
+      break;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// 信息面板渲染
+// ════════════════════════════════════════════════════════
+function updateInfoPanel() {
+  var el = document.getElementById('panel-content');
+  if (!el) return;
+
+  // 状态
+  var statusClass = 'idle';
+  var statusLabel = '空闲';
+  if (listenActive) { statusClass = 'listen'; statusLabel = '审查中'; }
+  else if (processing) { statusClass = 'busy'; statusLabel = '处理中'; }
+
+  // 上下文
+  var ctxStr = panelState.contextChars > 0
+    ? (panelState.contextChars >= 10000
+      ? (panelState.contextChars / 1000).toFixed(1) + 'k'
+      : panelState.contextChars)
+    : '--';
+  var tokenStr = panelState.contextTokens > 0
+    ? panelState.contextTokens + 't'
+    : '';
+
+  var timeStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+
+  var html = ''
+    + '<div class="panel-section">'
+    + '  <div class="panel-title">信息面板</div>'
+    + '</div>'
+    + '<div class="panel-section">'
+    + '  <div class="panel-row"><span class="panel-label">消息总数</span><span class="panel-value">' + panelState.totalMessages + '</span></div>'
+    + '  <div class="panel-row"><span class="panel-label">用户</span><span class="panel-value">' + panelState.userMessages + '</span></div>'
+    + '  <div class="panel-row"><span class="panel-label">助手</span><span class="panel-value">' + panelState.agentMessages + '</span></div>'
+    + '  <div class="panel-row"><span class="panel-label">工具调用</span><span class="panel-value">' + panelState.toolCallCount + '</span></div>'
+    + '</div>'
+    + '<div class="panel-section">'
+    + '  <div class="panel-title">上下文</div>'
+    + '  <div class="panel-row"><span class="panel-label">字符</span><span class="panel-value">' + ctxStr + '</span></div>'
+    + (tokenStr ? '  <div class="panel-row"><span class="panel-label">Token</span><span class="panel-value">' + tokenStr + '</span></div>' : '')
+    + '</div>'
+    + '<div class="panel-section">'
+    + '  <div class="panel-title">状态</div>'
+    + '  <div class="panel-row"><span class="panel-label"><span class="panel-status-dot ' + statusClass + '"></span>' + statusLabel + '</span></div>'
+    + '</div>'
+    + '<div class="panel-section">'
+    + '  <div class="panel-title">时间</div>'
+    + '  <div class="panel-row"><span class="panel-label">' + timeStr + '</span></div>'
+    + '</div>';
+
+  el.innerHTML = html;
+}
+
+// ════════════════════════════════════════════════════════
+// 状态栏显示
+// ════════════════════════════════════════════════════════
+function updateStatus() {
+  if (!connected) {
+    statusText.textContent = '正在连接 Agent...';
+    return;
+  }
+
+  if (listenActive) {
+    statusText.textContent = '审查中...';
+    statusDot.className = 'status-dot processing';
+    return;
+  }
+
+  if (processing) {
+    if (thinkingActive) {
+      statusText.textContent = 'AI 思考中...';
+    } else {
+      statusText.textContent = '处理中...';
+    }
+    statusDot.className = 'status-dot processing';
+    return;
+  }
+
+  statusText.textContent = '就绪';
+  statusDot.className = 'status-dot connected';
+}
+
+// ════════════════════════════════════════════════════════
+// 连接状态处理
+// ════════════════════════════════════════════════════════
+api.onAgentStatus((status) => {
+  connected = status.connected;
+  if (status.code !== undefined && !status.connected) {
+    statusText.textContent = 'Agent 已退出（code: ' + status.code + '）';
+    statusDot.className = 'status-dot disconnected';
+  } else if (status.connected) {
+    connected = true;
+    updateStatus();
+  }
+});
+
+// ════════════════════════════════════════════════════════
+// stderr 日志
+// ════════════════════════════════════════════════════════
+api.onAgentStderr((text) => {
+  // 在开发时显示错误
+  console.error('[agent]', text);
+});
+
+// ════════════════════════════════════════════════════════
+// 初始化
+// ════════════════════════════════════════════════════════
+// 注册 agent 消息处理
+api.onAgentMessage(handleAgentMessage);
+
+// 显示初始状态
+statusText.textContent = '正在连接 Agent...';
+
+// 显示欢迎消息
+appendMessage({ role: 'banner', content: '', createdAt: Date.now() });
+appendMessage({ role: 'system', content: 'Seek Agent 已启动。输入消息开始对话。' });
+appendMessage({ role: 'blank', content: '' });
+
+// 聚焦输入框
+setTimeout(() => messageInput.focus(), 300);
+

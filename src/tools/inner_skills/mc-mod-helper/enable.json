@@ -1,0 +1,4 @@
+{
+  "enable": false,
+  "description": "Minecraft 模组开发辅助工具，支持 Forge/Fabric/NeoForge 模组的项目初始化、物品/方块注册代码生成、配方/语言/模型/战利品表等资源文件生成。适用于 Java 模组开发者的日常编码辅助。"
+}

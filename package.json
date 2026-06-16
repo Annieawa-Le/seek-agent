@@ -1,0 +1,41 @@
+{
+  "name": "seek-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Agent runtime with IDE integration",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "electron": "electron .",
+    "build:agent": "cd packages/agent-runtime && pnpm build",
+    "build:ext": "cd extension && pnpm build",
+    "build": "pnpm build:agent && pnpm build:ext"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron"
+    ]
+  },
+  "packageManager": "pnpm@10.33.2",
+  "dependencies": {
+    "@ai-sdk/deepseek": "^2.0.35",
+    "@ai-sdk/openai": "^3.0.66",
+    "@ai-sdk/openai-compatible": "^2.0.48",
+    "@tavily/core": "^0.7.6",
+    "ai": "^6.0.193",
+    "dotenv": "^17.4.2",
+    "iconv-lite": "^0.7.2",
+    "image-size": "^2.0.2",
+    "parse5": "^8.0.1",
+    "pdf-parse": "^2.4.5",
+    "pngjs": "^7.0.0",
+    "tesseract.js": "^7.0.0",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1"
+  }
+}

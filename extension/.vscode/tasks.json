@@ -1,0 +1,20 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build agent-runtime",
+      "type": "shell",
+      "command": "pnpm --filter @seek-agent/agent-runtime build",
+      "group": "build",
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "Build extension",
+      "type": "shell",
+      "command": "pnpm --filter seek-agent-ide build",
+      "group": "build",
+      "problemMatcher": "$tsc",
+      "dependsOn": ["Build agent-runtime"]
+    }
+  ]
+}

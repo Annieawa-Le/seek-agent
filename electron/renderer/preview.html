@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Seek Agent — 样式预览</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+  /* ─── 预览专用：控制栏 ─── */
+  #preview-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    background: #e8e4f0;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  #preview-controls label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #preview-controls select, #preview-controls button {
+    font-size: 12px;
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    cursor: pointer;
+  }
+  #preview-controls button { background: var(--accent); color: #fff; border: none; }
+
+  /* 覆盖：预览里 send-btn 保持禁用态可见 */
+  .send-btn:disabled { background: #d4d4d8; cursor: not-allowed; }
+
+  /* ─── 工具图标 ─── */
+  .tool-collapse-icon::before { content: "🔧"; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+
+    <!-- 预览控制栏 -->
+    <div id="preview-controls">
+      <span style="font-weight:600;color:var(--accent)">🎨 预览</span>
+      <label>
+        状态灯
+        <select id="status-select">
+          <option value="connected">已连接</option>
+          <option value="disconnected">未连接</option>
+          <option value="processing">处理中</option>
+        </select>
+      </label>
+      <label>
+        <input type="checkbox" id="toggle-thinking"> 思考中
+      </label>
+      <label>
+        <input type="checkbox" id="toggle-streaming" checked> 流式光标
+      </label>
+      <label>
+        <input type="checkbox" id="toggle-panel" checked> 信息面板
+      </label>
+      <button id="refresh-btn">🔄 重置预览</button>
+    </div>
+
+    <!-- 顶部标题栏 -->
+    <header id="header">
+      <div class="header-left">
+        <span class="header-icon">✨</span>
+        <span class="header-title">Seek Agent</span>
+      </div>
+      <div class="header-right">
+        <span id="ctx-display" class="header-ctx" title="上下文长度">ctx: 3.2k</span>
+        <span id="status-dot" class="status-dot connected"></span>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <div id="main-content">
+      <!-- 消息区域 -->
+      <div id="message-area">
+        <div id="message-list"></div>
+      </div>
+      <!-- 信息面板 -->
+      <aside id="info-panel">
+        <div id="panel-content"></div>
+      </aside>
+    </div>
+
+    <!-- 底部 -->
+    <footer id="footer">
+      <div id="status-bar" class="status-bar">
+        <span id="status-text" class="status-text">就绪</span>
+        <span id="tools-badge" class="tools-badge" style="display:inline">工具 2</span>
+      </div>
+      <div id="input-bar" class="input-bar">
+        <div id="thinking-spinner" class="thinking-spinner" style="display:none" title="AI 思考中…">⠋</div>
+        <div id="input-wrapper" class="input-wrapper">
+          <textarea id="message-input" rows="1" placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"></textarea>
+        </div>
+        <button id="send-btn" class="send-btn" title="发送" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+  // ═══════════════════════════════════════════════
+  // 预览数据
+  // ═══════════════════════════════════════════════
+
+  const previewMessages = [
+    { role: 'banner', content: '' },
+    { role: 'system', content: 'Seek Agent 已启动。输入消息开始对话。' },
+    { role: 'blank', content: '' },
+    { role: 'user', content: '帮我分析一下这个项目的架构，看看有哪些可以优化的地方。' },
+    {
+      role: 'agent',
+      content: '好的，我来分析一下项目结构。从根目录来看，这是一个基于 TypeScript 的项目，主要包含以下模块：\n\n- **src/** — 核心源码\n- **electron/** — Electron 桌面端\n- **extension/** — 浏览器扩展\n- **packages/** — 子包\n\n先看一下核心模块的组织方式。'
+    },
+    { role: 'user', content: '主要看看 src 目录下的结构。' },
+    {
+      role: 'agent',
+      content: '',
+      streaming: true,
+      inlineTools: true,
+      toolCalls: [
+        { name: 'read_file', args: { filePath: 'src/index.ts' }, result: 'export function main() {\n  console.log("hello");\n}' },
+        { name: 'search_all_file', args: { filePath: 'src', fileName: '*.ts' }, result: 'src/index.ts\nsrc/core/agent.ts\nsrc/core/llm.ts' }
+      ],
+      toolCounter: '1/2'
+    },
+    { role: 'divider', content: '' },
+    {
+      role: 'agent',
+      content: [
+        '## 分析结果',
+        '',
+        '项目整体结构清晰，以下是几个优化建议：',
+        '',
+        '### 1. 模块拆分',
+        '当前 `src/core/agent.ts` 体积较大，建议拆分为：',
+        '- `agent.ts` — 主流程编排',
+        '- `tool-executor.ts` — 工具执行',
+        '- `message-handler.ts` — 消息处理',
+        '',
+        '### 2. 类型定义',
+        '```typescript',
+        'interface AgentConfig {',
+        '  model: string;',
+        '  maxTokens: number;',
+        '  temperature?: number;',
+        '}',
+        '```',
+        '',
+        '> 提示：使用 `interface` 替代 `type` 可以获得更好的类型检查。',
+        '',
+        '### 3. 错误处理',
+        '当前缺少统一的错误处理机制，建议添加：',
+        '1. 全局错误边界',
+        '2. 重试策略',
+        '3. 日志分级',
+        '',
+        '更多细节请参考 [项目文档](https://example.com)。'
+      ].join('\n')
+    },
+    { role: 'user', content: '换一种说法总结一下。' },
+    {
+      role: 'subagent',
+      subagentName: '架构审查员',
+      content: '分析完成，发现 3 个关键优化点：\n1. Agent 模块过大（~800行）\n2. 类型定义分散\n3. 缺少错误处理策略'
+    },
+    {
+      role: 'agent',
+      content: '以上就是整体分析。需要我深入某个具体模块吗？'
+    },
+    {
+      role: 'tool',
+      collapsed: true,
+      toolName: 'search_content',
+      args: { filePath: 'src/**/*.ts', content: 'TODO' }
+    },
+    {
+      role: 'tool',
+      content: '搜索结果：\nsrc/core/agent.ts:120:  // TODO: 添加错误处理\nsrc/core/llm.ts:45:  // TODO: 实现重试'
+    },
+    { role: 'user', content: '看起来不错，那帮我改一下错误处理吧。' },
+  ];
+
+  // ═══════════════════════════════════════════════
+  // 渲染引擎
+  // ═══════════════════════════════════════════════
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function renderMarkdown(text) {
+    if (!text) return '';
+    let html = escapeHtml(text);
+
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+      const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : '';
+      return `<pre${langAttr}><code>${code}</code></pre>`;
+    });
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+    html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+    html = html.replace(/^(\d+)\. (.+)$/gm, '<li value="$1">$2</li>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+    html = html.replace(/^-{3,}$/gm, '<hr>');
+
+    html = html.split('\n').filter(line => line.trim()).map(line => `<p>${line}</p>`).join('\n');
+    return html;
+  }
+
+  function formatTime(ts) {
+    const d = ts ? new Date(ts) : new Date();
+    return d.toLocaleTimeString('zh-CN', { hour12: false });
+  }
+
+  let msgIdCounter = 0;
+
+  function renderMessage(msg) {
+    const el = document.createElement('div');
+    const id = ++msgIdCounter;
+    el.dataset.msgId = id;
+
+    switch (msg.role) {
+
+      case 'user':
+        el.className = 'message user';
+        el.innerHTML = `
+          <div class="message-user-header">
+            <span>祝景玥</span>
+            <span class="time">${formatTime()}</span>
+          </div>
+          <div class="content">${renderMarkdown(msg.content)}</div>
+        `;
+        break;
+
+      case 'agent':
+        el.className = 'message agent' + (msg.streaming ? ' streaming' : '');
+        el.innerHTML = `
+          <div class="message-agent-header">
+            <span>小鲸鱼Deepseek</span>
+          </div>
+          <div class="content"></div>
+        `;
+        const contentEl = el.querySelector('.content');
+        if (msg.content) {
+          contentEl.dataset.raw = msg.content;
+          contentEl.innerHTML = renderMarkdown(msg.content);
+        }
+        if (msg.inlineTools && msg.toolCalls) {
+          const paramsEl = document.createElement('div');
+          paramsEl.className = 'agent-tool-params';
+          paramsEl.innerHTML = '<span style="color:#3b82f6">→ 正在分析项目结构...</span>';
+          contentEl.appendChild(paramsEl);
+
+          const container = document.createElement('div');
+          container.className = 'agent-tool-container';
+          container.innerHTML = msg.toolCalls.map(tc =>
+            '<div class="agent-tool-call"> ' + escapeHtml(tc.name) + '</div>' +
+            '<div class="agent-tool-result">' + escapeHtml(tc.result) + '</div>'
+          ).join('');
+          contentEl.appendChild(container);
+
+          const counter = document.createElement('div');
+          counter.className = 'agent-tool-counter';
+          counter.textContent = msg.toolCounter || '2/2';
+          contentEl.appendChild(counter);
+        }
+        break;
+
+      case 'subagent':
+        el.className = 'message subagent';
+        el.innerHTML = `
+          <div class="message-subagent-header">💬 ${escapeHtml(msg.subagentName || '子模型')}</div>
+          <div class="content">${renderMarkdown(msg.content)}</div>
+        `;
+        break;
+
+      case 'tool':
+        if (msg.collapsed) {
+          el.className = 'message tool collapsed';
+          const argsStr = Object.entries(msg.args || {})
+            .map(([k, v]) => {
+              const vStr = typeof v === 'string' ? v : JSON.stringify(v);
+              return vStr.length > 40 ? `${k}=${vStr.slice(0, 40)}...` : `${k}=${vStr}`;
+            })
+            .join(', ');
+          el.innerHTML = `
+            <div class="content">
+              <span class="tool-collapse-icon"></span>
+              <span class="tool-name">${escapeHtml(msg.toolName)}</span>
+              <span class="tool-args">${escapeHtml(argsStr)}</span>
+            </div>
+          `;
+        } else {
+          el.className = 'message tool result';
+          el.innerHTML = `<div class="content">${escapeHtml(msg.content)}</div>`;
+        }
+        break;
+
+      case 'system':
+        el.className = 'message system';
+        el.innerHTML = `<div class="content">${escapeHtml(msg.content)}</div>`;
+        break;
+
+      case 'divider':
+        el.className = 'message divider';
+        break;
+
+      case 'blank':
+        el.className = 'message blank';
+        break;
+
+      case 'banner':
+        el.className = 'message banner';
+        el.innerHTML = `<div class="content" style="user-select:none;">${escapeHtml(msg.content)}</div>`;
+        break;
+    }
+
+    return el;
+  }
+
+  function renderAll() {
+    const list = document.getElementById('message-list');
+    list.innerHTML = '';
+    msgIdCounter = 0;
+    previewMessages.forEach(msg => {
+      const el = renderMessage(msg);
+      if (el) list.appendChild(el);
+    });
+  }
+
+  // ═══════════════════════════════════════════════
+  // 信息面板
+  // ═══════════════════════════════════════════════
+
+  function updatePanel() {
+    const el = document.getElementById('panel-content');
+    if (!el) return;
+
+    const statusVal = document.getElementById('status-select').value;
+    const statusClass = statusVal === 'processing' ? 'busy' : 'idle';
+    const statusLabel = statusVal === 'processing' ? '处理中' : statusVal === 'disconnected' ? '已断开' : '就绪';
+    const timeStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+
+    el.innerHTML = [
+      '<div class="panel-section"><div class="panel-title">信息面板</div></div>',
+      '<div class="panel-section">',
+      '  <div class="panel-row"><span class="panel-label">消息总数</span><span class="panel-value">' + previewMessages.length + '</span></div>',
+      '  <div class="panel-row"><span class="panel-label">用户</span><span class="panel-value">3</span></div>',
+      '  <div class="panel-row"><span class="panel-label">助手</span><span class="panel-value">4</span></div>',
+      '  <div class="panel-row"><span class="panel-label">工具调用</span><span class="panel-value">2</span></div>',
+      '</div>',
+      '<div class="panel-section">',
+      '  <div class="panel-title">上下文</div>',
+      '  <div class="panel-row"><span class="panel-label">字符</span><span class="panel-value">3.2k</span></div>',
+      '  <div class="panel-row"><span class="panel-label">Token</span><span class="panel-value">812t</span></div>',
+      '</div>',
+      '<div class="panel-section">',
+      '  <div class="panel-title">状态</div>',
+      '  <div class="panel-row"><span class="panel-label"><span class="panel-status-dot ' + statusClass + '"></span>' + statusLabel + '</span></div>',
+      '</div>',
+      '<div class="panel-section">',
+      '  <div class="panel-title">时间</div>',
+      '  <div class="panel-row"><span class="panel-label">' + timeStr + '</span></div>',
+      '</div>'
+    ].join('');
+  }
+
+  // ═══════════════════════════════════════════════
+  // 控制面板联动
+  // ═══════════════════════════════════════════════
+
+  document.getElementById('status-select').addEventListener('change', (e) => {
+    const dot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const val = e.target.value;
+    dot.className = 'status-dot ' + val;
+    if (val === 'connected') statusText.textContent = '就绪';
+    else if (val === 'disconnected') statusText.textContent = 'Agent 已退出（code: 1）';
+    else statusText.textContent = '处理中...';
+    updatePanel();
+  });
+
+  document.getElementById('toggle-thinking').addEventListener('change', (e) => {
+    document.getElementById('thinking-spinner').style.display = e.target.checked ? 'block' : 'none';
+  });
+
+  document.getElementById('toggle-streaming').addEventListener('change', (e) => {
+    document.querySelectorAll('.message.agent').forEach(el => {
+      el.classList.toggle('streaming', e.target.checked);
+    });
+  });
+
+  document.getElementById('toggle-panel').addEventListener('change', (e) => {
+    document.getElementById('info-panel').style.display = e.target.checked ? '' : 'none';
+  });
+
+  document.getElementById('refresh-btn').addEventListener('click', () => {
+    renderAll();
+    updatePanel();
+    const streamingOn = document.getElementById('toggle-streaming').checked;
+    document.querySelectorAll('.message.agent').forEach(el => {
+      el.classList.toggle('streaming', streamingOn);
+    });
+  });
+
+  // ═══════════════════════════════════════════════
+  // 初始化
+  // ═══════════════════════════════════════════════
+
+  renderAll();
+  updatePanel();
+  </script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+{
+  "enable": true,
+  "description": "轻量级网页爬取工具，无需外部 API Key。提供网页内容抓取、链接提取、站点爬取和免费网页搜索能力，替代 Tavily 依赖。"
+}

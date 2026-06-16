@@ -1,0 +1,88 @@
+{
+  "name": "seek-agent-ide",
+  "displayName": "Seek AI IDE",
+  "description": "AI-powered development assistant - seek-agent integrated into VS Code",
+  "version": "0.0.1",
+  "publisher": "seek",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.98.0"
+  },
+  "categories": [
+    "Chat",
+    "Machine Learning",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/activate.js",
+  "browser": "./dist/activate.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "seek.ping",
+        "title": "Seek AI: Ping agent"
+      },
+      {
+        "command": "seek.restart",
+        "title": "Seek AI: Restart agent"
+      },
+      {
+        "command": "seek.status",
+        "title": "Seek AI: Show status"
+      },
+      {
+        "command": "seek.diagnose",
+        "title": "Seek AI: Run diagnostics"
+      },
+      {
+        "command": "seek.explainCode",
+        "title": "Seek AI: Explain code"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "workbench.action.chat.open",
+        "key": "ctrl+shift+;",
+        "when": "!chatInputFocus"
+      }
+    ],
+    "inlineCompletions": [
+      {
+        "id": "seek-agent-completion",
+        "name": "Seek AI Completions"
+      }
+    ],
+    "configuration": {
+      "title": "Seek AI",
+      "properties": {
+        "seek.agentPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the seek-agent runtime JS file. If empty, uses the bundled one."
+        },
+        "seek.model": {
+          "type": "string",
+          "default": "deepseek-v4-flash",
+          "description": "AI model to use for completions and chat."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "dependencies": {
+    "vscode-jsonrpc": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.98.0",
+    "typescript": "^5.7.0"
+  }
+}
+
+
+
+

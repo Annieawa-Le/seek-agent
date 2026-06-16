@@ -1,0 +1,4 @@
+{
+  "enable": true,
+  "description": "技能管理器，提供 reload_skills 工具，让 AI 或用户在不重启进程的情况下重新加载所有 inner_skills。"
+}

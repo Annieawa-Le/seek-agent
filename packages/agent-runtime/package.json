@@ -1,0 +1,24 @@
+{
+  "name": "@seek-agent/agent-runtime",
+  "version": "0.0.1",
+  "description": "seek-agent runtime JSON-RPC server for VS Code integration",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "vscode-jsonrpc": "^8.2.0",
+    "ai": "^6.0.193",
+    "@ai-sdk/openai-compatible": "^2.0.48",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.19.0"
+  }
+}
