@@ -51,3 +51,5 @@ export function ansiToHtml(text: string): string {
   html = html.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
   return html;
 
+
+}
