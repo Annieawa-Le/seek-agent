@@ -36,7 +36,8 @@
   --warning: #f59e0b;
   --header-height: 48px;
   --footer-min-height: 100px;
-  --sidebar-width: 280px;
+  --sidebar-width: 240px;
+  --right-panel-width: 300px;
   --radius: 8px;
   --user-radius: 15px;
   --radius-sm: 4px;
@@ -56,55 +57,71 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ─── 应用布局 ─── */
+/* ═══════════════════════════════════════════════════
+   应用布局 — 三栏结构
+   ═══════════════════════════════════════════════════ */
+
 #app {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  max-width: 100%;
+  width: 100%;
 }
 
-/* ═══════════════════════════════════════════════════
-   主内容区（消息 + 信息面板）
-   ═══════════════════════════════════════════════════ */
-
-#main-content {
+/* #body-content: 三栏行 + 底部状态栏，纵向堆叠 */
+#body-content {
   display: flex;
+  flex-direction: column;
   flex: 1;
   overflow: hidden;
   min-height: 0;
 }
 
-/* ═══════════════════════════════════════════════════
-   信息面板（侧边栏）
-   ═══════════════════════════════════════════════════ */
+/* 三栏行 — 水平排列 */
+#body-row {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* 中栏（工具栏 + 消息区 + 输入栏），纵向排列 */
+#main-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ─── 三栏宽度 ─── */
+#left-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  flex-grow: 0;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  font-size: 13px;
+}
 
 #info-panel {
-  width: var(--sidebar-width);
+  width: 350px;
   flex-shrink: 0;
+  flex-grow: 0;
   border-left: 1px solid var(--border-color);
   background: var(--bg-secondary);
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
+  display: flex;
+  flex-direction: column;
 }
-
-#info-panel::-webkit-scrollbar { width: 4px; }
-#info-panel::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
-
-.panel-title { font-weight: 600; font-size: 11px; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border-color); }
-.panel-section { margin-bottom: 12px; }
-.panel-row { display: flex; justify-content: space-between; align-items: center; padding: 1px 0; }
-.panel-label { color: var(--text-secondary); }
-.panel-value { color: var(--text-primary); font-weight: 500; font-family: var(--font-mono); font-size: 11px; }
-.panel-status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 4px; }
-.panel-status-dot.idle { background: var(--success); }
-.panel-status-dot.busy { background: var(--warning); animation: pulse 1s infinite; }
-.panel-status-dot.listen { background: var(--accent); animation: pulse 1s infinite; }
-
-@media (max-width: 900px) { #info-panel { display: none; } }
 
 /* ═══════════════════════════════════════════════════
    顶部标题栏
@@ -126,11 +143,10 @@ html, body {
 .header-left { display: flex; align-items: center; gap: 8px; }
 .header-icon { font-size: 18px; }
 .header-title { font-size: 15px; font-weight: 600; color: var(--text-primary); letter-spacing: 0.3px; }
-.header-right { display: flex; align-items: center; gap: 12px; -webkit-app-region: no-drag; }
-.header-ctx { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); cursor: help; }
 
-.status-dot {
-  width: 8px; height: 8px; border-radius: 50%; transition: background 0.3s;
+.header-center {
+  -webkit-app-region: no-drag;
+}
 }
 .status-dot.connected { background: var(--success); box-shadow: 0 0 4px rgba(34,197,94,0.4); }
 .status-dot.disconnected { background: var(--danger); }
@@ -140,6 +156,275 @@ html, body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+
+/* ═══════════════════════════════════════════════════
+   左侧导航栏 (Left Sidebar)
+   ═══════════════════════════════════════════════════ */
+
+
+/* ─── 侧边栏区块标题 ─── */
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sidebar-section-header .section-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-primary);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.sidebar-section-header .collapse-arrow {
+  font-size: 9px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.section-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.section-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 2px;
+  line-height: 1;
+  border-radius: 3px;
+}
+.section-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-section-header.collapsible {
+  cursor: pointer;
+}
+
+/* ─── "New Session" 按钮 ─── */
+#new-session-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  background: #f0f0f0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+  transition: background 0.15s;
+}
+#new-session-btn:hover {
+  background: var(--bg-hover);
+}
+
+.ns-icon {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--accent);
+}
+.ns-text {
+  font-weight: 500;
+}
+.ns-shortcut {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* ─── Sessions 区块 ─── */
+#sessions-section {
+  margin-bottom: 4px;
+}
+
+/* ─── Customizations 列表 ─── */
+#customizations-section {
+  margin-top: 4px;
+}
+
+#custom-list {
+  list-style: none;
+  margin-top: 2px;
+}
+
+.custom-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+.custom-item:hover {
+  background: var(--bg-hover);
+}
+
+.custom-icon {
+  font-size: 14px;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.custom-label {
+  flex: 1;
+}
+
+.custom-badge {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: #f0f0f0;
+  padding: 0 7px;
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  line-height: 1.6;
+}
+
+/* ─── 左侧栏中间空白填充 ─── */
+#sidebar-spacer {
+  flex: 1;
+  min-height: 20px;
+}
+
+/* ═══════════════════════════════════════════════════
+   中栏 — 顶部工具栏
+   ═══════════════════════════════════════════════════ */
+
+#main-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px 4px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+.toolbar-icon {
+  font-size: 16px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.toolbar-context {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.ctx-folder, .ctx-tool {
+  color: var(--text-primary);
+  font-weight: 500;
+  cursor: pointer;
+}
+.ctx-folder:hover, .ctx-tool:hover {
+  color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════
+   中栏 — 底部状态行
+   ═══════════════════════════════════════════════════ */
+
+#main-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 20px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  user-select: none;
+}
+.ms-left, .ms-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ms-right {
+  gap: 6px;
+}
+
+/* ═══════════════════════════════════════════════════
+   右栏 — 文件树
+   ═══════════════════════════════════════════════════ */
+
+.file-tree {
+  font-size: 13px;
+  user-select: none;
+}
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12.5px;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.tree-item:hover {
+  background: var(--bg-hover);
+}
+.tree-toggle {
+  font-size: 8px;
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.tree-folder-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.tree-icon {
+  flex-shrink: 0;
+  font-size: 12px;
+  width: 16px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-tag {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-right: 2px;
+  flex-shrink: 0;
+  line-height: 1.6;
+}
+.tag-yellow { background: #fef3c7; color: #92400e; }
+.tag-red { background: #fee2e2; color: #991b1b; }
+.tag-blue { background: #dbeafe; color: #1e40af; }
+.tree-children {
+  padding-left: 16px;
+}
+.tree-item.folder .tree-icon {
+  color: var(--text-muted);
+}
+.tree-item.file {
+  padding-left: 20px;
+}
+
 
 /* ═══════════════════════════════════════════════════
    消息区域
@@ -418,8 +703,6 @@ html, body {
   font-size: 11.5px;
 }
 
-/* 计数器：无边框底色 */
-
 /* ─── 工具结果可滚动容器 ─── */
 .tool-result-scroll-wrap {
   width: 100%;
@@ -557,26 +840,87 @@ html, body {
   color: var(--text-muted);
   text-transform: uppercase;
 }
-
-.content hr { border: none; height: 1px; background: var(--border-color); margin: 12px 0; }
-
-.content a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-.content a:hover { color: var(--accent); }
-.content strong { font-weight: 600; }
-
-/* ─── 折叠工具消息 ─── */
-.message.tool.collapsed .content {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .message.tool.collapsed .tool-collapse-icon { flex-shrink: 0; }
 .message.tool.collapsed .tool-name { font-weight: 500; flex-shrink: 0; }
 .message.tool.collapsed .tool-args { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+
+/* ═══════════════════════════════════════════════════
+   信息面板（右侧 — 文件树风格）
+   ═══════════════════════════════════════════════════ */
+
+
+/* ─── 标签栏 ─── */
+.panel-tabs {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px 0;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.panel-tab {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 2px 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  user-select: none;
+}
+
+.panel-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+.panel-tab.inactive:hover {
+  color: var(--text-secondary);
+}
+
+.panel-tab-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+
+.panel-tab-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 2px 4px;
+  border-radius: 3px;
+  line-height: 1;
+}
+.panel-tab-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ─── 面板内容 ─── */
+#panel-content {
+  padding: 12px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* ─── 信息面板内部统计样式（原有的面板内容兼容） ─── */
+.panel-title { font-weight: 600; font-size: 11px; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border-color); }
+.panel-section { margin-bottom: 12px; }
+.panel-row { display: flex; justify-content: space-between; align-items: center; padding: 1px 0; }
+.panel-label { color: var(--text-secondary); }
+.panel-value { color: var(--text-primary); font-weight: 500; font-family: var(--font-mono); font-size: 11px; }
+.panel-status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+.panel-status-dot.idle { background: var(--success); }
+.panel-status-dot.busy { background: var(--warning); animation: pulse 1s infinite; }
+.panel-status-dot.listen { background: var(--accent); animation: pulse 1s infinite; }
+
+@media (max-width: 900px) { #info-panel { display: none; } }
 
 /* ═══════════════════════════════════════════════════
    底部栏
@@ -705,22 +1049,9 @@ html, body {
   .header-title { font-size: 14px; }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+@media (max-width: 780px) {
+  #left-sidebar { display: none; }
+}
 
 
 
