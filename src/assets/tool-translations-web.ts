@@ -30,21 +30,24 @@ export function ansiToHtml(text: string): string {
   html = html.replace(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g, (_m: string, r: string, g: string, b: string) => {
     return `<span style="color:rgb(${r},${g},${b})">`;
   });
-
   // 3) 简单颜色码
   html = html
     .replace(/\x1b\[94m/g, '<span style="color:#2563eb">')
     .replace(/\x1b\[35m/g, '<span style="color:#a855f7">')
+    .replace(/\x1b\[36m/g, '<span style="color:#06b6d4">')
+    .replace(/\x1b\[90m/g, '<span style="color:#94a3b8">')
     .replace(/\x1b\[30m/g, '<span style="color:#6b7280">')
     .replace(/\x1b\[32m/g, '<span style="color:#16a34a">')
     .replace(/\x1b\[31m/g, '<span style="color:#dc2626">')
     .replace(/\x1b\[33m/g, '<span style="color:#ca8a04">')
     .replace(/\x1b\[1m/g, '<strong>')
+    .replace(/\x1b\[2m/g, '<span style="opacity:0.7">')
     .replace(/\x1b\[4m/g, '<span style="text-decoration:underline">')
     .replace(/\x1b\[0m/g, '</span>')
     .replace(/<\/strong><\/span>/g, '</strong>')
     .replace(/(<\/span>)+/g, '</span>');
 
+  // 4) 兜底：擦掉任何剩余的控制序列
+  html = html.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
   return html;
-}
 

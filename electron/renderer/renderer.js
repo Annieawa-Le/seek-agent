@@ -261,18 +261,26 @@ function renderAnsi(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-  return escaped
+  // ── 已知样式码转 HTML ──
+  var html = escaped
     .replace(/\x1b\[94m/g, '<span style="color:#3b82f6">')
     .replace(/\x1b\[35m/g, '<span style="color:#a855f7">')
     .replace(/\x1b\[32m/g, '<span style="color:#16a34a">')
     .replace(/\x1b\[31m/g, '<span style="color:#dc2626">')
     .replace(/\x1b\[33m/g, '<span style="color:#ca8a04">')
+    .replace(/\x1b\[90m/g, '<span style="color:#64748b">')
+    .replace(/\x1b\[36m/g, '<span style="color:#06b6d4">')
     .replace(/\x1b\[30m/g, '<span style="color:#374151">')
     .replace(/\x1b\[1m/g, '<span style="font-weight:600">')
+    .replace(/\x1b\[2m/g, '<span style="opacity:0.7">')
     .replace(/\x1b\[4m/g, '<span style="text-decoration:underline">')
     .replace(/\x1b\[0m/g, '</span>')
-    .replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, '')
-    .replace(/(<\/span>)+/g, '</span>');
+    .replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, '');
+  // ── 兜底：擦掉任何剩余的控制序列（如 \x1b[0;31m、\x1b[38;5;Nm 等）──
+  html = html.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  // ── 去掉孤立的闭合标签 ──
+  html = html.replace(/(<\/span>)+/g, '</span>');
+  return html;
 }
 
 /** 渲染普通消息内容（纯文本，如工具消息） */
@@ -346,7 +354,13 @@ function createMessageElement(msg) {
         `;
       } else {
         el.className = 'message tool' + (msg.toolMeta ? ' call' : ' result');
-        el.innerHTML = `<div class="content">${renderPlainText(msg.content)}</div>`;
+        // 优先使用服务端预处理好的 HTML（含 ANSI 转换），否则本地渲染
+        var html = msg.toolCallHtml || msg.toolResultHtml;
+        if (html) {
+          el.innerHTML = '<div class="content">' + html + '</div>';
+        } else {
+          el.innerHTML = '<div class="content">' + renderAnsi(msg.content) + '</div>';
+        }
       }
       break;
     }
@@ -1080,7 +1094,6 @@ function renderTreeNodes(nodes, depth) {
       const tagClass = tagMap[node.ext] || '';
       const tagLabel = node.ext === 'json' ? '{}' : node.ext === 'npmrc' ? 'npm' : node.ext;
       html += '<div class="tree-item file" data-path="' + escapeHtml(node.path) + '">';
-      html += '<div class="tree-item file" data-path="' + escapeHtml(node.path) + '">';
       if (tagClass) {
         html += '  <span class="tree-tag ' + tagClass + '">' + tagLabel.toUpperCase() + '</span>';
       } else {
@@ -1230,6 +1243,8 @@ if (document.getElementById('session-list')) {
 if (document.querySelector('.panel-tab')) {
   initRightPanel();
 }
+
+
 
 
 
