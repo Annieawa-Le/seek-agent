@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seek-Agent · UI/UX 设计系统报告</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════
+   Primitive Tokens（原始值）
+   ═══════════════════════════════════════════ */
+:root {
+  /* ── 原始色板 · 来自项目已建立的 Seek-Agent 品牌色 ── */
+  --warm-950: #0D0A08;
+  --warm-900: #151210;
+  --warm-850: #1A1714;
+  --warm-800: #24211D;
+  --warm-700: #35302A;
+  --slate-50:  #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+
+  /* 品牌金 */
+  --gold-200: #F0E4B8;
+  --gold-300: #E5D08A;
+  --gold-400: #D4B86A;
+  --gold-500: #C4A246;
+  --gold-600: #A88730;
+
+  /* 语义色 */
+  --green-400: #4ade80;
+  --green-500: #22c55e;
+  --green-600: #16a34a;
+  --amber-400: #fbbf24;
+  --amber-500: #f59e0b;
+  --red-400:  #f87171;
+  --red-500:  #ef4444;
+  --purple-400: #c084fc;
+  --purple-500: #a855f7;
+  --cyan-400: #22d3ee;
+
+  /* 间距 */
+  --space-1:  4px;  --space-2:  8px;  --space-3:  12px;
+  --space-4:  16px; --space-5:  20px; --space-6:  24px;
+  --space-8:  32px; --space-10: 40px; --space-12: 48px;
+  --space-16: 64px; --space-20: 80px;
+
+  /* 圆角 */
+  --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
+
+  /* 阴影 */
+  --shadow-sm:  0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md:  0 4px 6px rgba(0,0,0,0.3);
+  --shadow-glow-gold: 0 0 24px rgba(212, 168, 67, 0.2);
+
+  /* 字体 */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+}
+
+/* ═══════════════════════════════════════════
+   Semantic Tokens（语义 Token）
+   ═══════════════════════════════════════════ */
+:root {
+  --bg-deepest:     var(--warm-950);
+  --bg-base:        var(--warm-900);
+  --bg-elevated:    var(--warm-850);
+  --bg-surface:     var(--warm-800);
+  --bg-card:        var(--warm-800);
+  --bg-hover:       rgba(255,255,255,0.05);
+  --text-primary:   var(--slate-50);
+  --text-secondary: var(--slate-300);
+  --text-muted:     var(--slate-400);
+  --text-dim:       var(--slate-500);
+  --border-subtle:  rgba(255,255,255,0.06);
+  --border-default: rgba(255,255,255,0.10);
+  --border-strong:  rgba(255,255,255,0.15);
+  --accent:         #d4a843;
+  --accent-hover:   #e5c158;
+  --accent-bg:      rgba(212,168,67,0.10);
+  --accent-glow:    var(--shadow-glow-gold);
+  --success:        var(--green-500);
+  --warning:        var(--amber-500);
+  --danger:         var(--red-500);
+  --code-bg:        rgba(0,0,0,0.3);
+  --slide-bg:       var(--warm-900);
+  --slide-card-bg:  var(--warm-800);
+  --slide-accent:   var(--accent);
+  --slide-font:     var(--font-sans);
+  --slide-mono:     var(--font-mono);
+}
+
+/* ═══════════════════════════════════════════
+   Reset & Base
+   ═══════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--slide-font);
+  background: var(--slide-bg);
+  color: var(--text-primary);
+  line-height: 1.6;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+}
+
+::selection { background: rgba(212,168,67,0.25); color: var(--text-primary); }
+
+/* ═══════════════════════════════════════════
+   Slide Container
+   ═══════════════════════════════════════════ */
+.slides-container {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+
+.slide {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 60px 80px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.slide.active {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  z-index: 10;
+}
+
+/* ═══════════════════════════════════════════
+   Navigation
+   ═══════════════════════════════════════════ */
+.nav-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background: rgba(13,10,8,0.85);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 40px;
+  z-index: 100;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.nav-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-default);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.dot.active {
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(212,168,67,0.4);
+  width: 10px;
+  height: 10px;
+}
+.dot:hover { background: var(--text-muted); }
+
+.nav-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.nav-btn {
+  background: none;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  padding: 6px 16px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--slide-font);
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+.nav-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+  border-color: var(--border-subtle);
+  color: var(--text-dim);
+  background: transparent;
+}
+
+.nav-counter {
+  font-family: var(--slide-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* ═══════════════════════════════════════════
+   Slide Typography
+   ═══════════════════════════════════════════ */
+.slide-title {
+  font-size: clamp(1.8rem, 3vw, 2.8rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin-bottom: 16px;
+}
+
+.slide-subtitle {
+  font-size: 1.05rem;
+  color: var(--text-muted);
+  max-width: 700px;
+  line-height: 1.7;
+  margin-bottom: 32px;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, var(--accent), var(--gold-200));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.section-num {
+  font-family: var(--slide-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.section-num::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(212,168,67,0.3);
+  margin-right: 8px;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+/* ═══════════════════════════════════════════
+   Card Components
+   ═══════════════════════════════════════════ */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.card {
+  background: var(--slide-card-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  transition: all 0.25s ease;
+}
+
+.card:hover {
+  border-color: rgba(212,168,67,0.2);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.card-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 8px;
+  font-family: var(--slide-mono);
+}
+
+.card-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.card-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── Two column layout ── */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-top: 8px;
+}
+
+.col { min-width: 0; }
+
+/* ── Tag pills ── */
+.tag {
+  display: inline-block;
+  font-family: var(--slide-mono);
+  font-size: 0.68rem;
+  padding: 2px 10px;
+  border-radius: 100px;
+  background: rgba(74,90,122,0.15);
+  color: var(--text-muted);
+  border: 1px solid rgba(74,90,122,0.12);
+  margin: 2px 4px 2px 0;
+}
+
+/* ── Color swatch row ── */
+.swatch-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+.swatch {
+  width: 60px;
+  height: 60px;
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 6px;
+  font-family: var(--slide-mono);
+  font-size: 0.6rem;
+  color: rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Code block ── */
+.code-block {
+  background: var(--code-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  font-family: var(--slide-mono);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.code-block .token-var { color: var(--accent); }
+.code-block .token-comment { color: var(--text-dim); }
+.code-block .token-value { color: var(--gold-400); }
+
+/* ── Stats row ── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.stat-item {
+  text-align: center;
+  padding: 16px;
+  background: var(--slide-card-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.stat-num {
+  font-size: 2.2rem;
+  font-weight: 800;
+  font-family: var(--slide-mono);
+  color: var(--accent);
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* ── Chart wrapper ── */
+.chart-wrapper {
+  background: var(--slide-card-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  max-width: 520px;
+}
+
+/* ── Checklist ── */
+.checklist {
+  list-style: none;
+  margin: 12px 0;
+}
+.checklist li {
+  padding: 6px 0 6px 28px;
+  position: relative;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+.checklist li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: var(--success);
+  font-weight: 700;
+}
+
+/* ── Horizontal rule ── */
+.hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  margin: 20px 0;
+  opacity: 0.3;
+}
+
+/* ── Cover specific ── */
+.cover { justify-content: center; align-items: center; text-align: center; }
+.cover .slide-title { font-size: clamp(2.5rem, 5vw, 4rem); }
+.cover .meta-line {
+  font-family: var(--slide-mono);
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-top: 20px;
+}
+.cover .meta-line span { color: var(--accent); }
+
+/* ── Bullet list ── */
+.bullet-list { list-style: none; margin: 8px 0; }
+.bullet-list li {
+  padding: 4px 0 4px 24px;
+  position: relative;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.bullet-list li::before {
+  content: '▸';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ── Responsive ── */
+@media (max-width: 800px) {
+  .slide { padding: 40px 32px; }
+  .two-col { grid-template-columns: 1fr; gap: 20px; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .card-grid { grid-template-columns: 1fr 1fr; }
+  .nav-bar { padding: 0 16px; font-size: 12px; }
+}
+@media (max-width: 480px) {
+  .slide { padding: 24px 16px; }
+  .stats-row { grid-template-columns: 1fr 1fr; }
+  .card-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="slides-container" id="slidesContainer">
+
+<!-- ═══════════ Slide 0: Cover ═══════════ -->
+<div class="slide cover active" data-index="0">
+  <div class="section-num">Design System Report</div>
+  <h1 class="slide-title">
+    <span class="gradient-text">Seek-Agent</span><br>
+    UI/UX 设计系统报告
+  </h1>
+  <p style="color: var(--text-muted); font-size: 1.1rem; max-width: 600px; margin: 0 auto;">
+    从 Electron 渲染层到终端 TUI — 完整的设计语言、Token 体系与视觉规范
+  </p>
+  <div class="meta-line">
+    <span>✦</span>  v1.0  ·  2025  ·  AI Agent Runtime Design
+  </div>
+</div>
+
+<!-- ═══════════ Slide 1: 目录 ═══════════ -->
+<div class="slide" data-index="1">
+  <div class="section-num">Contents</div>
+  <h2 class="slide-title">报告目录</h2>
+  <div class="hr"></div>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 40px; margin-top: 16px;">
+    <div style="display: flex; gap: 12px; align-items: flex-start; padding: 6px 0;">
+      <span style="font-family: var(--slide-mono); font-size: 0.75rem; color: var(--accent); min-width: 28px;">01</span>
+      <span style="color: var(--text-primary); font-weight: 500;">设计 Token 架构</span>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: flex-start; padding: 6px 0;">
+      <span style="font-family: var(--slide-mono); font-size: 0.75rem; color: var(--accent); min-width: 28px;">02</span>
+      <span style="color: var(--text-primary); font-weight: 500;">配色系统</span>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: flex-start; padding: 6px 0;">
+      <span style="font-family: var(--slide-mono); font-size: 0.75rem; color: var(--accent); min-width: 28px;">03</span>
+      <span style="color: var(--text-primary); font-weight: 500;">排版与字体系统</span>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: flex-start; padding: 6px 0;">
+      <span style="font-family: var(--slide-mono); font-size: 0.75rem; color: var(--accent); min-width: 28px;">04</span>
+      <span style="color: var(--text-primary); font-weight: 500;">间距、圆角与阴影</span>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: flex-start; padding: 6px 0;">
+      <span style="font-family: var(--slide-mono); font-size: 0.75rem; color: var(--accent); min-width: 28px;">05</span>
+      <span style="color: var(--text-primary); font-weight: 500;">组件设计规范</span>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: flex-start; padding: 6px 0;">
+      <span style="font-family: var(--slide-mono); font-size: 0.75rem; color: var(--accent); min-width: 28px;">06</span>
+      <span style="color: var(--text-primary); font-weight: 500;">深色模式实现</span>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: flex-start; padding: 6px 0;">
+      <span style="font-family: var(--slide-mono); font-size: 0.75rem; color: var(--accent); min-width: 28px;">07</span>
+      <span style="color: var(--text-primary); font-weight: 500;">UI 风格展示</span>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: flex-start; padding: 6px 0;">
+      <span style="font-family: var(--slide-mono); font-size: 0.75rem; color: var(--accent); min-width: 28px;">08</span>
+      <span style="color: var(--text-primary); font-weight: 500;">可访问性与预交付检查</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ Slide 2: Token架构 ═══════════ -->
+<div class="slide" data-index="2">
+  <div class="section-num">01  Token 架构</div>
+  <h2 class="slide-title">三层 Token <span class="gradient-text">设计系统</span></h2>
+  <p class="slide-subtitle">遵循 UI/UX Pro Max 规范的三层 Token 架构：原始值 → 语义别名 → 组件专用</p>
+
+  <div class="two-col">
+    <div>
+      <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;">
+        <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 10px 16px; border-left: 3px solid var(--accent);">
+          <div style="font-size: 0.7rem; color: var(--text-dim); font-family: var(--slide-mono); margin-bottom: 2px;">Primitive</div>
+          <div style="font-size: 0.85rem; color: var(--gold-400);"><span style="color: var(--text-secondary);">--gold-500:</span> #C4A246</div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 0.7rem;">↓</div>
+        <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 10px 16px; border-left: 3px solid var(--green-400);">
+          <div style="font-size: 0.7rem; color: var(--text-dim); font-family: var(--slide-mono); margin-bottom: 2px;">Semantic</div>
+          <div style="font-size: 0.85rem; color: var(--green-400);"><span style="color: var(--text-secondary);">--accent:</span> var(--gold-500)</div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 0.7rem;">↓</div>
+        <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 10px 16px; border-left: 3px solid var(--cyan-400);">
+          <div style="font-size: 0.7rem; color: var(--text-dim); font-family: var(--slide-mono); margin-bottom: 2px;">Component</div>
+          <div style="font-size: 0.85rem; color: var(--cyan-400);"><span style="color: var(--text-secondary);">--btn-bg:</span> var(--accent)</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 8px;">核心原则</p>
+      <ul class="bullet-list">
+        <li>绝不使用原始 hex —— 始终引用 Token</li>
+        <li>语义层支持主题切换（亮/暗）</li>
+        <li>组件 Token 支持逐组件定制</li>
+        <li>使用 HSL 格式便于透明控制</li>
+        <li>每个 Token 记录用途文档</li>
+      </ul>
+      <div class="code-block" style="margin-top: 12px;">
+<span class="token-comment">/* Component Token 示例 */</span>
+<span class="token-var">--send-btn-bg</span>:   var(--accent);
+<span class="token-var">--send-btn-hover</span>: var(--accent-hover);
+<span class="token-var">--msg-user-bg</span>:    rgba(212,168,67,0.06);
+<span class="token-var">--msg-agent-bg</span>:   rgba(255,255,255,0.03);
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ Slide 3: 配色系统 ═══════════ -->
+<div class="slide" data-index="3">
+  <div class="section-num">02  配色系统</div>
+  <h2 class="slide-title">暖调深色 · <span class="gradient-text">金色点缀</span></h2>
+  <p class="slide-subtitle">以深暖灰色为基底，金色作为品牌色/强调色，绿色表示成功，红色的错误。面向开发者的电影级深色体验。</p>
+
+  <div class="two-col">
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">背景层级</p>
+      <div class="swatch-row">
+        <div class="swatch" style="background: var(--warm-950);">#0D0A08<br>deepest</div>
+        <div class="swatch" style="background: var(--warm-900);">#151210<br>base</div>
+        <div class="swatch" style="background: var(--warm-850);">#1A1714<br>elevated</div>
+        <div class="swatch" style="background: var(--warm-800);">#24211D<br>surface</div>
+      </div>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-top: 16px; margin-bottom: 8px;">品牌色 — 金色渐变</p>
+      <div class="swatch-row">
+        <div class="swatch" style="background: var(--gold-300); color: #333;">#E5D08A</div>
+        <div class="swatch" style="background: var(--gold-400); color: #333;">#D4B86A</div>
+        <div class="swatch" style="background: var(--gold-500); color: #333;">#C4A246</div>
+        <div class="swatch" style="background: var(--gold-600);">#A88730</div>
+      </div>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-top: 16px; margin-bottom: 8px;">语义色</p>
+      <div class="swatch-row">
+        <div class="swatch" style="background: var(--green-500);">#22c55e<br>success</div>
+        <div class="swatch" style="background: var(--amber-500);">#f59e0b<br>warning</div>
+        <div class="swatch" style="background: var(--red-500);">#ef4444<br>danger</div>
+        <div class="swatch" style="background: var(--purple-400);">#c084fc<br>agent</div>
+      </div>
+    </div>
+
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 12px;">消息角色色分布</p>
+      <div class="chart-wrapper">
+        <canvas id="colorChart" height="240"></canvas>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;">
+        <span class="tag">用户消息 · 金色边框 rgba(212,168,67,0.18)</span>
+        <span class="tag">Agent消息 · 白色微光 rgba(255,255,255,0.06)</span>
+        <span class="tag">工具消息 · 最淡 rgba(255,255,255,0.04)</span>
+        <span class="tag">子Agent · 紫色 #c084fc</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ Slide 4: 排版系统 ═══════════ -->
+<div class="slide" data-index="4">
+  <div class="section-num">03  排版与字体</div>
+  <h2 class="slide-title">Inter + JetBrains Mono <span class="gradient-text">双字体系统</span></h2>
+  <p class="slide-subtitle">清晰的技术调性，契合开发者工具的产品气质。动态缩放比例基于 clamp() 实现响应式。</p>
+
+  <div class="two-col">
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">字体家族</p>
+      <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px;">
+        <div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 4px;">Inter</div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">正文字体 · 300-700 字重</div>
+        <div style="font-family: var(--slide-mono); font-size: 1.2rem; font-weight: 500;">JetBrains Mono</div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">等宽字体 · 代码、数据、终端</div>
+      </div>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-top: 16px; margin-bottom: 8px;">字号层级</p>
+      <div class="code-block">
+<span class="token-comment">/* 动态缩放 — 基于 clamp */</span>
+<span class="token-var">--text-xs</span>:  0.75rem;  <span class="token-comment">/* 标签/辅助 */</span>
+<span class="token-var">--text-sm</span>:  0.875rem; <span class="token-comment">/* 正文小 */</span>
+<span class="token-var">--text-base</span>: 1rem;     <span class="token-comment">/* 正文 */</span>
+<span class="token-var">--text-lg</span>:  1.125rem;
+<span class="token-var">--text-xl</span>:  1.25rem;
+<span class="token-var">--h3</span>: clamp(1.1rem, 2vw, 1.4rem);
+<span class="token-var">--h2</span>: clamp(1.4rem, 3vw, 1.8rem);
+<span class="token-var">--h1</span>: clamp(1.8rem, 4vw, 2.8rem);
+      </div>
+    </div>
+
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">行高与字重规范</p>
+      <ul class="bullet-list">
+        <li>正文行高 <strong>1.6–1.75</strong>，代码行高 <strong>1.5</strong></li>
+        <li>标题字重 <strong>600–700</strong>，正文 <strong>400</strong>，标签 <strong>500</strong></li>
+        <li>代码内联背景 <span style="background: rgba(168,85,247,0.12); padding: 1px 5px; border-radius: 4px; font-family: var(--slide-mono);">rgba(168,85,247,0.12)</span></li>
+        <li>代码块背景 <span style="background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 4px;">rgba(0,0,0,0.3)</span></li>
+        <li>标题色使用 <span style="color: var(--accent); font-weight: 600;">金色</span> 突出</li>
+        <li>移动端最小 <strong>16px</strong> 正文（防 iOS 缩放）</li>
+      </ul>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-top: 16px; margin-bottom: 8px;">排版示例</p>
+      <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px;">
+        <div style="font-size: 1.2rem; font-weight: 700; color: var(--accent);">标题层级一目了然</div>
+        <div style="font-size: 0.9rem; color: var(--text-secondary); margin: 6px 0;">正文清晰可读，行高舒适。</div>
+        <div style="font-family: var(--slide-mono); font-size: 0.8rem; color: var(--text-muted); background: var(--code-bg); padding: 8px; border-radius: 4px; margin-top: 6px;">代码与环境变量保持等宽</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ Slide 5: 间距圆角阴影 ═══════════ -->
+<div class="slide" data-index="5">
+  <div class="section-num">04  间距与布局</div>
+  <h2 class="slide-title"><span class="gradient-text">4px 增量</span> 与 8px 网格系统</h2>
+  <p class="slide-subtitle">基于 4px/8px 的间距体系，配合语义化圆角与阴影层级，保证视觉一致性。</p>
+
+  <div class="two-col">
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">间距 Token</p>
+      <div class="card-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+        <div class="card" style="padding: 12px 16px;">
+          <div style="font-size: 0.7rem; color: var(--text-dim); font-family: var(--slide-mono);">--space-1</div>
+          <div style="font-size: 1.1rem; font-weight: 700;">4px</div>
+        </div>
+        <div class="card" style="padding: 12px 16px;">
+          <div style="font-size: 0.7rem; color: var(--text-dim); font-family: var(--slide-mono);">--space-2</div>
+          <div style="font-size: 1.1rem; font-weight: 700;">8px</div>
+        </div>
+        <div class="card" style="padding: 12px 16px;">
+          <div style="font-size: 0.7rem; color: var(--text-dim); font-family: var(--slide-mono);">--space-4</div>
+          <div style="font-size: 1.1rem; font-weight: 700;">16px</div>
+        </div>
+        <div class="card" style="padding: 12px 16px;">
+          <div style="font-size: 0.7rem; color: var(--text-dim); font-family: var(--slide-mono);">--space-6</div>
+          <div style="font-size: 1.1rem; font-weight: 700;">24px</div>
+        </div>
+        <div class="card" style="padding: 12px 16px;">
+          <div style="font-size: 0.7rem; color: var(--text-dim); font-family: var(--slide-mono);">--space-8</div>
+          <div style="font-size: 1.1rem; font-weight: 700;">32px</div>
+        </div>
+        <div class="card" style="padding: 12px 16px;">
+          <div style="font-size: 0.7rem; color: var(--text-dim); font-family: var(--slide-mono);">--space-12</div>
+          <div style="font-size: 1.1rem; font-weight: 700;">48px</div>
+        </div>
+      </div>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-top: 16px; margin-bottom: 8px;">圆角</p>
+      <div style="display: flex; gap: 8px;">
+        <div style="width: 50px; height: 50px; background: var(--slide-card-bg); border: 1px solid var(--border-default); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: var(--text-dim);">4px</div>
+        <div style="width: 50px; height: 50px; background: var(--slide-card-bg); border: 1px solid var(--border-default); border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: var(--text-dim);">8px</div>
+        <div style="width: 50px; height: 50px; background: var(--slide-card-bg); border: 1px solid var(--border-default); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: var(--text-dim);">12px</div>
+        <div style="width: 50px; height: 50px; background: var(--slide-card-bg); border: 1px solid var(--border-default); border-radius: var(--radius-xl); display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: var(--text-dim);">16px</div>
+      </div>
+    </div>
+
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">阴影层级</p>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="background: var(--slide-card-bg); border-radius: var(--radius-md); padding: 10px 16px; box-shadow: var(--shadow-sm);">
+          <span style="font-family: var(--slide-mono); font-size: 0.7rem; color: var(--text-dim);">--shadow-sm</span>
+          <span style="color: var(--text-muted); margin-left: 8px; font-size: 0.8rem;">轻微浮动</span>
+        </div>
+        <div style="background: var(--slide-card-bg); border-radius: var(--radius-md); padding: 10px 16px; box-shadow: var(--shadow-md);">
+          <span style="font-family: var(--slide-mono); font-size: 0.7rem; color: var(--text-dim);">--shadow-md</span>
+          <span style="color: var(--text-muted); margin-left: 8px; font-size: 0.8rem;">卡片抬高</span>
+        </div>
+        <div style="background: var(--slide-card-bg); border-radius: var(--radius-md); padding: 10px 16px; box-shadow: var(--shadow-glow-gold);">
+          <span style="font-family: var(--slide-mono); font-size: 0.7rem; color: var(--text-dim);">--shadow-glow-gold</span>
+          <span style="color: var(--text-muted); margin-left: 8px; font-size: 0.8rem;">金色光晕 · CTA</span>
+        </div>
+      </div>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-top: 16px; margin-bottom: 8px;">布局关键尺寸</p>
+      <ul class="bullet-list">
+        <li>Header 高度 <strong>48px</strong> · 毛玻璃 backdrop-filter: blur(12px)</li>
+        <li>侧边栏宽 <strong>260px</strong> · 右侧面板 <strong>320px</strong></li>
+        <li>消息最大宽 <strong>820px</strong> · 居中布局</li>
+        <li>输入栏最小高 <strong>40px</strong> · 自适应 max-height: 150px</li>
+        <li>响应式断点：375 / 768 / 1024 / 1440</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ Slide 6: 组件设计 ═══════════ -->
+<div class="slide" data-index="6">
+  <div class="section-num">05  组件设计规范</div>
+  <h2 class="slide-title">组件 <span class="gradient-text">状态与变体</span></h2>
+  <p class="slide-subtitle">每个组件定义默认、悬停、激活、禁用四种状态，确保交互反馈一致。</p>
+
+  <div class="two-col">
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">发送按钮 · Send Button</p>
+      <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 16px; overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.75rem;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--border-default);">
+              <th style="text-align: left; padding: 6px 8px; color: var(--text-dim);">状态</th>
+              <th style="text-align: left; padding: 6px 8px; color: var(--text-dim);">背景</th>
+              <th style="text-align: left; padding: 6px 8px; color: var(--text-dim);">效果</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid var(--border-subtle);">
+              <td style="padding: 6px 8px;">默认</td>
+              <td style="padding: 6px 8px; font-family: var(--slide-mono);">--accent</td>
+              <td style="padding: 6px 8px;">金色，常态</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border-subtle);">
+              <td style="padding: 6px 8px;">悬停</td>
+              <td style="padding: 6px 8px; font-family: var(--slide-mono);">--accent-hover</td>
+              <td style="padding: 6px 8px;">亮金 + 光晕 + 上移 1px</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border-subtle);">
+              <td style="padding: 6px 8px;">激活</td>
+              <td style="padding: 6px 8px; font-family: var(--slide-mono);">--accent</td>
+              <td style="padding: 6px 8px;">scale(0.96)</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 8px;">禁用</td>
+              <td style="padding: 6px 8px; font-family: var(--slide-mono);">--bg-surface</td>
+              <td style="padding: 6px 8px;">灰色，无阴影</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-top: 16px; margin-bottom: 8px;">消息卡片</p>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="background: var(--slide-card-bg); border: 1px solid rgba(212,168,67,0.18); border-radius: var(--radius-lg); padding: 10px 14px; margin-left: 40px;">
+          <div style="font-size: 0.7rem; color: var(--accent); font-weight: 600; margin-bottom: 2px;">You</div>
+          <div style="font-size: 0.85rem; color: var(--text-primary);">用户消息 — 右对齐，金色边框</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-lg); padding: 10px 14px;">
+          <div style="font-size: 0.7rem; color: var(--accent); font-weight: 600; margin-bottom: 2px;">Seek Agent</div>
+          <div style="font-size: 0.85rem; color: var(--text-primary);">Agent 消息 — 左对齐，微光背景</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">所有组件状态矩阵</p>
+      <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 16px; overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.72rem;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--border-default);">
+              <th style="text-align: left; padding: 4px 6px; color: var(--text-dim);">属性</th>
+              <th style="text-align: left; padding: 4px 6px; color: var(--text-dim);">默认</th>
+              <th style="text-align: left; padding: 4px 6px; color: var(--text-dim);">悬停</th>
+              <th style="text-align: left; padding: 4px 6px; color: var(--text-dim);">激活</th>
+              <th style="text-align: left; padding: 4px 6px; color: var(--text-dim);">禁用</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid var(--border-subtle);">
+              <td style="padding: 4px 6px; font-weight: 500;">背景</td>
+              <td style="padding: 4px 6px;">--accent</td>
+              <td style="padding: 4px 6px;">--accent-hover</td>
+              <td style="padding: 4px 6px;">--accent</td>
+              <td style="padding: 4px 6px;">--bg-surface</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border-subtle);">
+              <td style="padding: 4px 6px; font-weight: 500;">文字</td>
+              <td style="padding: 4px 6px;">white</td>
+              <td style="padding: 4px 6px;">white</td>
+              <td style="padding: 4px 6px;">white</td>
+              <td style="padding: 4px 6px;">--text-dim</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border-subtle);">
+              <td style="padding: 4px 6px; font-weight: 500;">阴影</td>
+              <td style="padding: 4px 6px;">none</td>
+              <td style="padding: 4px 6px;">--glow-gold</td>
+              <td style="padding: 4px 6px;">none</td>
+              <td style="padding: 4px 6px;">none</td>
+            </tr>
+            <tr>
+              <td style="padding: 4px 6px; font-weight: 500;">变换</td>
+              <td style="padding: 4px 6px;">—</td>
+              <td style="padding: 4px 6px;">translateY(-1px)</td>
+              <td style="padding: 4px 6px;">scale(0.96)</td>
+              <td style="padding: 4px 6px;">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-top: 16px; margin-bottom: 8px;">过渡动画</p>
+      <ul class="bullet-list">
+        <li>默认过渡：<strong>150–200ms</strong> cubic-bezier(0.16, 1, 0.3, 1)</li>
+        <li>消息入场：250ms fade-in + translateY(6px)</li>
+        <li>光标闪烁：1s step-end 无限循环</li>
+        <li>状态指示点脉冲：1.5s ease-in-out 无限</li>
+        <li>尊重 prefers-reduced-motion</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ Slide 7: 深色模式 ═══════════ -->
+<div class="slide" data-index="7">
+  <div class="section-num">06  深色模式实现</div>
+  <h2 class="slide-title">Dark Mode (OLED) <span class="gradient-text">独家深色</span></h2>
+  <p class="slide-subtitle">纯深色模式设计，无亮色回退。针对 OLED 屏幕优化，低蓝光护眼，高对比度确保可读性。</p>
+
+  <div class="two-col">
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">背景色分层策略</p>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--bg-deepest); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+          <div style="width: 24px; height: 24px; border-radius: 4px; background: var(--warm-950); border: 1px solid rgba(255,255,255,0.06);"></div>
+          <div>
+            <div style="font-size: 0.75rem; font-weight: 600;">--bg-deepest</div>
+            <div style="font-size: 0.65rem; color: var(--text-dim);">侧边栏 · 深层背景 · 接近纯黑</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--bg-base); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+          <div style="width: 24px; height: 24px; border-radius: 4px; background: var(--warm-900); border: 1px solid rgba(255,255,255,0.06);"></div>
+          <div>
+            <div style="font-size: 0.75rem; font-weight: 600;">--bg-base</div>
+            <div style="font-size: 0.65rem; color: var(--text-dim);">主体背景 · 主工作区</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--bg-elevated); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+          <div style="width: 24px; height: 24px; border-radius: 4px; background: var(--warm-850); border: 1px solid rgba(255,255,255,0.06);"></div>
+          <div>
+            <div style="font-size: 0.75rem; font-weight: 600;">--bg-elevated</div>
+            <div style="font-size: 0.65rem; color: var(--text-dim);">抬高层 · 消息区背景</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--bg-surface); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+          <div style="width: 24px; height: 24px; border-radius: 4px; background: var(--warm-800); border: 1px solid rgba(255,255,255,0.06);"></div>
+          <div>
+            <div style="font-size: 0.75rem; font-weight: 600;">--bg-surface</div>
+            <div style="font-size: 0.65rem; color: var(--text-dim);">卡片表面 · 面板</div>
+          </div>
+        </div>
+      </div>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-top: 16px; margin-bottom: 8px;">金色光晕系统</p>
+      <div class="code-block">
+<span class="token-comment">/* Form 渐变光晕 */</span>
+background: linear-gradient(90deg, transparent,
+  rgba(212, 168, 67, 0.25), transparent);
+
+<span class="token-comment">/* Header 底部渐变线 */</span>
+background: linear-gradient(135deg,
+  var(--slate-50), var(--gold-400));
+      </div>
+    </div>
+
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">对比度验证</p>
+      <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
+        <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.85rem;">主文字 ← 背景</span>
+          <span style="font-family: var(--slide-mono); font-size: 0.7rem; color: var(--success);">✓ 15.7:1</span>
+        </div>
+        <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.85rem; color: var(--text-secondary);">次文字 ← 背景</span>
+          <span style="font-family: var(--slide-mono); font-size: 0.7rem; color: var(--success);">✓ 10.4:1</span>
+        </div>
+        <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.85rem; color: var(--text-muted);">弱文字 ← 背景</span>
+          <span style="font-family: var(--slide-mono); font-size: 0.7rem; color: var(--success);">✓ 6.8:1</span>
+        </div>
+      </div>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">毛玻璃效果层</p>
+      <ul class="bullet-list">
+        <li>Header：<strong>backdrop-filter: blur(12px)</strong></li>
+        <li>背景透光：<strong>rgba(21,18,16,0.88)</strong></li>
+        <li>输入栏：<strong>rgba(13,10,8,0.5) + blur(8px)</strong></li>
+        <li>底部导航：<strong>rgba(13,10,8,0.85) + blur(12px)</strong></li>
+      </ul>
+
+      <p style="font-size: 0.85rem; font-weight: 600; margin-top: 16px; margin-bottom: 8px;">关键设计决策</p>
+      <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 12px 16px; border-left: 3px solid var(--accent);">
+        <div style="font-size: 0.8rem; color: var(--text-secondary);">"暖调深色 + 金色点缀"</div>
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">比纯蓝黑更温暖，比纯灰黑更有质感。金色作为开发工具的品牌色，传递"价值感"与"精准"。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ Slide 8: UI 风格展示 ═══════════ -->
+<div class="slide" data-index="8">
+  <div class="section-num">07  UI 风格展示</div>
+  <h2 class="slide-title">风格定调 · <span class="gradient-text">Dark Developer Tool</span></h2>
+  <p class="slide-subtitle">电影级深色 · 开发者工具 · 微玻璃质感 · AI 原生体验。源自项目现有 style.css 的设计语言。</p>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 16px;">
+      <p style="font-size: 0.8rem; font-weight: 600; color: var(--accent); margin-bottom: 8px;">✦ 设计风格关键词</p>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <span class="tag" style="background: var(--accent-bg); color: var(--accent); border-color: rgba(212,168,67,0.2);">Dark Mode OLED</span>
+        <span class="tag">电影级深色</span>
+        <span class="tag">微玻璃质感</span>
+        <span class="tag">AI 原生</span>
+        <span class="tag">金色点缀</span>
+        <span class="tag">暖调深棕</span>
+        <span class="tag">高对比度</span>
+        <span class="tag">代码友好</span>
+        <span class="tag">终端美学</span>
+        <span class="tag">低蓝光</span>
+      </div>
+    </div>
+
+    <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 16px;">
+      <p style="font-size: 0.8rem; font-weight: 600; color: var(--accent); margin-bottom: 8px;">✦ 反模式清单（避免）</p>
+      <ul class="bullet-list" style="margin: 0;">
+        <li>不使用 emoji 作为图标（使用 SVG）</li>
+        <li>纯色深色主题，无亮色默认</li>
+        <li>避免低对比度（< 4.5:1）</li>
+        <li>所有可点击元素有 cursor: pointer</li>
+        <li>不依赖单一颜色传达信息</li>
+        <li>缓慢/卡顿性能</li>
+      </ul>
+    </div>
+
+    <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 16px;">
+      <p style="font-size: 0.8rem; font-weight: 600; color: var(--accent); margin-bottom: 8px;">✦ 数据看板风格统计</p>
+      <div class="chart-wrapper" style="max-width: none; padding: 8px;">
+        <canvas id="uiChart" height="140"></canvas>
+      </div>
+    </div>
+
+    <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 16px;">
+      <p style="font-size: 0.8rem; font-weight: 600; color: var(--accent); margin-bottom: 8px;">✦ 交互反馈模式</p>
+      <ul class="bullet-list" style="margin: 0;">
+        <li>按钮悬停：上移 1px + 光晕 + 亮色</li>
+        <li>卡片悬停：上移 4px + 边界高亮 + 顶部渐变色条</li>
+        <li>输入聚焦：金色边框 + 外发光</li>
+        <li>消息入场：淡入 + 上移（250ms）</li>
+        <li>禁用态：灰色 + 无交互</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ Slide 9: 可访问性 ═══════════ -->
+<div class="slide" data-index="9">
+  <div class="section-num">08  可访问性与预交付检查</div>
+  <h2 class="slide-title">CRITICAL · <span class="gradient-text">可访问性优先</span></h2>
+  <p class="slide-subtitle">遵循 UI/UX Pro Max 的优先级规则，可访问性为最高优先级（Critical）。</p>
+
+  <div class="two-col">
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">可访问性检查清单</p>
+      <ul class="checklist">
+        <li>正常文本最小对比度 <strong>4.5:1</strong>，大文本 3:1</li>
+        <li>交互元素必须有可见焦点环</li>
+        <li>图标按钮必须有 aria-label</li>
+        <li>不仅靠颜色传达信息（加图标/文字）</li>
+        <li>支持 prefers-reduced-motion</li>
+        <li>触摸目标最小 44x44pt</li>
+        <li>触摸目标间至少 8px 间距</li>
+      </ul>
+    </div>
+
+    <div>
+      <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 8px;">预交付检查清单</p>
+      <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 3px 0;">
+          <span style="color: var(--success);">✓</span><span style="font-size: 0.8rem;">无 emoji 用作图标（使用 SVG）</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 3px 0;">
+          <span style="color: var(--success);">✓</span><span style="font-size: 0.8rem;">语义色值统一使用 Token</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 3px 0;">
+          <span style="color: var(--success);">✓</span><span style="font-size: 0.8rem;">所有可触摸元素有按压反馈</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 3px 0;">
+          <span style="color: var(--success);">✓</span><span style="font-size: 0.8rem;">正文字体对比度 ≥4.5:1</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 3px 0;">
+          <span style="color: var(--success);">✓</span><span style="font-size: 0.8rem;">深色模式独立验证</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 3px 0;">
+          <span style="color: var(--success);">✓</span><span style="font-size: 0.8rem;">已在小屏、大屏验证响应式</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top: 16px; background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 12px 20px; display: flex; align-items: center; gap: 12px;">
+    <span style="font-size: 2rem; color: var(--accent);">⏱</span>
+    <div>
+      <div style="font-size: 0.85rem; font-weight: 600;">动画规范</div>
+      <div style="font-size: 0.75rem; color: var(--text-muted);">时长 150-300ms · cubic-bezier 缓出 · 尊重运动减少偏好</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ Slide 10: 总结 ═══════════ -->
+<div class="slide" data-index="10">
+  <div class="section-num">Summary</div>
+  <h2 class="slide-title">设计系统 <span class="gradient-text">总结</span></h2>
+  <div class="hr"></div>
+
+  <div class="stats-row" style="margin-top: 8px;">
+    <div class="stat-item">
+      <div class="stat-num">50+</div>
+      <div class="stat-label">设计 Token</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">8</div>
+      <div class="stat-label">语义色类别</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">2</div>
+      <div class="stat-label">字体家族</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">6</div>
+      <div class="stat-label">圆角层级</div>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px;">
+    <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 16px;">
+      <p style="font-size: 0.85rem; font-weight: 600; color: var(--accent); margin-bottom: 6px;">设计原则回顾</p>
+      <ul class="bullet-list" style="margin: 0;">
+        <li>暖调深色 + 金色点缀 · 开发者工具风格</li>
+        <li>三层 Token 架构 · 无硬编码 hex</li>
+        <li>可访问性为最高优先级</li>
+        <li>极致的深色体验 · OLED 优化</li>
+        <li>一致的组件状态与过渡系统</li>
+      </ul>
+    </div>
+
+    <div style="background: var(--slide-card-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 16px;">
+      <p style="font-size: 0.85rem; font-weight: 600; color: var(--accent); margin-bottom: 6px;">下一步建议</p>
+      <ul class="bullet-list" style="margin: 0;">
+        <li>将设计 Token 提取为独立 CSS 文件</li>
+        <li>建立组件库文档（Storybook）</li>
+        <li>开发亮色模式（可选）</li>
+        <li>自动化 Token 合规验证</li>
+        <li>持续收集用户反馈迭代</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="text-align: center; margin-top: 24px;">
+    <div style="font-family: var(--slide-mono); font-size: 0.8rem; color: var(--text-dim);">
+      <span style="color: var(--accent);">✦</span>  Seek-Agent Design System  v1.0  <span style="color: var(--accent);">✦</span>
+    </div>
+  </div>
+</div>
+
+</div><!-- /slides-container -->
+
+<!-- ═══════════ Navigation Bar ═══════════ -->
+<nav class="nav-bar">
+  <div class="nav-progress" id="navDots"></div>
+  <div class="nav-controls">
+    <span class="nav-counter" id="slideCounter">1 / 11</span>
+    <button class="nav-btn" id="prevBtn" disabled>← 上一页</button>
+    <button class="nav-btn" id="nextBtn">下一页 →</button>
+  </div>
+</nav>
+
+<script>
+(function() {
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+
+  const dotsContainer = document.getElementById('navDots');
+  const counter = document.getElementById('slideCounter');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+
+  // 生成 dots
+  for (let i = 0; i < total; i++) {
+    const dot = document.createElement('span');
+    dot.className = 'dot' + (i === 0 ? ' active' : '');
+    dot.dataset.index = i;
+    dot.addEventListener('click', () => goTo(i));
+    dotsContainer.appendChild(dot);
+  }
+
+  function updateUI() {
+    slides.forEach((s, i) => s.classList.toggle('active', i === current));
+    document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === current));
+    counter.textContent = (current + 1) + ' / ' + total;
+    prevBtn.disabled = current === 0;
+    nextBtn.disabled = current === total - 1;
+  }
+
+  function goTo(index) {
+    if (index < 0 || index >= total) return;
+    current = index;
+    updateUI();
+  }
+
+  prevBtn.addEventListener('click', () => goTo(current - 1));
+  nextBtn.addEventListener('click', () => goTo(current + 1));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') goTo(current - 1);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); goTo(current + 1); }
+    if (e.key === 'Home') goTo(0);
+    if (e.key === 'End') goTo(total - 1);
+  });
+
+  // 触摸滑动
+  let touchStartX = 0, touchEndX = 0;
+  document.addEventListener('touchstart', (e) => { touchStartX = e.changedTouches[0].screenX; });
+  document.addEventListener('touchend', (e) => {
+    touchEndX = e.changedTouches[0].screenX;
+    const diff = touchStartX - touchEndX;
+    if (Math.abs(diff) > 50) {
+      diff > 0 ? goTo(current + 1) : goTo(current - 1);
+    }
+  });
+
+  // ── Chart.js 配色饼图 ──
+  const colorCtx = document.getElementById('colorChart');
+  if (colorCtx) {
+    new Chart(colorCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['背景层', '品牌金', '成功绿', '警告黄', '危险红', '紫(子Agent)'],
+        datasets: [{
+          data: [40, 20, 15, 10, 10, 5],
+          backgroundColor: [
+            '#1A1714', '#D4B86A', '#22c55e', '#f59e0b', '#ef4444', '#c084fc'
+          ],
+          borderWidth: 0,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { color: '#cbd5e1', font: { size: 10 }, padding: 8 }
+          }
+        }
+      }
+    });
+  }
+
+  // ── Chart.js UI 风格雷达 ──
+  const uiCtx = document.getElementById('uiChart');
+  if (uiCtx) {
+    new Chart(uiCtx, {
+      type: 'radar',
+      data: {
+        labels: ['暗色深度', '金色点缀', '可读性', '开发者工具体验', '动画流畅', '一致性'],
+        datasets: [{
+          label: 'Seek-Agent 设计质量',
+          data: [95, 88, 92, 90, 85, 93],
+          backgroundColor: 'rgba(212, 168, 67, 0.15)',
+          borderColor: '#D4B86A',
+          borderWidth: 2,
+          pointBackgroundColor: '#D4B86A',
+          pointBorderColor: '#fff',
+          pointRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        scales: {
+          r: {
+            min: 0,
+            max: 100,
+            ticks: { color: '#64748b', backdropColor: 'transparent', font: { size: 9 } },
+            grid: { color: 'rgba(255,255,255,0.06)' },
+            angleLines: { color: 'rgba(255,255,255,0.06)' },
+            pointLabels: { color: '#cbd5e1', font: { size: 10 } }
+          }
+        },
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

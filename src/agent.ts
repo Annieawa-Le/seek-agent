@@ -153,6 +153,19 @@ export class CLIAAgent {
       parts.push(injectionParts.join('\n\n'));
     }
 
+    // ── 工作区根目录下的 SEEK.md 项目指引 ──
+    const seekPath = path.join(getWorkspaceRoot(), 'SEEK.md');
+    if (fs.existsSync(seekPath)) {
+      try {
+        const seekContent = fs.readFileSync(seekPath, 'utf-8').trim();
+        if (seekContent) {
+          parts.push(seekContent);
+        }
+      } catch {
+        // 读取失败则静默跳过
+      }
+    }
+
     return parts.join('\n\n');
   }
 
@@ -856,6 +869,8 @@ export class CLIAAgent {
     }
   }
 }
+
+
 
 
 

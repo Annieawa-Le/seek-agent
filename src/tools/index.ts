@@ -69,9 +69,9 @@ const coreTools = {
 let skillToolMap: Record<string, string[]> = {};
 
 // ── 自动扫描加载 inner_skills ──
-async function loadInnerSkills(): Promise<Record<string, unknown>> {
+async function loadInnerSkills(): Promise<Record<string, any>> {
   const skillsDir = path.join(__dirname, 'inner_skills');
-  const allTools: Record<string, unknown> = {};
+  const allTools: Record<string, any> = {};
 
   let entries;
   try {
@@ -103,7 +103,7 @@ async function loadInnerSkills(): Promise<Record<string, unknown>> {
       const ts = Date.now();
       const indexUrl = pathToFileURL(path.join(skillPath, 'index.ts')).href + `?t=${ts}`;
       const skillModule = await import(indexUrl);
-      const skillTools: Record<string, unknown> = skillModule.default || skillModule;
+      const skillTools: Record<string, any> = skillModule.default || skillModule;
 
       for (const [name, toolImpl] of Object.entries(skillTools)) {
         if (name in allTools || name in coreTools) {
@@ -156,7 +156,7 @@ const skillTools = await loadInnerSkills();
 
 // 可变的 tools 容器 —— 静态 import 拿到的是同一对象引用，
 // reload_skills 通过 Object.assign 更新其属性
-const toolsContainer: Record<string, unknown> = {
+const toolsContainer: Record<string, any> = {
   ...coreTools,
   ...skillTools,
 };
@@ -228,6 +228,7 @@ export function removeTool(toolName: string): string | null {
   setToolRegistry(toolsContainer as any);
   return '__anonymous__';
 }
+
 
 
 

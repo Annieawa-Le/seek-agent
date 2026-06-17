@@ -31,7 +31,8 @@ export class TokenizerService {
     if (this.proc) return;
 
     return new Promise<void>((resolve, reject) => {
-      const child = spawn('python3', ['-u', SERVICE_SCRIPT], {
+      const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+      const child = spawn(pythonCmd, ['-u', SERVICE_SCRIPT], {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -110,3 +111,5 @@ export class TokenizerService {
 export function estimateTokens(text: string): number {
   return Math.max(1, Math.round(text.length / 4));
 }
+
+

@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seek-Agent — AI Agent 运行时 · IDE 深度集成</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════
+   Design Tokens — 蓝金主题
+   ═══════════════════════════════════════════ */
+:root {
+  /* ── Primitive ── */
+  --black-900: #02040A;
+  --black-800: #0B0E18;
+  --navy-950:  #0A0F24;
+  --navy-900:  #0F1A3E;
+  --navy-800:  #162152;
+  --gray-950:  #0B1120;
+  --gray-900:  #141E33;
+  --gray-800:  #1E2A45;
+  --gray-700:  #2D3A55;
+  --gray-600:  #4A5A7A;
+  --gray-500:  #6B7FA0;
+  --gray-400:  #94A6C5;
+  --gray-300:  #C5D0E6;
+  --gray-100:  #EDF1F8;
+  --gray-50:   #F5F8FE;
+  --blue-600:  #2563EB;
+  --blue-500:  #3B82F6;
+  --blue-400:  #60A5FA;
+  --blue-300:  #93C5FD;
+  --gold-600:  #D97706;
+  --gold-500:  #F59E0B;
+  --gold-400:  #FBBF24;
+  --gold-300:  #FCD34D;
+  --red-500:   #EF4444;
+  --cyan-500:  #06B6D4;
+
+  /* ── Semantic ── */
+  --color-accent:        var(--blue-500);
+  --color-accent-glow:   rgba(59, 130, 246, 0.28);
+  --color-accent-subtle: rgba(59, 130, 246, 0.08);
+  --color-accent-deep:   rgba(59, 130, 246, 0.15);
+  --color-gold:          var(--gold-500);
+  --color-glow-gold:     rgba(245, 158, 11, 0.2);
+  --color-background:    var(--gray-950);
+  --color-surface:       var(--black-800);
+  --color-card:          var(--black-800);
+  --color-card-hover:    rgba(20, 30, 51, 0.7);
+  --color-foreground:    var(--gray-50);
+  --color-border:        var(--gray-700);
+  --color-border-subtle: rgba(74, 90, 122, 0.25);
+  --color-text-secondary: var(--gray-400);
+  --color-text-tertiary:  var(--gray-500);
+
+  /* ── Typography ── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* ── Spacing ── */
+  --space-1:  4px;  --space-2:  8px;  --space-3:  12px;
+  --space-4:  16px; --space-5:  20px; --space-6:  24px;
+  --space-8:  32px; --space-10: 40px; --space-12: 48px;
+  --space-16: 64px; --space-20: 80px; --space-24: 96px;
+
+  /* ── Radius ── */
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px; --radius-xl: 24px;
+
+  /* ── Shadows ── */
+  --shadow-sm:  0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.25);
+  --shadow-lg:  0 8px 40px rgba(0,0,0,0.35);
+  --shadow-glow: 0 0 30px var(--color-accent-glow);
+
+  /* ── Transitions ── */
+  --transition-fast:   150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow:   400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ═══════════════════════════════════════════
+   Reset & Base
+   ═══════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-background);
+  color: var(--color-foreground);
+  line-height: 1.6;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* ═══════════════════════════════════════════
+   Scrollbar
+   ═══════════════════════════════════════════ */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--gray-700); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gray-600); }
+
+/* ═══════════════════════════════════════════
+   Utility
+   ═══════════════════════════════════════════ */
+.container { max-width: 1200px; margin: 0 auto; padding: 0 var(--space-6); }
+.section { padding: var(--space-24) 0; }
+
+.section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+  margin-bottom: var(--space-4);
+}
+
+.section-label::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-gold);
+  box-shadow: 0 0 8px var(--color-glow-gold);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+.section-title {
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin-bottom: var(--space-4);
+}
+
+.section-subtitle {
+  font-size: 1.05rem;
+  color: var(--color-text-secondary);
+  max-width: 640px;
+  line-height: 1.75;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, var(--color-accent), var(--color-gold));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ═══════════════════════════════════════════
+   Grid Background
+   ═══════════════════════════════════════════ */
+.grid-bg {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(rgba(74, 90, 122, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74, 90, 122, 0.05) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+.grid-bg::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 80% 50% at 50% -15%, rgba(59, 130, 246, 0.04), transparent 70%);
+}
+
+/* ═══════════════════════════════════════════
+   Navigation
+   ═══════════════════════════════════════════ */
+.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: rgba(11, 17, 32, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--color-border-subtle);
+  transition: var(--transition-normal);
+}
+
+.nav.scrolled {
+  background: rgba(11, 14, 24, 0.94);
+  box-shadow: 0 1px 20px rgba(0,0,0,0.3);
+}
+
+.nav-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 60px; max-width: 1200px; margin: 0 auto; padding: 0 var(--space-6);
+}
+
+.nav-brand {
+  display: flex; align-items: center; gap: var(--space-3);
+  text-decoration: none; color: var(--color-foreground);
+  font-weight: 700; font-size: 1.05rem; letter-spacing: -0.01em;
+}
+
+.nav-brand-icon {
+  width: 28px; height: 28px;
+  border: 2px solid var(--color-accent);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 0.65rem; font-weight: 700;
+  color: var(--color-accent); position: relative;
+}
+
+.nav-brand-icon::after {
+  content: '';
+  position: absolute; inset: -2px;
+  border-radius: 10px;
+  background: var(--color-accent-glow);
+  filter: blur(6px); z-index: -1; opacity: 0.5;
+}
+
+.nav-links { display: flex; align-items: center; gap: var(--space-8); list-style: none; }
+
+.nav-links a {
+  text-decoration: none; color: var(--color-text-secondary);
+  font-size: 0.875rem; font-weight: 500;
+  transition: var(--transition-fast); position: relative;
+}
+
+.nav-links a::after {
+  content: '';
+  position: absolute; bottom: -4px; left: 0;
+  width: 0; height: 2px;
+  background: var(--color-accent);
+  border-radius: 1px; transition: var(--transition-fast);
+}
+
+.nav-links a:hover { color: var(--color-foreground); }
+.nav-links a:hover::after { width: 100%; }
+
+.nav-cta {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-5);
+  background: linear-gradient(135deg, var(--color-accent), var(--color-gold));
+  color: var(--black-900) !important;
+  border-radius: var(--radius-sm);
+  font-weight: 600; font-size: 0.875rem;
+  text-decoration: none; transition: var(--transition-fast);
+}
+
+.nav-cta::after { display: none !important; }
+
+.nav-cta:hover {
+  box-shadow: 0 0 24px rgba(59, 130, 246, 0.3);
+  transform: translateY(-1px);
+}
+
+/* Language toggle */
+.lang-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(74, 90, 122, 0.15);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 3px 3px;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.lang-toggle:hover {
+  border-color: var(--gray-600);
+  color: var(--color-foreground);
+}
+
+.lang-toggle span {
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: var(--transition-fast);
+}
+
+.lang-toggle span.active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+/* Mobile menu */
+.menu-toggle {
+  display: none;
+  flex-direction: column; gap: 5px;
+  background: none; border: none; cursor: pointer;
+  padding: var(--space-2);
+}
+
+.menu-toggle span {
+  display: block; width: 22px; height: 2px;
+  background: var(--gray-300); border-radius: 1px;
+  transition: var(--transition-fast);
+}
+
+/* ═══════════════════════════════════════════
+   Hero
+   ═══════════════════════════════════════════ */
+.hero {
+  position: relative; z-index: 1;
+  min-height: 100vh; display: flex; align-items: center;
+  padding-top: 60px; overflow: hidden;
+}
+
+.hero-content { position: relative; z-index: 2; max-width: 820px; }
+
+.hero-badge {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 5px 14px;
+  background: var(--color-accent-subtle);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 100px;
+  font-size: 0.78rem; font-weight: 500;
+  color: var(--blue-300);
+  margin-bottom: var(--space-6);
+  font-family: var(--font-mono);
+}
+
+.hero-badge-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px var(--color-accent-glow);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.hero-title {
+  font-size: clamp(2.5rem, 6vw, 4.2rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin-bottom: var(--space-5);
+}
+
+.hero-title .gradient-text { display: inline-block; }
+
+.hero-desc {
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  color: var(--color-text-secondary);
+  line-height: 1.8;
+  max-width: 600px;
+  margin-bottom: var(--space-10);
+}
+
+.hero-actions { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 12px 28px; border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans); font-size: 0.9rem; font-weight: 600;
+  cursor: pointer; text-decoration: none;
+  transition: var(--transition-fast); position: relative;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--color-accent), var(--color-gold));
+  color: var(--black-900);
+}
+
+.btn-primary:hover {
+  box-shadow: 0 0 30px rgba(59, 130, 246, 0.3);
+  transform: translateY(-2px);
+}
+
+.btn-secondary {
+  background: transparent; color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+}
+
+.btn-secondary:hover {
+  border-color: var(--gray-400);
+  background: rgba(255,255,255,0.03);
+  transform: translateY(-2px);
+}
+
+/* Terminal decoration */
+.hero-terminal {
+  position: absolute; right: -40px; top: 50%;
+  transform: translateY(-50%);
+  width: 440px; opacity: 0.3; pointer-events: none;
+}
+
+.hero-terminal pre {
+  font-family: var(--font-mono);
+  font-size: 0.62rem; line-height: 1.65;
+  color: var(--gray-500); user-select: none;
+}
+
+/* ═══════════════════════════════════════════
+   Features
+   ═══════════════════════════════════════════ */
+.features { position: relative; z-index: 1; }
+
+.features-header { text-align: center; margin-bottom: var(--space-16); }
+.features-header .section-subtitle { margin: 0 auto; }
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-5);
+}
+
+.feature-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+  transition: var(--transition-normal);
+  position: relative; overflow: hidden;
+}
+
+.feature-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--color-accent), var(--color-gold), transparent);
+  opacity: 0; transition: var(--transition-normal);
+}
+
+.feature-card:hover {
+  background: var(--color-card-hover);
+  border-color: rgba(74, 90, 122, 0.5);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+
+.feature-card:hover::before { opacity: 1; }
+
+.feature-icon {
+  width: 44px; height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-subtle);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: var(--space-5);
+  font-size: 1.2rem;
+  color: var(--blue-400);
+  border: 1px solid rgba(59, 130, 246, 0.12);
+}
+
+.feature-card h3 {
+  font-size: 1.05rem; font-weight: 600;
+  margin-bottom: var(--space-3); letter-spacing: -0.01em;
+}
+
+.feature-card p {
+  font-size: 0.9rem; color: var(--color-text-secondary); line-height: 1.7;
+}
+
+.feature-tags {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.feature-tag {
+  font-family: var(--font-mono); font-size: 0.68rem;
+  padding: 2px 10px; border-radius: 100px;
+  background: rgba(74, 90, 122, 0.15);
+  color: var(--gray-400);
+  border: 1px solid rgba(74, 90, 122, 0.12);
+}
+
+/* ═══════════════════════════════════════════
+   Architecture
+   ═══════════════════════════════════════════ */
+.architecture { position: relative; z-index: 1; }
+
+.arch-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-16);
+  align-items: center;
+}
+
+.arch-text .section-subtitle { margin-bottom: var(--space-6); }
+
+.arch-list { list-style: none; display: flex; flex-direction: column; gap: var(--space-5); }
+
+.arch-list li { display: flex; gap: var(--space-4); align-items: flex-start; }
+
+.arch-list-num {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-subtle);
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600;
+  color: var(--color-accent);
+}
+
+.arch-list-text h4 { font-size: 0.95rem; font-weight: 600; margin-bottom: 2px; }
+.arch-list-text p { font-size: 0.85rem; color: var(--color-text-secondary); line-height: 1.6; }
+
+/* Architecture Diagram */
+.arch-diagram {
+  background: var(--color-card);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+  position: relative; overflow: hidden;
+}
+
+.arch-diagram-title {
+  font-family: var(--font-mono); font-size: 0.7rem; font-weight: 500;
+  color: var(--gray-500); margin-bottom: var(--space-6);
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+
+.arch-diagram-title::before { content: '// '; color: var(--gray-600); }
+
+.arch-flow { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.arch-node {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: rgba(20, 30, 51, 0.4);
+  border: 1px solid rgba(74, 90, 122, 0.15);
+  transition: var(--transition-fast);
+}
+
+.arch-node:hover {
+  border-color: rgba(59, 130, 246, 0.25);
+  background: rgba(59, 130, 246, 0.04);
+}
+
+.arch-node-icon {
+  width: 32px; height: 32px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem; flex-shrink: 0;
+}
+
+.arch-node-icon.blue   { background: rgba(59, 130, 246, 0.12); color: var(--blue-400); }
+.arch-node-icon.gold   { background: rgba(245, 158, 11, 0.12); color: var(--gold-400); }
+.arch-node-icon.cyan   { background: rgba(6, 182, 212, 0.12); color: var(--cyan-500); }
+.arch-node-icon.purple { background: rgba(139, 92, 246, 0.12); color: #A78BFA; }
+
+.arch-node-info { flex: 1; min-width: 0; }
+.arch-node-info .name { font-size: 0.85rem; font-weight: 600; }
+.arch-node-info .desc { font-size: 0.75rem; color: var(--color-text-tertiary); }
+
+.arch-arrow { text-align: center; color: var(--gray-600); font-size: 0.75rem; padding: 2px 0; }
+
+/* ═══════════════════════════════════════════
+   Stats
+   ═══════════════════════════════════════════ */
+.stats { position: relative; z-index: 1; }
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-5);
+}
+
+.stat-card {
+  text-align: center;
+  padding: var(--space-8);
+  background: var(--color-card);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  transition: var(--transition-fast);
+}
+
+.stat-card:hover {
+  border-color: rgba(74, 90, 122, 0.5);
+  transform: translateY(-2px);
+}
+
+.stat-number {
+  font-size: 2.2rem; font-weight: 800;
+  letter-spacing: -0.02em; margin-bottom: var(--space-2);
+  font-family: var(--font-mono);
+}
+
+.stat-label { font-size: 0.85rem; color: var(--color-text-secondary); font-weight: 500; }
+
+.stat-card .stat-number.blue  { color: var(--blue-400); }
+.stat-card .stat-number.gold  { color: var(--gold-400); }
+.stat-card .stat-number.cyan  { color: var(--cyan-500); }
+.stat-card .stat-number.purple { color: #A78BFA; }
+
+/* ═══════════════════════════════════════════
+   CTA
+   ═══════════════════════════════════════════ */
+.cta { position: relative; z-index: 1; }
+
+.cta-card {
+  background: linear-gradient(135deg,
+    rgba(59, 130, 246, 0.06),
+    rgba(245, 158, 11, 0.04)
+  );
+  border: 1px solid rgba(59, 130, 246, 0.12);
+  border-radius: var(--radius-xl);
+  padding: var(--space-16) var(--space-10);
+  text-align: center;
+  position: relative; overflow: hidden;
+}
+
+.cta-card::before {
+  content: '';
+  position: absolute; top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(59, 130, 246, 0.03),
+    transparent 50%
+  );
+  pointer-events: none;
+}
+
+.cta-card .section-title { margin-bottom: var(--space-4); }
+.cta-card .section-subtitle { margin: 0 auto var(--space-8); }
+
+.cta-actions {
+  display: flex; align-items: center; justify-content: center;
+  gap: var(--space-4); flex-wrap: wrap;
+}
+
+.cmd-snippet {
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  background: var(--black-900);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 20px;
+  font-family: var(--font-mono); font-size: 0.85rem;
+  color: var(--gray-300);
+  cursor: pointer; transition: var(--transition-fast);
+  user-select: all;
+}
+
+.cmd-snippet:hover {
+  border-color: var(--gray-500);
+  box-shadow: var(--shadow-sm);
+}
+
+.cmd-snippet .prompt { color: var(--color-accent); }
+
+.cmd-snippet .cursor {
+  display: inline-block; width: 8px; height: 1.1em;
+  background: var(--color-accent);
+  animation: blink-cursor 1s step-end infinite;
+  vertical-align: text-bottom;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════
+   Footer
+   ═══════════════════════════════════════════ */
+.footer {
+  position: relative; z-index: 1;
+  border-top: 1px solid var(--color-border-subtle);
+  padding: var(--space-10) 0;
+}
+
+.footer-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  max-width: 1200px; margin: 0 auto; padding: 0 var(--space-6);
+}
+
+.footer-copy { font-size: 0.8rem; color: var(--color-text-tertiary); }
+
+.footer-links { display: flex; gap: var(--space-6); list-style: none; }
+
+.footer-links a {
+  color: var(--color-text-tertiary); text-decoration: none;
+  font-size: 0.8rem; transition: var(--transition-fast);
+}
+
+.footer-links a:hover { color: var(--color-text-secondary); }
+
+/* ═══════════════════════════════════════════
+   Animations
+   ═══════════════════════════════════════════ */
+.reveal {
+  opacity: 0; transform: translateY(30px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+
+.reveal.visible { opacity: 1; transform: translateY(0); }
+
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+
+/* ═══════════════════════════════════════════
+   Responsive
+   ═══════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  .features-grid { grid-template-columns: repeat(2, 1fr); }
+  .arch-content { grid-template-columns: 1fr; gap: var(--space-10); }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero-terminal { display: none; }
+}
+
+@media (max-width: 768px) {
+  .section { padding: var(--space-16) 0; }
+
+  .nav-links {
+    display: none;
+    position: absolute; top: 60px; left: 0; right: 0;
+    flex-direction: column; gap: 0;
+    background: rgba(11, 14, 24, 0.98);
+    border-bottom: 1px solid var(--color-border-subtle);
+    padding: var(--space-4) 0;
+  }
+
+  .nav-links.open { display: flex; }
+
+  .nav-links a { padding: var(--space-3) var(--space-6); width: 100%; }
+  .nav-links a::after { display: none; }
+
+  .nav-links .nav-cta {
+    margin: var(--space-3) var(--space-6);
+    justify-content: center;
+  }
+
+  .menu-toggle { display: flex; }
+  .lang-toggle { display: none; }
+
+  .features-grid { grid-template-columns: 1fr; }
+
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: var(--space-3); }
+  .stat-card { padding: var(--space-6); }
+  .stat-number { font-size: 1.6rem; }
+
+  .cta-card { padding: var(--space-10) var(--space-6); }
+
+  .cmd-snippet {
+    font-size: 0.75rem; padding: 8px 14px;
+    width: 100%; justify-content: flex-start; overflow-x: auto;
+  }
+
+  .footer-inner { flex-direction: column; gap: var(--space-4); text-align: center; }
+}
+
+@media (max-width: 480px) {
+  .hero-actions { flex-direction: column; width: 100%; }
+  .hero-actions .btn { width: 100%; justify-content: center; }
+  .stats-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  .reveal { opacity: 1; transform: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- Background -->
+<div class="grid-bg"></div>
+
+<!-- ═══════════ Navigation ═══════════ -->
+<nav class="nav" id="nav">
+  <div class="nav-inner">
+    <a href="#" class="nav-brand">
+      <span class="nav-brand-icon">S</span>
+      Seek-Agent
+    </a>
+    <button class="menu-toggle" id="menuToggle" aria-label="切换菜单">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links" id="navLinks">
+      <li><a href="#features" data-i18n="nav.features">核心能力</a></li>
+      <li><a href="#architecture" data-i18n="nav.arch">架构</a></li>
+      <li><a href="#stats" data-i18n="nav.stats">数据</a></li>
+      <li>
+        <button class="lang-toggle" id="langToggle" aria-label="切换语言">
+          <span class="active">中</span>
+          <span>EN</span>
+        </button>
+      </li>
+      <li><a href="#cta" class="nav-cta" data-i18n="nav.cta">快速开始</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ═══════════ Hero ═══════════ -->
+<section class="hero" id="hero">
+  <div class="container hero-content">
+    <div class="hero-badge">
+      <span class="hero-badge-dot"></span>
+      <span data-i18n="hero.badge">v1.0.0 — AI Agent 运行时</span>
+    </div>
+    <h1 class="hero-title">
+      <span data-i18n="hero.line1">让 AI Agent</span><br>
+      <span class="gradient-text" data-i18n="hero.line2">融入你的 IDE</span>
+    </h1>
+    <p class="hero-desc" data-i18n="hero.desc">
+      Seek-Agent 是一个终端原生的 AI Agent 运行时，深度集成到你的开发环境中。
+      它将自主编码 Agent、工具执行和多模型支持直接带入你的日常工作流。
+    </p>
+    <div class="hero-actions">
+      <a href="#cta" class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <span data-i18n="hero.cta">快速开始</span>
+      </a>
+      <a href="#features" class="btn btn-secondary">
+        <span data-i18n="hero.learn">了解更多</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+      </a>
+    </div>
+  </div>
+
+  <!-- Terminal decoration -->
+  <div class="hero-terminal">
+    <pre>
+┌─ seek-agent ─────────────────────┐
+│ $ agent.run("分析代码仓库")       │
+│                                   │
+│ ◇ 正在扫描模块...                │
+│ ◇ 运行分析中...                  │
+│ ◇ 生成报告...                    │
+│                                   │
+│ ✓ 完成。发现 3 个问题。          │
+│                                   │
+│ $ _                              │
+└──────────────────────────────────┘
+    </pre>
+  </div>
+</section>
+
+<!-- ═══════════ Features ═══════════ -->
+<section class="section features" id="features">
+  <div class="container">
+    <div class="features-header reveal">
+      <div class="section-label" data-i18n="features.label">核心能力</div>
+      <h2 class="section-title" data-i18n="features.title">为<span class="gradient-text">开发者效率</span>而生</h2>
+      <p class="section-subtitle" data-i18n="features.sub">
+        每一项功能都旨在让你保持心流——从智能代码分析到无缝的 IDE 集成。
+      </p>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        </div>
+        <h3 data-i18n="features.f1.title">多模型 AI 支持</h3>
+        <p data-i18n="features.f1.desc">无缝集成 DeepSeek、OpenAI 及兼容模型。无需改变工作流即可热切换模型提供商。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">DeepSeek</span>
+          <span class="feature-tag">OpenAI</span>
+          <span class="feature-tag">Custom</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <h3 data-i18n="features.f2.title">终端原生 TUI</h3>
+        <p data-i18n="features.f2.desc">完整的终端界面，支持 Markdown 渲染、语法高亮和键盘驱动交互。无 Electron 开销。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">TUI</span>
+          <span class="feature-tag">ANSI</span>
+          <span class="feature-tag">键盘</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        </div>
+        <h3 data-i18n="features.f3.title">可扩展工具系统</h3>
+        <p data-i18n="features.f3.desc">动态工具注册、运行时热重载、补丁管理和子 Agent 编排。构建你自己的工具箱。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">热重载</span>
+          <span class="feature-tag">补丁</span>
+          <span class="feature-tag">子 Agent</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        </div>
+        <h3 data-i18n="features.f4.title">IDE 深度集成</h3>
+        <p data-i18n="features.f4.desc">VS Code 扩展支持内联代码编辑、文件系统感知，以及 Agent 与开发者之间的实时协作。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">VS Code</span>
+          <span class="feature-tag">内联编辑</span>
+          <span class="feature-tag">文件感知</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        </div>
+        <h3 data-i18n="features.f5.title">会话管理</h3>
+        <p data-i18n="features.f5.desc">持久化会话支持保存/恢复、内存压缩、上下文折叠，以及跨重启的自动状态管理。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">持久化</span>
+          <span class="feature-tag">压缩</span>
+          <span class="feature-tag">恢复</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </div>
+        <h3 data-i18n="features.f6.title">技能 SDK</h3>
+        <p data-i18n="features.f6.desc">通过简洁的 SDK 创建和分享自定义技能。工具、提示词和工作流被打包为可组合的模块。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">SDK</span>
+          <span class="feature-tag">可组合</span>
+          <span class="feature-tag">可分享</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ Architecture ═══════════ -->
+<section class="section architecture" id="architecture">
+  <div class="container">
+    <div class="arch-content">
+      <div class="arch-text reveal">
+        <div class="section-label" data-i18n="arch.label">系统设计</div>
+        <h2 class="section-title" data-i18n="arch.title">它是如何<span class="gradient-text">工作的</span></h2>
+        <p class="section-subtitle" data-i18n="arch.sub">
+          清晰分层的架构，从终端界面到模型提供商和工具运行时，各层职责分明。
+        </p>
+        <ul class="arch-list">
+          <li>
+            <span class="arch-list-num">01</span>
+            <div class="arch-list-text">
+              <h4 data-i18n="arch.l1.t">终端 UI 层</h4>
+              <p data-i18n="arch.l1.d">事件驱动的 TUI，支持 Markdown 渲染、键盘快捷键和面板管理。</p>
+            </div>
+          </li>
+          <li>
+            <span class="arch-list-num">02</span>
+            <div class="arch-list-text">
+              <h4 data-i18n="arch.l2.t">Agent 运行时</h4>
+              <p data-i18n="arch.l2.d">消息循环含 Hook、内存管理、子 Agent 编排和错误恢复。</p>
+            </div>
+          </li>
+          <li>
+            <span class="arch-list-num">03</span>
+            <div class="arch-list-text">
+              <h4 data-i18n="arch.l3.t">工具系统</h4>
+              <p data-i18n="arch.l3.d">动态工具发现、基于补丁的编辑、参考桌面和热重载技能。</p>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="arch-diagram reveal reveal-delay-2">
+        <div class="arch-diagram-title" data-i18n="arch.flow">数据流</div>
+        <div class="arch-flow">
+          <div class="arch-node">
+            <div class="arch-node-icon blue">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </div>
+            <div class="arch-node-info">
+              <div class="name" data-i18n="arch.n1.t">用户输入</div>
+              <div class="desc" data-i18n="arch.n1.d">终端 → UI.onSubmit</div>
+            </div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-node">
+            <div class="arch-node-icon gold">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </div>
+            <div class="arch-node-info">
+              <div class="name" data-i18n="arch.n2.t">Agent 运行时</div>
+              <div class="desc" data-i18n="arch.n2.d">消息循环 · Hook · 内存</div>
+            </div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-node">
+            <div class="arch-node-icon purple">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div class="arch-node-info">
+              <div class="name" data-i18n="arch.n3.t">模型提供商</div>
+              <div class="desc" data-i18n="arch.n3.d">DeepSeek · OpenAI · 兼容</div>
+            </div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-node">
+            <div class="arch-node-icon blue">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            </div>
+            <div class="arch-node-info">
+              <div class="name" data-i18n="arch.n4.t">工具执行</div>
+              <div class="desc" data-i18n="arch.n4.d">技能 · 补丁 · 桌面 · 子 Agent</div>
+            </div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-node">
+            <div class="arch-node-icon gold">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+            <div class="arch-node-info">
+              <div class="name" data-i18n="arch.n5.t">IDE 与文件系统</div>
+              <div class="desc" data-i18n="arch.n5.d">VS Code · 工作区 · 补丁应用</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ Stats ═══════════ -->
+<section class="section stats" id="stats">
+  <div class="container">
+    <div class="features-header reveal">
+      <div class="section-label" data-i18n="stats.label">数据一览</div>
+      <h2 class="section-title" data-i18n="stats.title">为<span class="gradient-text">规模</span>而建</h2>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card reveal reveal-delay-1">
+        <div class="stat-number blue">40+</div>
+        <div class="stat-label" data-i18n="stats.s1">内置工具</div>
+      </div>
+      <div class="stat-card reveal reveal-delay-2">
+        <div class="stat-number gold">3</div>
+        <div class="stat-label" data-i18n="stats.s2">模型提供商</div>
+      </div>
+      <div class="stat-card reveal reveal-delay-3">
+        <div class="stat-number cyan">2K+</div>
+        <div class="stat-label" data-i18n="stats.s3">核心运行时代码</div>
+      </div>
+      <div class="stat-card reveal reveal-delay-4">
+        <div class="stat-number purple">100%</div>
+        <div class="stat-label" data-i18n="stats.s4">TypeScript</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ CTA ═══════════ -->
+<section class="section cta" id="cta">
+  <div class="container">
+    <div class="cta-card reveal">
+      <div class="section-label" data-i18n="cta.label">开始使用</div>
+      <h2 class="section-title" data-i18n="cta.title">准备好<span class="gradient-text">加速交付</span>了吗？</h2>
+      <p class="section-subtitle" data-i18n="cta.sub">克隆仓库，几分钟内即可开始使用 Seek-Agent 构建。</p>
+      <div class="cta-actions">
+        <div class="cmd-snippet">
+          <span class="prompt">$</span>
+          <span>git clone https://github.com/seek-agent/seek-agent</span>
+          <span class="cursor"></span>
+        </div>
+        <a href="https://github.com" class="btn btn-primary" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          <span data-i18n="cta.github">在 GitHub 上查看</span>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ Footer ═══════════ -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-copy">
+      &copy; 2025 Seek-Agent. MIT License.
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="#" data-i18n="footer.docs">文档</a></li>
+      <li><a href="#" data-i18n="footer.changelog">更新日志</a></li>
+    </ul>
+  </div>
+</footer>
+
+<!-- ═══════════ Scripts ═══════════ -->
+<script>
+// ── i18n 字典 ──
+const i18n = {
+  'zh-CN': {
+    'nav.features': '核心能力',
+    'nav.arch': '架构',
+    'nav.stats': '数据',
+    'nav.cta': '快速开始',
+    'hero.badge': 'v1.0.0 — AI Agent 运行时',
+    'hero.line1': '让 AI Agent',
+    'hero.line2': '融入你的 IDE',
+    'hero.desc': 'Seek-Agent 是一个终端原生的 AI Agent 运行时，深度集成到你的开发环境中。它将自主编码 Agent、工具执行和多模型支持直接带入你的日常工作流。',
+    'hero.cta': '快速开始',
+    'hero.learn': '了解更多',
+    'features.label': '核心能力',
+    'features.title': '为',
+    'features.sub': '每一项功能都旨在让你保持心流——从智能代码分析到无缝的 IDE 集成。',
+    'features.f1.title': '多模型 AI 支持',
+    'features.f1.desc': '无缝集成 DeepSeek、OpenAI 及兼容模型。无需改变工作流即可热切换模型提供商。',
+    'features.f2.title': '终端原生 TUI',
+    'features.f2.desc': '完整的终端界面，支持 Markdown 渲染、语法高亮和键盘驱动交互。无 Electron 开销。',
+    'features.f3.title': '可扩展工具系统',
+    'features.f3.desc': '动态工具注册、运行时热重载、补丁管理和子 Agent 编排。构建你自己的工具箱。',
+    'features.f4.title': 'IDE 深度集成',
+    'features.f4.desc': 'VS Code 扩展支持内联代码编辑、文件系统感知，以及 Agent 与开发者之间的实时协作。',
+    'features.f5.title': '会话管理',
+    'features.f5.desc': '持久化会话支持保存/恢复、内存压缩、上下文折叠，以及跨重启的自动状态管理。',
+    'features.f6.title': '技能 SDK',
+    'features.f6.desc': '通过简洁的 SDK 创建和分享自定义技能。工具、提示词和工作流被打包为可组合的模块。',
+    'arch.label': '系统设计',
+    'arch.title': '它是如何',
+    'arch.sub': '清晰分层的架构，从终端界面到模型提供商和工具运行时，各层职责分明。',
+    'arch.l1.t': '终端 UI 层',
+    'arch.l1.d': '事件驱动的 TUI，支持 Markdown 渲染、键盘快捷键和面板管理。',
+    'arch.l2.t': 'Agent 运行时',
+    'arch.l2.d': '消息循环含 Hook、内存管理、子 Agent 编排和错误恢复。',
+    'arch.l3.t': '工具系统',
+    'arch.l3.d': '动态工具发现、基于补丁的编辑、参考桌面和热重载技能。',
+    'arch.flow': '数据流',
+    'arch.n1.t': '用户输入',
+    'arch.n1.d': '终端 → UI.onSubmit',
+    'arch.n2.t': 'Agent 运行时',
+    'arch.n2.d': '消息循环 · Hook · 内存',
+    'arch.n3.t': '模型提供商',
+    'arch.n3.d': 'DeepSeek · OpenAI · 兼容',
+    'arch.n4.t': '工具执行',
+    'arch.n4.d': '技能 · 补丁 · 桌面 · 子 Agent',
+    'arch.n5.t': 'IDE 与文件系统',
+    'arch.n5.d': 'VS Code · 工作区 · 补丁应用',
+    'stats.label': '数据一览',
+    'stats.title': '为',
+    'stats.s1': '内置工具',
+    'stats.s2': '模型提供商',
+    'stats.s3': '核心运行时代码',
+    'stats.s4': 'TypeScript',
+    'cta.label': '开始使用',
+    'cta.title': '准备好',
+    'cta.sub': '克隆仓库，几分钟内即可开始使用 Seek-Agent 构建。',
+    'cta.github': '在 GitHub 上查看',
+    'footer.docs': '文档',
+    'footer.changelog': '更新日志',
+  },
+  en: {
+    'nav.features': 'Features',
+    'nav.arch': 'Architecture',
+    'nav.stats': 'Stats',
+    'nav.cta': 'Get Started',
+    'hero.badge': 'v1.0.0 — AI Agent Runtime',
+    'hero.line1': 'Run AI Agents',
+    'hero.line2': 'Inside Your IDE',
+    'hero.desc': 'Seek-Agent is a terminal-native AI agent runtime with deep IDE integration. It brings autonomous coding agents, tool execution, and multi-model support directly into your development workflow.',
+    'hero.cta': 'Get Started',
+    'hero.learn': 'Learn More',
+    'features.label': 'Core Capabilities',
+    'features.title': 'Built for ',
+    'features.sub': 'Every feature designed to keep you in flow — from intelligent code analysis to seamless IDE integration.',
+    'features.f1.title': 'Multi-Provider AI',
+    'features.f1.desc': 'Seamless integration with DeepSeek, OpenAI, and compatible models. Hot-swap providers without changing your workflow.',
+    'features.f2.title': 'Terminal-Native TUI',
+    'features.f2.desc': 'Full terminal UI with markdown rendering, syntax highlighting, and keyboard-driven interactions. No Electron overhead.',
+    'features.f3.title': 'Extensible Tool System',
+    'features.f3.desc': 'Dynamic tool registration, runtime hot-reload, patch management, and sub-agent orchestration. Build your own toolchain.',
+    'features.f4.title': 'IDE Integration',
+    'features.f4.desc': 'VS Code extension with inline code editing, file system awareness, and real-time collaboration between agent and developer.',
+    'features.f5.title': 'Session Management',
+    'features.f5.desc': 'Persistent sessions with save/restore, memory compression, context folding, and automatic state management across restarts.',
+    'features.f6.title': 'Skill SDK',
+    'features.f6.desc': 'Create and share custom skills with a simple SDK. Tools, prompts, and workflows are packaged as composable modules.',
+    'arch.label': 'System Design',
+    'arch.title': 'How It ',
+    'arch.sub': 'A layered architecture that separates concerns cleanly, from the terminal interface down to the model provider and tool runtime.',
+    'arch.l1.t': 'Terminal UI Layer',
+    'arch.l1.d': 'Event-driven TUI with markdown rendering, keyboard shortcuts, and panel management.',
+    'arch.l2.t': 'Agent Runtime',
+    'arch.l2.d': 'Message loop with hooks, memory management, sub-agent orchestration, and error recovery.',
+    'arch.l3.t': 'Tool System',
+    'arch.l3.d': 'Dynamic tool discovery, patch-based editing, desk reference, and hot-reloadable skills.',
+    'arch.flow': 'Data Flow',
+    'arch.n1.t': 'User Input',
+    'arch.n1.d': 'Terminal → UI.onSubmit',
+    'arch.n2.t': 'Agent Runtime',
+    'arch.n2.d': 'Message loop · Hooks · Memory',
+    'arch.n3.t': 'Model Provider',
+    'arch.n3.d': 'DeepSeek · OpenAI · Compatible',
+    'arch.n4.t': 'Tool Execution',
+    'arch.n4.d': 'Skills · Patch · Desk · Sub-Agents',
+    'arch.n5.t': 'IDE & File System',
+    'arch.n5.d': 'VS Code · Workspace · Patch Apply',
+    'stats.label': 'By the Numbers',
+    'stats.title': 'Built for ',
+    'stats.s1': 'Built-in Tools',
+    'stats.s2': 'Model Providers',
+    'stats.s3': 'Core Runtime Lines',
+    'stats.s4': 'TypeScript',
+    'cta.label': 'Get Started',
+    'cta.title': 'Ready to ',
+    'cta.sub': 'Clone the repository and start building with Seek-Agent in minutes.',
+    'cta.github': 'View on GitHub',
+    'footer.docs': 'Documentation',
+    'footer.changelog': 'Changelog',
+  }
+};
+
+// ── 当前语言 ──
+let currentLang = 'zh-CN';
+
+function updateLang(lang) {
+  currentLang = lang;
+  const dict = i18n[lang];
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (dict[key] !== undefined) {
+      // 处理渐变标题：保留内部的 gradient-text 结构
+      const gradSpan = el.querySelector('.gradient-text');
+      if (gradSpan) {
+        // 替换文本节点，保留子元素
+        const text = dict[key];
+        const parts = text.split(/\s*<span/);
+        if (parts.length > 1) {
+          // 有占位，重建结构
+          const beforeText = text.substring(0, text.indexOf('<span'));
+          const afterText = text.substring(text.indexOf('</span>') + 7);
+          el.childNodes.forEach((node, i) => {
+            if (node.nodeType === 3) {
+              if (i === 0 && beforeText) node.textContent = beforeText;
+              else if (i === el.childNodes.length - 1 && afterText) node.textContent = afterText;
+            }
+          });
+        } else {
+          el.childNodes.forEach((node, i) => {
+            if (node.nodeType === 3) {
+              node.textContent = text;
+            }
+          });
+        }
+      } else {
+        el.textContent = dict[key];
+      }
+    }
+  });
+
+  // 更新语言切换按钮状态
+  document.querySelectorAll('.lang-toggle span').forEach(s => s.classList.remove('active'));
+  const idx = lang === 'zh-CN' ? 0 : 1;
+  document.querySelectorAll('.lang-toggle span')[idx]?.classList.add('active');
+
+  // 更新 HTML lang
+  document.documentElement.lang = lang === 'zh-CN' ? 'zh-CN' : 'en';
+}
+
+// ── Nav scroll effect ──
+const nav = document.getElementById('nav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('scrolled', window.pageYOffset > 50);
+}, { passive: true });
+
+// ── Mobile menu ──
+const menuToggle = document.getElementById('menuToggle');
+const navLinks = document.getElementById('navLinks');
+
+menuToggle.addEventListener('click', () => navLinks.classList.toggle('open'));
+navLinks.querySelectorAll('a').forEach(link => {
+  link.addEventListener('click', () => navLinks.classList.remove('open'));
+});
+
+// ── Lang toggle ──
+document.getElementById('langToggle').addEventListener('click', () => {
+  updateLang(currentLang === 'zh-CN' ? 'en' : 'zh-CN');
+});
+
+// ── Scroll reveal ──
+const revealObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+      revealObserver.unobserve(entry.target);
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+
+document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+// ── Smooth scroll ──
+document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+  anchor.addEventListener('click', (e) => {
+    const href = anchor.getAttribute('href');
+    if (href === '#') return;
+    e.preventDefault();
+    const target = document.querySelector(href);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+
+// ── Copy command ──
+document.querySelectorAll('.cmd-snippet').forEach(el => {
+  el.addEventListener('click', async () => {
+    const text = Array.from(el.querySelectorAll('span'))
+      .filter(s => !s.classList.contains('prompt') && !s.classList.contains('cursor'))
+      .map(s => s.textContent)
+      .join('')
+      .trim();
+    try {
+      await navigator.clipboard.writeText(text);
+      const original = el.innerHTML;
+      el.innerHTML = '<span style="color: #3B82F6; font-weight: 600;">✓ Copied!</span>';
+      setTimeout(() => { el.innerHTML = original; }, 1500);
+    } catch { /* fallback */ }
+  });
+});
+</script>
+</body>
+</html>
