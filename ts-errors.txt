@@ -1,0 +1,65 @@
+npm warn Unknown env config "npm-globalconfig". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "onlybuiltdependencies". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "verify-deps-before-run". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "_jsr-registry". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "onlyBuiltDependencies". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown project config "package-manager-strict". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+src/electron-bridge.ts(8,1): error TS6133: 'randomUUID' is declared but its value is never read.
+src/electron-bridge.ts(72,10): error TS6133: 'thinkingActive' is declared but its value is never read.
+src/electron-bridge.ts(73,10): error TS6133: 'listenActiveName' is declared but its value is never read.
+src/index.ts(14,15): error TS2339: Property 'name' does not exist on type '{}'.
+src/index.ts(14,63): error TS2339: Property 'message' does not exist on type '{}'.
+src/test-opencode.ts(3,10): error TS6133: 'generateText' is declared but its value is never read.
+src/tools/desk-edit.ts(11,10): error TS6133: 'tool' is declared but its value is never read.
+src/tools/desk-edit.ts(12,1): error TS6133: 'z' is declared but its value is never read.
+src/tools/desk-edit.ts(14,1): error TS6133: 'path' is declared but its value is never read.
+src/tools/inner_skills/code-reader/scripts/jump-to-definition.ts(8,31): error TS6133: 'getSupportedFileTypes' is declared but its value is never read.
+src/tools/inner_skills/github-docx-official/index.ts(21,16): error TS6133: 'runPython' is declared but its value is never read.
+src/tools/inner_skills/icon-lib/scripts/get-icon-detail.ts(4,8): error TS2300: Duplicate identifier 'fs'.
+src/tools/inner_skills/icon-lib/scripts/get-icon-detail.ts(5,8): error TS2300: Duplicate identifier 'fs'.
+src/tools/inner_skills/icon-lib/scripts/list-all-icons.ts(36,39): error TS6133: 'groupKey' is declared but its value is never read.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(52,19): error TS2322: Type '(pkg: string, modId: string, modName: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(68,24): error TS2322: Type '(pkg: string, modId: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(81,25): error TS2322: Type '(pkg: string, modId: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(96,23): error TS2322: Type '(pkg: string, modId: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(121,23): error TS2322: Type '(modId: string, modName: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(142,18): error TS2322: Type '(modId: string, modName: string, pkg: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(171,19): error TS2322: Type '(pkg: string, modId: string, modName: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(187,24): error TS2322: Type '(pkg: string, modId: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(201,25): error TS2322: Type '(pkg: string, modId: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(216,23): error TS2322: Type '(pkg: string, modId: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(241,23): error TS2322: Type '(modId: string, modName: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(262,18): error TS2322: Type '(modId: string, modName: string, pkg: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(291,19): error TS2322: Type '(pkg: string, modId: string, modName: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(309,24): error TS2322: Type '(pkg: string, modId: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(324,25): error TS2322: Type '(pkg: string, modId: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(324,39): error TS6133: 'modId' is declared but its value is never read.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(333,23): error TS2322: Type '(pkg: string, modId: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(357,23): error TS2322: Type '(_modId: string, _modName: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(358,18): error TS2322: Type '(modId: string, modName: string, pkg: string) => string' is not assignable to type 'string'.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(409,27): error TS2349: This expression is not callable.
+  Type 'String' has no call signatures.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(413,27): error TS2349: This expression is not callable.
+  Type 'String' has no call signatures.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(417,27): error TS2349: This expression is not callable.
+  Type 'String' has no call signatures.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(421,27): error TS2349: This expression is not callable.
+  Type 'String' has no call signatures.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(425,27): error TS2349: This expression is not callable.
+  Type 'String' has no call signatures.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-project-scaffold.ts(429,27): error TS2349: This expression is not callable.
+  Type 'String' has no call signatures.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-register-block.ts(234,58): error TS6133: 'packageName' is declared but its value is never read.
+src/tools/inner_skills/mc-mod-helper/scripts/mc-register-item.ts(35,56): error TS6133: 'packageName' is declared but its value is never read.
+src/tools/inner_skills/pdf-reader/scripts/pdf-image.ts(6,28): error TS6196: 'PageImages' is declared but never used.
+src/tools/inner_skills/skill-creator/scripts/create-skill.ts(37,21): error TS6133: 'skillName' is declared but its value is never read.
+src/tools/inner_skills/skill-creator/scripts/create-skill.ts(270,73): error TS2345: Argument of type '{ name: string; type: "string" | "number" | "boolean"; description: string; }[]' is not assignable to parameter of type '{ name: string; type: string; desc: string; }[]'.
+  Property 'desc' is missing in type '{ name: string; type: "string" | "number" | "boolean"; description: string; }' but required in type '{ name: string; type: string; desc: string; }'.
+src/tools/inner_skills/skill-manager/translation.ts(5,3): error TS2322: Type '"system"' is not assignable to type '"read" | "search" | "exec" | "file" | "patch" | "desk" | "other"'.
+src/tools/inner_skills/skill-manager/translation.ts(13,3): error TS2322: Type '"system"' is not assignable to type '"read" | "search" | "exec" | "file" | "patch" | "desk" | "other"'.
+src/tools/inner_skills/skill-manager/translation.ts(20,3): error TS2322: Type '"system"' is not assignable to type '"read" | "search" | "exec" | "file" | "patch" | "desk" | "other"'.
+src/tools/raw-bulk-formatters.ts(123,30): error TS2339: Property 'description' does not exist on type 'DeskBulk'.
+src/tools/search-files.ts(52,10): error TS6133: 'parseNameList' is declared but its value is never read.
+src/tools/todo-state.ts(8,27): error TS2307: Cannot find module './inner_skills/todo-manager/data' or its corresponding type declarations.
+src/ui.ts(293,10): error TS6133: 'timestamp' is declared but its value is never read.
+src/ui.ts(1648,49): error TS7006: Parameter 's' implicitly has an 'any' type.

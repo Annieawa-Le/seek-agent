@@ -1,17 +1,12 @@
 /**
  * ref-desk.ts — 参考桌面管理工具
- *
- * 让主模型可以主动管理 RefDesk（参考桌面）中的文件引用，
- * 将关键文件"钉"在上下文中，避免被记忆清理机制冲掉。
  */
 
 import { tool } from 'ai';
 import { z } from 'zod';
 import { refDesk } from './ref-desk-core';
-
-// ═════════════════════════════════════════════════════
-// desk_add
-// ═════════════════════════════════════════════════════
+import { ToolOutput } from './tool-output';
+import type { DeskBulk } from './raw-bulk-types';
 
 export const deskAddTool = tool({
   description: [
@@ -27,13 +22,11 @@ export const deskAddTool = tool({
   }),
   execute: async ({ filePath, content }) => {
     refDesk.set(filePath, content, Date.now());
-    return `✅ 已将 ${filePath} 加入参考桌面（${content.length} 字符）`;
+    const msg = `✅ 已将 ${filePath} 加入参考桌面（${content.length} 字符）`;
+    const bulk: DeskBulk = { type: 'desk', action: 'add', filePath, totalCount: refDesk.getAll().length };
+    return new ToolOutput(bulk, msg);
   },
 });
-
-// ═════════════════════════════════════════════════════
-// desk_list
-// ═════════════════════════════════════════════════════
 
 export const deskListTool = tool({
   description: '列出当前「参考桌面」上所有已注册的文件条目，含文件路径和字符数摘要。',
@@ -41,18 +34,18 @@ export const deskListTool = tool({
   execute: async () => {
     const all = refDesk.getAll();
     if (all.length === 0) {
-      return '📭 参考桌面上没有任何文件。';
+      const bulk: DeskBulk = { type: 'desk', action: 'list', totalCount: 0 };
+      return new ToolOutput(bulk, '📭 参考桌面上没有任何文件。');
     }
-    const lines = all.map((entry, i) => {
-      return `${i + 1}. ${entry.filePath}（${entry.content.length} 字符）`;
-    });
-    return `📋 参考桌面（共 ${all.length} 项）：\n${lines.join('\n')}`;
+    const lines = all.map((entry, i) => `${i + 1}. ${entry.filePath}（${entry.content.length} 字符）`);
+    const msg = `📋 参考桌面（共 ${all.length} 项）：\n${lines.join('\n')}`;
+    const bulk: DeskBulk = {
+      type: 'desk', action: 'list', totalCount: all.length,
+      entries: all.map(e => ({ filePath: e.filePath, charCount: e.content.length })),
+    };
+    return new ToolOutput(bulk, msg);
   },
 });
-
-// ═════════════════════════════════════════════════════
-// desk_remove
-// ═════════════════════════════════════════════════════
 
 export const deskRemoveTool = tool({
   description: '从「参考桌面」中移除指定文件路径的条目，不再自动注入上下文。',
@@ -62,15 +55,15 @@ export const deskRemoveTool = tool({
   execute: async ({ filePath }) => {
     if (refDesk.has(filePath)) {
       refDesk.remove(filePath);
-      return `✅ 已将 ${filePath} 从参考桌面移除。`;
+      const msg = `✅ 已将 ${filePath} 从参考桌面移除。`;
+      const bulk: DeskBulk = { type: 'desk', action: 'remove', filePath, totalCount: refDesk.getAll().length };
+      return new ToolOutput(bulk, msg);
     }
-    return `⚠ 参考桌面上未找到 ${filePath}，无需移除。`;
+    const msg = `⚠ 参考桌面上未找到 ${filePath}，无需移除。`;
+    const bulk: DeskBulk = { type: 'desk', action: 'remove', filePath, totalCount: refDesk.getAll().length };
+    return new ToolOutput(bulk, msg);
   },
 });
-
-// ═════════════════════════════════════════════════════
-// desk_clear
-// ═════════════════════════════════════════════════════
 
 export const deskClearTool = tool({
   description: '清空整个「参考桌面」，移除所有已注册的文件条目。',
@@ -78,7 +71,8 @@ export const deskClearTool = tool({
   execute: async () => {
     const count = refDesk.getAll().length;
     refDesk.clear();
-    return `✅ 已清空参考桌面（移除了 ${count} 项）。`;
+    const msg = `✅ 已清空参考桌面（移除了 ${count} 项）。`;
+    const bulk: DeskBulk = { type: 'desk', action: 'clear', totalCount: 0 };
+    return new ToolOutput(bulk, msg);
   },
 });
-

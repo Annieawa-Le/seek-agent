@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { ansiToHtml } from './assets/tool-translations-web';
+import { toWebUI } from './tools/raw-bulk-formatters';
 import { friendlyToolCallLabel } from './assets/tool-translations';
 import type { UIMessage } from './ui';
 
@@ -24,6 +25,8 @@ export interface BridgeMessage {
  doNotRender?: boolean;
  /** 工具结果的完整原始输出（未截断的原始内容） */
  fullOutput?: string;
+  /** 结构化功能数据（工具结果，供多端消费） */
+  rawBulk?: Record<string, unknown>;
 }
 
 // ═════════════════════════════════════════════════════
@@ -32,7 +35,7 @@ export interface BridgeMessage {
 
 /** 子进程 → 主进程 */
 export type ChildToParent =
-  | { type: 'message'; role: BridgeMessage['role']; content: string; subagentName?: string; toolMeta?: BridgeMessage['toolMeta']; toolCallHtml?: string; toolResultHtml?: string; fullOutput?: string }
+  | { type: 'message'; role: BridgeMessage['role']; content: string; subagentName?: string; toolMeta?: BridgeMessage['toolMeta']; toolCallHtml?: string; toolResultHtml?: string; fullOutput?: string; rawBulk?: Record<string, unknown> }
   | { type: 'state'; processing: boolean }
   | { type: 'context'; chars: number; tokens: number }
   | { type: 'tool-call'; count: number }
@@ -119,18 +122,22 @@ export class ElectronUIBridge {
  this.send({ type: 'message', role: 'agent', content });
  }
 
- addToolMessage(content: string, toolMeta?: { toolName: string; args: Record<string, unknown> }, fullOutput?: string): void {
- let toolCallHtml: string | undefined;
- let toolResultHtml: string | undefined;
- if (toolMeta) {
- toolCallHtml = ansiToHtml(friendlyToolCallLabel(toolMeta.toolName, toolMeta.args));
- } else {
- // 工具结果——content 是 friendlyToolResultLabel 输出，含 ANSI 码
- toolResultHtml = ansiToHtml(content);
- }
- this.messages.push({ role: 'tool', content, toolMeta, fullOutput, createdAt: Date.now() });
- this.send({ type: 'message', role: 'tool', content, toolMeta, toolCallHtml, toolResultHtml, fullOutput });
- }
+  addToolMessage(content: string, toolMeta?: { toolName: string; args: Record<string, unknown> }, fullOutput?: string, rawBulk?: Record<string, unknown>): void {
+  let toolCallHtml: string | undefined;
+  let toolResultHtml: string | undefined;
+  if (toolMeta) {
+  toolCallHtml = ansiToHtml(friendlyToolCallLabel(toolMeta.toolName, toolMeta.args));
+  } else if (rawBulk) {
+  // rawBulk 存在时用 WebUI 格式化器生成结构化 HTML
+  const webUIResult = toWebUI(rawBulk as any);
+  toolResultHtml = (webUIResult as any).html as string;
+  } else {
+  // 工具结果——content 是 friendlyToolResultLabel 输出，含 ANSI 码
+  toolResultHtml = ansiToHtml(content);
+  }
+  this.messages.push({ role: 'tool', content, toolMeta, fullOutput, rawBulk, createdAt: Date.now() });
+  this.send({ type: 'message', role: 'tool', content, toolMeta, toolCallHtml, toolResultHtml, fullOutput, rawBulk });
+  }
 
  addSystemMessage(content: string): void {
  this.messages.push({ role: 'system', content, createdAt: Date.now() });
@@ -324,5 +331,10 @@ export class ElectronUIBridge {
  this.send({ type: 'init-done' });
  }
 }
+
+
+
+
+
 
 

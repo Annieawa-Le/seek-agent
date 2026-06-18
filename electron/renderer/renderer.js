@@ -545,16 +545,12 @@ function renderToolDisplay(contentEl) {
     if (callEl) callEl.textContent = entry.toolName;
     var resultEl = toolContainer.querySelector('.agent-tool-result');
     if (resultEl) {
-      if (entry.fullOutput) {
-        // 有完整原始输出 → 直接渲染可滚动容器
-        resultEl.style.opacity = '1';
+      if (entry.resultHtml) {
+        // 有结构化 HTML → 传入 addToolResultExpand 处理折叠展开
         addToolResultExpand(resultEl, entry);
-      } else if (entry.resultHtml) {
-        resultEl.innerHTML = entry.resultHtml;
-        resultEl.style.opacity = '1';
-      } else {
-        resultEl.textContent = '执行中...';
-        resultEl.style.opacity = '0.6';
+      } else if (entry.fullOutput) {
+        // 旧格式：纯文本
+        addToolResultExpand(resultEl, entry);
       }
     }
   }
@@ -633,6 +629,55 @@ function addToolResultExpand(resultEl, entry) {
   // 计算内容行数
   var fullText = entry.fullOutput || '';
   var lines = fullText.split('\n').length;
+function addToolResultExpand(resultEl, entry) {
+  var fullText = entry.fullOutput || '';
+  var lines = fullText.split('\n').length;
+
+  var wrapper = document.createElement('div');
+  wrapper.className = 'tool-result-scroll-wrap';
+
+  var scrollContainer = document.createElement('div');
+  scrollContainer.className = 'tool-result-scroll-container';
+
+  if (entry.resultHtml) {
+    // 结构化 HTML 渲染
+    scrollContainer.innerHTML = entry.resultHtml;
+  } else {
+    // 纯文本渲染
+    var pre = document.createElement('pre');
+    pre.className = 'tool-result-pre';
+    pre.textContent = fullText;
+    scrollContainer.appendChild(pre);
+  }
+  wrapper.appendChild(scrollContainer);
+
+  if (lines > 8) {
+    wrapper.classList.add('collapsed');
+    // 浮动展开按钮
+    var toggleBtn = document.createElement('button');
+    toggleBtn.className = 'tool-result-toggle';
+    toggleBtn.textContent = '\u25bc';
+    toggleBtn.title = '展开全部 (' + lines + ' 行)';
+    toggleBtn.addEventListener('click', function() {
+      var isCollapsed = wrapper.classList.contains('collapsed');
+      if (isCollapsed) {
+        wrapper.classList.remove('collapsed');
+        wrapper.classList.add('expanded');
+        toggleBtn.textContent = '\u25b2';
+        toggleBtn.title = '收起';
+      } else {
+        wrapper.classList.remove('expanded');
+        wrapper.classList.add('collapsed');
+        toggleBtn.textContent = '\u25bc';
+        toggleBtn.title = '展开全部 (' + lines + ' 行)';
+      }
+    });
+    wrapper.appendChild(toggleBtn);
+  }
+  resultEl.innerHTML = '';
+  resultEl.appendChild(wrapper);
+  resultEl.style.opacity = '1';
+}
 
   var wrapper = document.createElement('div');
   wrapper.className = 'tool-result-scroll-wrap';
@@ -1245,6 +1290,9 @@ if (document.getElementById('session-list')) {
 if (document.querySelector('.panel-tab')) {
   initRightPanel();
 }
+
+
+
 
 
 

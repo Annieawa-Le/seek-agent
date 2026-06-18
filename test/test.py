@@ -1,3 +1,5 @@
+# 这是由 patch 工具添加的测试注释
+# 测试注释代码 - 由 patch 工具添加
 # A - 被 modify_patch 改过了
 """
 测试 patch 工具全家桶。
@@ -107,3 +109,5 @@ finally:
 
 
 # add_patch 测试：追加到末尾
+
+

@@ -1,4 +1,5 @@
 import { getToolTranslation } from './assets/tool-translations';
+import type { RawBulk } from './tools/raw-bulk-types';
 import { getActiveTodo, getTodos } from './tools/todo-state';
 import { getPanelProviders } from './tools/panel-registry';
 import { WHALE } from './assets/whale.js';
@@ -308,6 +309,8 @@ export interface UIMessage {
   collapsed?: boolean;
   /** 工具元信息（折叠时用于渲染工具名和参数） */
   toolMeta?: { toolName: string; args: Record<string, unknown> };
+  /** 结构化功能数据（工具结果，供多端消费） */
+  rawBulk?: RawBulk;
   /** 标记为「不渲染」，用于移除已折叠工具的调用消息而不影响其他索引 */
   doNotRender?: boolean;
 }
@@ -960,12 +963,11 @@ export class TerminalUI {
     this.refreshDisplay();
   }
 
-  addToolMessage(content: string, toolMeta?: { toolName: string; args: Record<string, unknown> }, _fullOutput?: string): void {
-    this.messages.push({ role: 'tool', content, toolMeta, createdAt: Date.now() });
+  addToolMessage(content: string, toolMeta?: { toolName: string; args: Record<string, unknown> }, _fullOutput?: string, rawBulk?: RawBulk): void {
+    this.messages.push({ role: 'tool', content, toolMeta, rawBulk, createdAt: Date.now() });
     if (this.isAtBottom()) this.scrollOffset = 0;
     this.refreshDisplay();
   }
-
   /** 批量折叠指定工具消息（轮后折叠）
    * 将消息标记为折叠态，折叠时一并标记前面的「调用中」消息为不渲染，
    * 避免同一工具的名称+参数显示两遍。
@@ -1752,6 +1754,11 @@ export class TerminalUI {
     out.write(cursorTo(row, 1) + BG.white + displayText + eraseLine(0));
   }
 }
+
+
+
+
+
 
 
 

@@ -1,3 +1,5 @@
+import { ToolOutput } from './tool-output';
+import type { ExecBulk } from './raw-bulk-types';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { exec } from 'child_process';
@@ -10,7 +12,7 @@ const execPromise = promisify(exec);
 export const executeCommandTool = tool({
   description: '在终端执行一条系统命令（仅限于工作区目录内），并返回输出。',
   inputSchema: z.object({ command: z.string() }),
-  execute: async ({ command }) : Promise<string>=> {
+  execute: async ({ command }) => {
     try {
       // 关键：以 buffer 形式获取原始输出
       const { stdout, stderr } = await execPromise(command, {
@@ -32,7 +34,14 @@ export const executeCommandTool = tool({
       }
 
       const truncated = output.slice(0, 5000);
-      return truncated;
+      const execBulk: ExecBulk = {
+        type: 'exec',
+        command,
+        stdout: decode(stdout),
+        stderr: decode(stderr),
+        truncated: output.length > 5000,
+      };
+      return new ToolOutput(execBulk, truncated);
     } catch (error: any) {
       // 从 error 中获取 stderr/stdout Buffer
       const stderrBuf = error.stderr as Buffer;
@@ -48,9 +57,19 @@ export const executeCommandTool = tool({
       if (!errorOutput) {
         errorOutput = error.message || '未知错误';
       }
-      return `命令执行失败: ${errorOutput.slice(0, 5000)}`;
+      const errorText = errorOutput.slice(0, 5000);
+      const execBulk: ExecBulk = {
+        type: 'exec',
+        command,
+        stdout: stdoutBuf?.length ? iconv.decode(stdoutBuf, 'gbk') : '',
+        stderr: stderrBuf?.length ? iconv.decode(stderrBuf, 'gbk') : '',
+        truncated: true,
+        error: errorText,
+      };
+      return new ToolOutput(execBulk, `命令执行失败: ${errorText}`);
     }
   },
 });
+
 
 

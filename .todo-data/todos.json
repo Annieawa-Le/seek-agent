@@ -1,1 +1,46 @@
-[]
+[
+  {
+    "name": "raw_bulk_migration",
+    "steps": [
+      {
+        "content": "1-7. 基础设施 + 两端消费层 ✅",
+        "completed": false
+      },
+      {
+        "content": "8. 迁移 coreTools 返回 ToolOutput ✅",
+        "completed": false
+      },
+      {
+        "content": "9. 迁移 inner_skills ⏭️ 跳过",
+        "completed": false
+      },
+      {
+        "content": "10. 重写 WebUI 格式化渲染器 ✅",
+        "completed": false
+      },
+      {
+        "content": "11. 端到端验证 ⬅️ 待做",
+        "completed": false
+      }
+    ],
+    "createdAt": "2026-06-17T15:43:37.829Z"
+  },
+  {
+    "name": "webui渲染优化",
+    "steps": [
+      {
+        "content": "代码高亮：代码块以对应语法形式渲染高亮（prism/highlight.js）",
+        "completed": false
+      },
+      {
+        "content": "inner_skills rawBulk 迁移：补齐之前跳过的 Step 9",
+        "completed": false
+      },
+      {
+        "content": "HTML 优化接口：优化 toWebUI 接口和 renderer 渲染架构",
+        "completed": false
+      }
+    ],
+    "createdAt": "2026-06-17T16:01:27.122Z"
+  }
+]

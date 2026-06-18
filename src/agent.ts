@@ -16,6 +16,7 @@ import {
 } from './assets/tool-translations';
 import { toolCache } from './tools/tool-cache';
 import { triggerListenInterceptors, triggerResultListenInterceptors, drainPendingInjections, subAgentManager } from './tools/inner_skills/sub-agent/manager';
+import { extractBulk } from './tools/tool-output';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -558,26 +559,28 @@ export class CLIAAgent {
         // 拦截失败不影响工具执行
       }
       // ── 执行 ──
-      let output: string;
+      let execResult: unknown;
       try {
-        output = await toolImpl.execute(args as any, {
+        execResult = await toolImpl.execute(args as any, {
           toolCallId: toolCall.toolCallId,
           messages: this.messages,
-        }) as string;
+        });
       } catch (execError: any) {
-        output = `执行错误: ${execError.message}`;
+        execResult = `执行错误: ${execError.message}`;
       }
 
       // ── 非缓存调用才计入实际计数 ──
       this.roundActualToolCalls += 1;
       this.ui.setToolCallCount(this.roundActualToolCalls);
 
-
-      const sout = String(output);
+      // ── 提取 rawBulk 和 AI 文本 ──
+      const extracted = extractBulk(execResult);
+      const sout = String(extracted.text);
+      const rawBulk = extracted.rawBulk ?? undefined;
 
       // ── 记录轮后折叠索引（在 addToolMessage 前获取即将占用的索引） ──
       const resultMsgIdx = this.ui.messages.length;
-      this.ui.addToolMessage(friendlyToolResultLabel(toolName, args, sout), void 0, sout);
+      this.ui.addToolMessage(friendlyToolResultLabel(toolName, args, sout), void 0, sout, rawBulk);
 
       // ── 标记为轮后折叠 ──
       if (getToolCollapse(toolName) === 'after-round') {
@@ -869,6 +872,9 @@ export class CLIAAgent {
     }
   }
 }
+
+
+
 
 
 

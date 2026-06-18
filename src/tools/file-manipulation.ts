@@ -4,6 +4,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { resolvePath, assertPathInWorkspace } from '../workdir.js';
 import { patchStaging, PendingPatch } from './patch-staging';
+import { ToolOutput } from './tool-output';
+import type { FileWriteBulk, PatchStagingBulk } from './raw-bulk-types';
 
 
 // ============================================================
@@ -209,12 +211,10 @@ function groupIntoBatches(patches: PendingPatch[]): PendingPatch[][] {
 
 /** 找出现有 patches 中最后一个 resume 之后的所有 patch（即新 resume=false patch 所在的批次成员） */
 function getCurrentBatchPatches(existing: PendingPatch[]): PendingPatch[] {
-  // 从后往前找最后一个 resume=true 的位置
   let lastResumeIdx = -1;
   for (let i = existing.length - 1; i >= 0; i--) {
     if (existing[i].resume) { lastResumeIdx = i; break; }
   }
-  // 如果没有 resume，返回全部（batch 0）
   if (lastResumeIdx === -1) return existing;
   return existing.slice(lastResumeIdx);
 }
@@ -343,12 +343,6 @@ function applyBatchToLines(batch: PendingPatch[], lines: string[]): { lines: str
 
 /**
  * 将同一个文件的所有暂存补丁按批次应用到磁盘。
- *
- * 批次划分规则：
- *   - 所有 patch 按添加顺序排列
- *   - 遇到 resume=true 的 patch 时，之前的所有 patch 为一批，此 patch 开始新一批
- *   - 每批内的 patch 从底部向上处理（基于该批开始时的文件状态）
- *   - 批次之间顺序叠加（批 N 的输出是批 N+1 的输入）
  */
 export async function applyPatchesToFile(
   filePath: string,
@@ -362,8 +356,6 @@ export async function applyPatchesToFile(
 
   for (let bi = 0; bi < batches.length; bi++) {
     const batch = batches[bi];
-
-    // 验证该批的每个 patch 是否在当前文件状态中合法
     const valid: PendingPatch[] = [];
     for (const p of batch) {
       const err = validatePatchLines(p, currentLines.length);
@@ -374,11 +366,7 @@ export async function applyPatchesToFile(
       }
     }
     if (valid.length === 0) continue;
-
-    if (bi > 0) {
-      allResults.push(`  ── 批次 ${bi + 1}（resume）──`);
-    }
-
+    if (bi > 0) allResults.push(`  ── 批次 ${bi + 1}（resume）──`);
     const result = applyBatchToLines(valid, currentLines);
     currentLines = result.lines;
     allResults.push(...result.results);
@@ -386,7 +374,6 @@ export async function applyPatchesToFile(
 
   await writeFileLines(filePath, currentLines, hasTrailingNewline, lineEnding);
   allResults.push(`  💾 已写入文件：${filePath}（${originalLines.length} → ${currentLines.length} 行）`);
-
   return allResults;
 }
 
@@ -394,12 +381,7 @@ export async function applyPatchesToFile(
 // 预览辅助：模拟所有先前 patch 后的文件状态
 // ============================================================
 
-/**
- * 获取用于预览的基准行数组。
- * - resume=false → 直接读取原始文件
- * - resume=true  → 模拟暂存区中当前文件所有先前 patch（按批次）后的状态
- */
-async function getPreviewBaseLines(
+export async function getPreviewBaseLines(
   filePath: string,
   resume: boolean,
   priorPatches: PendingPatch[],
@@ -408,32 +390,26 @@ async function getPreviewBaseLines(
   if (!resume || priorPatches.length === 0) {
     return { lines: originalLines, batchResults: [] };
   }
-
   const batches = groupIntoBatches(priorPatches);
   let currentLines = [...originalLines];
   const batchResults: string[] = [];
-
   for (const batch of batches) {
-    // 跳过无效 patch 的验证（预览时只模拟有效部分）
     const valid: PendingPatch[] = [];
     for (const p of batch) {
-      if (!validatePatchLines(p, currentLines.length)) {
-        valid.push(p);
-      }
+      if (!validatePatchLines(p, currentLines.length)) valid.push(p);
     }
     if (valid.length === 0) continue;
     const result = applyBatchToLines(valid, currentLines);
     currentLines = result.lines;
     batchResults.push(...result.results);
   }
-
   return { lines: currentLines, batchResults };
 }
 
+export { readFileLines, groupIntoBatches, applyBatchToLines };
 
 // ============================================================
-// 1. create_file - 创建新文件
-export { getPreviewBaseLines, readFileLines, groupIntoBatches, applyBatchToLines };
+// 1. create_file
 // ============================================================
 export const createFile = tool({
   description: `创建一个新文件，并写入 fileContent。
@@ -444,7 +420,7 @@ export const createFile = tool({
     fileName: z.string().describe('需要创建的文件名（包括扩展名）'),
     fileContent: z.string().describe('要写入的文件内容'),
   }),
-  execute: async ({ filePath, fileName, fileContent }): Promise<string> => {
+  execute: async ({ filePath, fileName, fileContent }) => {
     try {
       const targetPath = path.join(resolvePath(filePath), fileName);
       assertPathInWorkspace(targetPath);
@@ -452,16 +428,25 @@ export const createFile = tool({
       const fileHandle = await fs.open(targetPath, 'wx');
       await fileHandle.writeFile(fileContent, 'utf8');
       await fileHandle.close();
-      return `✅ 文件创建成功：${targetPath}\n📝 写入内容长度：${fileContent.length} 字符`;
+      const msg = `✅ 文件创建成功：${targetPath}\n📝 写入内容长度：${fileContent.length} 字符`;
+      const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: targetPath, fileName, charCount: fileContent.length };
+      return new ToolOutput(bulk, msg);
     } catch (error: any) {
       if (error.code === 'EEXIST') {
-        return `文件已创建 ${path.join(resolvePath(filePath), fileName)}`;
+        const msg = `文件已创建 ${path.join(resolvePath(filePath), fileName)}`;
+        const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: path.join(resolvePath(filePath), fileName), fileName, charCount: 0, error: msg };
+        return new ToolOutput(bulk, msg);
       }
-      return `❌ 创建失败：${error.message}`;
+      const errMsg = `❌ 创建失败：${error.message}`;
+      const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: path.join(resolvePath(filePath), fileName), fileName, charCount: 0, error: errMsg };
+      return new ToolOutput(bulk, errMsg);
     }
   },
 });
 
+// ============================================================
+// 2. replace_file
+// ============================================================
 export const replaceFile = tool({
   description: `向一个文件中写入 fileContent。
   filePath 是文件的绝对路径或相对当前工作目录的路径，会替换原本的所有内容。
@@ -470,65 +455,56 @@ export const replaceFile = tool({
     filePath: z.string().describe('文件的绝对路径或相对当前工作目录的路径'),
     fileContent: z.string().describe('要写入的文件内容'),
   }),
-  execute: async ({ filePath, fileContent }): Promise<string> => {
+  execute: async ({ filePath, fileContent }) => {
     try {
       const targetPath = resolvePath(filePath);
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
       const fileHandle = await fs.open(targetPath, 'w');
       await fileHandle.writeFile(fileContent, 'utf8');
       await fileHandle.close();
-      return `✅ 写入成功：${targetPath}\n📝 写入内容长度：${fileContent.length} 字符`;
+      const msg = `✅ 写入成功：${targetPath}\n📝 写入内容长度：${fileContent.length} 字符`;
+      const bulk: FileWriteBulk = { type: 'file-write', action: 'replace', filePath: targetPath, charCount: fileContent.length };
+      return new ToolOutput(bulk, msg);
     } catch (error: any) {
-      return `❌ 写入失败：${error.message}`;
+      const errMsg = `❌ 写入失败：${error.message}`;
+      const bulk: FileWriteBulk = { type: 'file-write', action: 'replace', filePath: resolvePath(filePath), charCount: 0, error: errMsg };
+      return new ToolOutput(bulk, errMsg);
     }
   },
 });
-
 
 // ============================================================
 // ── 通用：为三种 patch 工具构造 execute 逻辑 ──
 // ============================================================
 
-/**
- * 构建 add_patch / del_patch / modify_patch 通用的执行体。
- * toolType / params / schemaParams 用于区分三种类型的差异，
- * 公共逻辑（自动清理、冲突检测、预览生成、暂存）复写一次。
- */
 async function executePatch(
   toolType: 'add' | 'del' | 'modify',
   params: Record<string, any>,
   schemaParams: { description: string; resolvedPath: string; rawFilePath: string },
-): Promise<string> {
+): Promise<ToolOutput> {
   const { rawFilePath, resolvedPath, description } = schemaParams;
   const resume = params.resume === true;
 
-  // 自动清理过期残留
   const cleanResult = autoCleanBeforeNewPatch();
   const existingPatches = getCurrentSessionPatches(resolvedPath);
 
-  // 冲突检测：resume=true 的开始新批次，不与任何已有 patch 冲突
-  // resume=false 的只与本批次内（最后一个 resume 之后）的 patch 对比
   let conflictMsg = '';
   if (!resume) {
     const sameBatch = getCurrentBatchPatches(existingPatches);
-    conflictMsg = checkConflict(
-      { type: toolType, params },
-      sameBatch,
-    );
+    conflictMsg = checkConflict({ type: toolType, params }, sameBatch);
   }
 
-  // 去重检测（仅同类型同参数）
   const existingSame = existingPatches.find(p => {
     if (p.type !== toolType) return false;
     if (p.resume !== resume) return false;
-    // 简化：只比较入参的 JSON
     return JSON.stringify(p.params) === JSON.stringify({ ...params, resume: undefined });
   });
 
   if (existingSame) {
     let msg = `（已添加的将要进行：）\n${existingSame.description}`;
     msg += `\n■ 暂存区现有 ${patchStaging.size} 个待应用的修改`;
-    return msg;
+    const bulk: PatchStagingBulk = { type: 'patch', action: toolType, description, stagingSize: patchStaging.size };
+    return new ToolOutput(bulk, msg);
   }
 
   let result = '';
@@ -551,9 +527,7 @@ async function executePatch(
     patchStaging.add(patch);
 
     result = '';
-    if (cleanResult.cleared) {
-      result += `${cleanResult.message}\n`;
-    }
+    if (cleanResult.cleared) result += `${cleanResult.message}\n`;
     result += `📥 [#${patchStaging.size}] 已添加到暂存区 [${toolType.toUpperCase()}] ${description}`;
     if (resume) result += '（续批模式）';
     result += `\n📄 文件：${resolvedPath}\n`;
@@ -562,7 +536,6 @@ async function executePatch(
   // ── 预览生成 ──
   let afterStr = '';
   try {
-    // 获取基准行（resume=true 时模拟先前所有 patch）
     const baseInfo = await getPreviewBaseLines(resolvedPath, resume, existingPatches);
     const baseLines = baseInfo.lines;
     const { lines: fileLines } = await readFileLines(resolvedPath);
@@ -574,30 +547,20 @@ async function executePatch(
           const simulated = [...baseLines];
           const insertIdx = lineIndex === -1 ? simulated.length : lineIndex - 1;
           simulated.splice(insertIdx, 0, ...Lines);
-
-          // 基于原始文件行号决定上下文范围
-          const origCtxStart = lineIndex === -1
-            ? Math.max(1, fileLines.length - 2)
-            : Math.max(1, lineIndex - 2);
-          const origCtxEnd = lineIndex === -1
-            ? fileLines.length
-            : Math.min(fileLines.length, lineIndex + 2);
+          const origCtxStart = lineIndex === -1 ? Math.max(1, fileLines.length - 2) : Math.max(1, lineIndex - 2);
+          const origCtxEnd = lineIndex === -1 ? fileLines.length : Math.min(fileLines.length, lineIndex + 2);
           const previewStart = Math.max(0, origCtxStart - 1);
           const previewEnd = Math.min(simulated.length, origCtxEnd + Lines.length);
-
           const showLines: string[] = [];
           for (let i = previewStart; i < previewEnd; i++) {
             const origLineNum = i + 1;
-            const isInserted = lineIndex === -1
-              ? i >= fileLines.length
-              : i >= lineIndex - 1 && i < lineIndex - 1 + Lines.length;
+            const isInserted = lineIndex === -1 ? i >= fileLines.length : (i >= lineIndex - 1 && i < lineIndex - 1 + Lines.length);
             const marker = isInserted ? `\x1b[32m>\x1b[0m\x1b[30m` : ' ';
             showLines.push(`  ${marker} ${origLineNum}. ${simulated[i]}`);
           }
           afterStr += `\n📄 修改后（> 标记新插入的行）：\n${showLines.join('\n')}`;
           break;
         }
-
         case 'del': {
           const { lineIndex } = params as { lineIndex: [number, number][] };
           const sortedRanges = [...lineIndex].sort((a, b) => a[0] - b[0]);
@@ -613,13 +576,11 @@ async function executePatch(
           const lastDel = mergedRanges[mergedRanges.length - 1][1];
           const ctxStart = Math.max(1, firstDel - 2);
           const ctxEnd = Math.min(fileLines.length, lastDel + 2);
-
           const simulated = [...baseLines];
           const zeroBasedRanges = mergedRanges.map(([s, e]) => [s - 1, e - 1] as [number, number]).sort((a, b) => b[0] - a[0]);
           for (const [s, e] of zeroBasedRanges) {
             simulated.splice(s, e - s + 1);
           }
-
           const deletedBefore = (origLine: number) => {
             let count = 0;
             for (const [s, e] of mergedRanges) { if (e < origLine) count += e - s + 1; }
@@ -638,16 +599,12 @@ async function executePatch(
           afterStr += `\n📄 修改后（× 标记将被删除的行）：\n${showLines.join('\n')}`;
           break;
         }
-
         case 'modify': {
-          const { startLine, endLine, replaceLines } = params as {
-            startLine: number; endLine: number; replaceLines: string[];
-          };
+          const { startLine, endLine, replaceLines } = params as { startLine: number; endLine: number; replaceLines: string[] };
           const ctxStart = Math.max(1, startLine - 2);
           const ctxEnd = Math.min(fileLines.length, endLine + 2);
           const simulated = [...baseLines];
           simulated.splice(startLine - 1, endLine - startLine + 1, ...replaceLines);
-
           const showLines: string[] = [];
           for (let i = ctxStart; i <= ctxEnd; i++) {
             const inModRange = i >= startLine && i <= endLine;
@@ -674,13 +631,24 @@ async function executePatch(
   if (afterStr) result += afterStr;
   result += `\n■ 操作尚未应用！请调用 ensure_patch 来确认或放弃。`;
   result += `\n■ 暂存区现有 ${patchStaging.size} 个待应用的修改`;
-  if (patchAdded) patchStaging.setLastResultMessage(result);
-  return result;
+
+  const bulk: PatchStagingBulk = {
+    type: 'patch',
+    action: toolType,
+    description,
+    stagingSize: patchStaging.size,
+  };
+
+  if (patchAdded) {
+    patchStaging.setLastResultMessage(result);
+    (bulk as any).lastResultMessage = result;
+  }
+
+  return new ToolOutput(bulk, result);
 }
 
-
 // ============================================================
-// 2. add_patch
+// 3. add_patch
 // ============================================================
 export const addPatch = tool({
   description: `向暂存区添加"插入内容"操作。暂存区中的修改不会立即应用到文件，
@@ -696,9 +664,15 @@ export const addPatch = tool({
     Lines: z.array(z.string()).describe('要插入的内容行列表'),
     resume: z.boolean().optional().default(false).describe('续批模式：行号基于前一个 patch 改完后的文件'),
   }),
-  execute: async ({ filePath, lineIndex, Lines, resume }): Promise<string> => {
-    if (!filePath?.trim()) return '❌ 错误：文件路径不能为空';
-    if (!Lines?.length) return '❌ 错误：写入内容不能为空';
+  execute: async ({ filePath, lineIndex, Lines, resume }) => {
+    if (!filePath?.trim()) {
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'add', description: '', stagingSize: patchStaging.size, error: '文件路径不能为空' };
+      return new ToolOutput(bulk, '❌ 错误：文件路径不能为空');
+    }
+    if (!Lines?.length) {
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'add', description: '', stagingSize: patchStaging.size, error: '写入内容不能为空' };
+      return new ToolOutput(bulk, '❌ 错误：写入内容不能为空');
+    }
 
     const resolvedPath = resolvePath(filePath);
     const description = lineIndex === -1
@@ -710,7 +684,7 @@ export const addPatch = tool({
 });
 
 // ============================================================
-// 3. del_patch
+// 4. del_patch
 // ============================================================
 export const delPatch = tool({
   description: `向暂存区添加"删除行"操作。暂存区中的修改不会立即应用到文件，
@@ -727,20 +701,38 @@ export const delPatch = tool({
       .describe('要删除的行范围列表，格式 [[start,end], ...]，行号从 1 开始'),
     resume: z.boolean().optional().default(false).describe('续批模式：行号基于前一个 patch 改完后的文件'),
   }),
-  execute: async ({ filePath, lineIndex, resume }): Promise<string> => {
-    if (!filePath?.trim()) return '❌ 错误：文件路径不能为空';
-    if (!lineIndex?.length) return '❌ 错误：删除范围不能为空';
+  execute: async ({ filePath, lineIndex, resume }) => {
+    if (!filePath?.trim()) {
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'del', description: '', stagingSize: patchStaging.size, error: '文件路径不能为空' };
+      return new ToolOutput(bulk, '❌ 错误：文件路径不能为空');
+    }
+    if (!lineIndex?.length) {
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'del', description: '', stagingSize: patchStaging.size, error: '删除范围不能为空' };
+      return new ToolOutput(bulk, '❌ 错误：删除范围不能为空');
+    }
 
     for (const range of lineIndex) {
       if (!Array.isArray(range) || range.length !== 2) {
-        return `❌ 错误：删除范围格式不正确，应为 [start, end]，实际为：${JSON.stringify(range)}`;
+        const errMsg = `❌ 错误：删除范围格式不正确，应为 [start, end]，实际为：${JSON.stringify(range)}`;
+        const bulk: PatchStagingBulk = { type: 'patch', action: 'del', description: '', stagingSize: patchStaging.size, error: errMsg };
+        return new ToolOutput(bulk, errMsg);
       }
       const [start, end] = range;
       if (!Number.isInteger(start) || !Number.isInteger(end)) {
-        return `❌ 错误：行号必须是整数，当前为 [${start}, ${end}]`;
+        const errMsg = `❌ 错误：行号必须是整数，当前为 [${start}, ${end}]`;
+        const bulk: PatchStagingBulk = { type: 'patch', action: 'del', description: '', stagingSize: patchStaging.size, error: errMsg };
+        return new ToolOutput(bulk, errMsg);
       }
-      if (start < 1 || end < 1) return `❌ 错误：行号必须 >= 1，当前为 [${start}, ${end}]`;
-      if (start > end) return `❌ 错误：起始行 ${start} 不能大于结束行 ${end}`;
+      if (start < 1 || end < 1) {
+        const errMsg = `❌ 错误：行号必须 >= 1，当前为 [${start}, ${end}]`;
+        const bulk: PatchStagingBulk = { type: 'patch', action: 'del', description: '', stagingSize: patchStaging.size, error: errMsg };
+        return new ToolOutput(bulk, errMsg);
+      }
+      if (start > end) {
+        const errMsg = `❌ 错误：起始行 ${start} 不能大于结束行 ${end}`;
+        const bulk: PatchStagingBulk = { type: 'patch', action: 'del', description: '', stagingSize: patchStaging.size, error: errMsg };
+        return new ToolOutput(bulk, errMsg);
+      }
     }
 
     const resolvedPath = resolvePath(filePath);
@@ -757,7 +749,7 @@ export const delPatch = tool({
 });
 
 // ============================================================
-// 4. modify_patch
+// 5. modify_patch
 // ============================================================
 export const modifyPatch = tool({
   description: `向暂存区添加"修改行"操作。暂存区中的修改不会立即应用到文件，
@@ -773,9 +765,15 @@ export const modifyPatch = tool({
     replaceLines: z.array(z.string()).describe('替换后的新内容行列表'),
     resume: z.boolean().optional().default(false).describe('续批模式：行号基于前一个 patch 改完后的文件'),
   }),
-  execute: async ({ filePath, startLine, endLine, replaceLines, resume }): Promise<string> => {
-    if (!filePath?.trim()) return '❌ 错误：文件路径为空，可能是后面的替换行字符串中存在转义导致。请检查';
-    if (!Array.isArray(replaceLines)) return '❌ 错误：replaceLines 必须是字符串数组';
+  execute: async ({ filePath, startLine, endLine, replaceLines, resume }) => {
+    if (!filePath?.trim()) {
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'modify', description: '', stagingSize: patchStaging.size, error: '文件路径为空' };
+      return new ToolOutput(bulk, '❌ 错误：文件路径为空，可能是后面的替换行字符串中存在转义导致。请检查');
+    }
+    if (!Array.isArray(replaceLines)) {
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'modify', description: '', stagingSize: patchStaging.size, error: 'replaceLines 必须是字符串数组' };
+      return new ToolOutput(bulk, '❌ 错误：replaceLines 必须是字符串数组');
+    }
 
     const resolvedPath = resolvePath(filePath);
     const description = `替换行 ${startLine}-${endLine}（共 ${endLine - startLine + 1} 行）→ 替换为 ${replaceLines.length} 行新内容`;
@@ -784,33 +782,28 @@ export const modifyPatch = tool({
   },
 });
 
-
 // ============================================================
-// 5. ensure_patch - 应用或放弃所有暂存的修改
+// 6. ensure_patch
 // ============================================================
 export const ensurePatch = tool({
-  description: `应用或放弃暂存区中的所有修改。
-  在调用 add_patch、del_patch、modify_patch 后，修改不会立即生效，
-  而是暂存在内存中。调用此工具并设置 apply=true 将把所有暂存的修改实际写入文件；
-  设置 apply=false 将放弃所有暂存的修改。
-
-  特别说明：如果同一个文件有多个待应用的修改，系统会自动按批次分组。
-  批次之间按顺序叠加（前一批次的输出是后一批次的输入），
-  同一批次内的 patch 按从文件底部向上的顺序处理。`,
+  description: `应用或放弃暂存区中的所有修改。`,
   inputSchema: z.object({
     apply: z.boolean().describe('true - 应用所有暂存的修改到原文件；false - 放弃所有暂存的修改'),
   }),
-  execute: async ({ apply }): Promise<string> => {
+  execute: async ({ apply }) => {
     if (patchStaging.isEmpty() && apply) {
-      return '📭 暂存区已为空！此前的修改已应用。';
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'ensure', description: '暂存区已为空', stagingSize: 0, applied: 0 };
+      return new ToolOutput(bulk, '📭 暂存区已为空！此前的修改已应用。');
     } else if (patchStaging.isEmpty()) {
-      return '📭 暂存区已清空！';
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'ensure', description: '暂存区已清空', stagingSize: 0, abandoned: 0 };
+      return new ToolOutput(bulk, '📭 暂存区已清空！');
     }
 
     if (!apply) {
       const count = patchStaging.size;
       patchStaging.clear();
-      return `■ 已放弃 ${count} 个暂存的修改。暂存区已清空。`;
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'ensure', description: '放弃所有暂存修改', stagingSize: 0, abandoned: count };
+      return new ToolOutput(bulk, `■ 已放弃 ${count} 个暂存的修改。暂存区已清空。`);
     }
 
     const patches = patchStaging.getAll();
@@ -830,12 +823,8 @@ export const ensurePatch = tool({
     let fileIdx = 0;
     for (const [filePath, filePatches] of byFile) {
       fileIdx++;
-      // 按添加顺序排序（暂存区本身就是添加顺序）
-      const ordered = filePatches.sort((a, b) =>
-        (patches.indexOf(a) - patches.indexOf(b))
-      );
+      const ordered = filePatches.sort((a, b) => (patches.indexOf(a) - patches.indexOf(b)));
       allResults.push(`📄 [${fileIdx}/${byFile.size}] 处理文件：${filePath}（${ordered.length} 个补丁）`);
-
       try {
         const fileResults = await applyPatchesToFile(filePath, ordered);
         allResults.push(...fileResults);
@@ -849,31 +838,48 @@ export const ensurePatch = tool({
     const totalCount = patches.length;
     patchStaging.clear();
 
+    const perFile = Array.from(byFile).map(([filePath, filePatches]) => ({
+      filePath,
+      patchCount: filePatches.length,
+      results: [] as string[],
+    }));
+
     if (totalFailed === 0) {
       allResults.push(`✅ 所有 ${totalCount} 个修改已成功应用。暂存区已清空。`);
     } else {
       allResults.push(`■ 已应用 ${totalCount - totalFailed} 个修改，${totalFailed} 个失败。暂存区已清空。`);
     }
 
-    return allResults.join('\n');
+    const resultText = allResults.join('\n');
+    const bulk: PatchStagingBulk = {
+      type: 'patch',
+      action: 'ensure',
+      description: `应用 ${totalCount - totalFailed} 个修改`,
+      stagingSize: 0,
+      applied: totalCount - totalFailed,
+      failed: totalFailed,
+      perFile,
+    };
+    return new ToolOutput(bulk, resultText);
   },
 });
 
 // ============================================================
-// 6. pop_patch
+// 7. pop_patch
 // ============================================================
 export const popPatch = tool({
-  description: `从暂存区中弹出最近添加的一个 patch 操作（后进先出）。
-  如果暂存区为空，会提示无操作可撤销。`,
+  description: `从暂存区中弹出最近添加的一个 patch 操作（后进先出）。`,
   inputSchema: z.object({}),
-  execute: async (): Promise<string> => {
+  execute: async () => {
     if (patchStaging.isEmpty()) {
-      return '■ 暂存区为空，没有可弹出的操作。';
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'pop', description: '暂存区为空', stagingSize: 0 };
+      return new ToolOutput(bulk, '■ 暂存区为空，没有可弹出的操作。');
     }
 
     const popped = patchStaging.pop();
     if (!popped) {
-      return '■ 暂存区为空，没有可弹出的操作。';
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'pop', description: '暂存区为空', stagingSize: 0 };
+      return new ToolOutput(bulk, '■ 暂存区为空，没有可弹出的操作。');
     }
 
     let result = `↩️ 已从暂存区弹出最近的一个操作：\n`;
@@ -883,13 +889,13 @@ export const popPatch = tool({
     if (popped.resume) result += `  ■ 模式：续批\n`;
     result += `\n■ 暂存区还有 ${patchStaging.size} 个待应用的修改`;
 
-    return result;
+    const bulk: PatchStagingBulk = { type: 'patch', action: 'pop', description: popped.description, stagingSize: patchStaging.size };
+    return new ToolOutput(bulk, result);
   }
 });
 
-
 // ============================================================
-// 7. check_patch
+// 8. check_patch
 // ============================================================
 export const checkPatch = tool({
   description: '查看暂存区中指定序号的 patch 的详细参数和原始返回结果。',
@@ -899,7 +905,9 @@ export const checkPatch = tool({
   execute: async ({ index }) => {
     const patches = patchStaging.getAll();
     if (index < 1 || index > patches.length) {
-      return `❌ 序号 ${index} 超出范围，暂存区共有 ${patches.length} 个 patch。`;
+      const errMsg = `❌ 序号 ${index} 超出范围，暂存区共有 ${patches.length} 个 patch。`;
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'check', description: errMsg, stagingSize: patches.length, error: errMsg };
+      return new ToolOutput(bulk, errMsg);
     }
     const p = patches[index - 1];
     let result = `📋 第 ${index} 个 patch 详情：\n`;
@@ -913,12 +921,24 @@ export const checkPatch = tool({
     } else {
       result += '\n(无原始返回记录)';
     }
-    return result;
+    const bulk: PatchStagingBulk = {
+      type: 'patch',
+      action: 'check',
+      description: p.description,
+      stagingSize: patches.length,
+      patchDetail: {
+        index,
+        toolType: p.type,
+        params: p.params,
+        resultMessage: p.resultMessage,
+      },
+    };
+    return new ToolOutput(bulk, result);
   },
 });
 
 // ============================================================
-// 8. revise_patch — 替换指定序号的 patch
+// 9. revise_patch
 // ============================================================
 export const revisePatch = tool({
   description: '替换暂存区中指定序号的 patch 为新的 patch 操作。先删除旧的，再添加新的。',
@@ -936,11 +956,17 @@ export const revisePatch = tool({
   execute: async ({ index, tool: toolName, filePath, lineIndex, Lines, startLine, endLine, replaceLines, resume }) => {
     const patches = patchStaging.getAll();
     if (index < 1 || index > patches.length) {
-      return `❌ 序号 ${index} 超出范围，暂存区共有 ${patches.length} 个 patch。`;
+      const errMsg = `❌ 序号 ${index} 超出范围，暂存区共有 ${patches.length} 个 patch。`;
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'revise', description: '', stagingSize: patches.length, error: errMsg };
+      return new ToolOutput(bulk, errMsg);
     }
 
     const removed = patchStaging.removeAt(index);
-    if (!removed) return `❌ 移除序号 ${index} 的 patch 失败。`;
+    if (!removed) {
+      const errMsg = `❌ 移除序号 ${index} 的 patch 失败。`;
+      const bulk: PatchStagingBulk = { type: 'patch', action: 'revise', description: '', stagingSize: patches.length, error: errMsg };
+      return new ToolOutput(bulk, errMsg);
+    }
 
     let desc = '';
     const resolvedPath = resolvePath(filePath);
@@ -961,7 +987,11 @@ export const revisePatch = tool({
       }
       case 'del_patch': {
         const li = lineIndex as [number, number][];
-        if (!li?.length) return '❌ del_patch 需要提供 lineIndex (行范围数组)';
+        if (!li?.length) {
+          const errMsg = '❌ del_patch 需要提供 lineIndex (行范围数组)';
+          const bulk: PatchStagingBulk = { type: 'patch', action: 'revise', description: '', stagingSize: patchStaging.size, error: errMsg };
+          return new ToolOutput(bulk, errMsg);
+        }
         desc = `删除 ${li.length} 个范围`;
         patchStaging.add({
           type: 'del', rawFilePath: filePath, resolvedPath,
@@ -988,11 +1018,9 @@ export const revisePatch = tool({
       }
     }
 
-    return `✅ 已替换第 ${index} 个 patch 为 [${toolName.toUpperCase()}] ${desc}\n■ 暂存区现有 ${patchStaging.size} 个待应用的修改`;
+    const resultText = `✅ 已替换第 ${index} 个 patch 为 [${toolName.toUpperCase()}] ${desc}\n■ 暂存区现有 ${patchStaging.size} 个待应用的修改`;
+    const bulk: PatchStagingBulk = { type: 'patch', action: 'revise', description: desc, stagingSize: patchStaging.size };
+    return new ToolOutput(bulk, resultText);
   },
 });
-
-
-
-
 

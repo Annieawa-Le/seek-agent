@@ -4,6 +4,8 @@ import fs from 'fs/promises';
 import path from 'node:path';
 import { match } from 'node:assert';
 import { resolvePath } from '../workdir.js';
+import { ToolOutput } from './tool-output';
+import type { SearchBulk, SearchContentBulk } from './raw-bulk-types';
 
 type FileEntry = {
   name: string;
@@ -37,20 +39,14 @@ async function getAllFiles(dirPath: string, recursion: boolean): Promise<FileEnt
 }
 
 function matchesWildcard(name: string, pattern: string): boolean {
-  // 将通配符模式转为正则
   const regexStr = '^' + pattern
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
     .replace(/\*/g, '.*') + '$';
   return new RegExp(regexStr, 'i').test(name);
 }
 
-function parseList(entryList:FileEntry[]): string{
+function parseList(entryList: FileEntry[]): string {
   return JSON.stringify(entryList);
-}
-
-
-function parseNameList(entryList: FileEntry[]): string {
-  return entryList.map(item => item.name).join('\n');
 }
 
 export const searchAllFile = tool({
@@ -64,27 +60,32 @@ export const searchAllFile = tool({
     fileName: z.string(),
     useRegex: z.boolean(),
   }),
-  execute: async ({ filePath, fileName, useRegex}) : Promise<string>=> {
+  execute: async ({ filePath, fileName, useRegex }) => {
     try {
       const resolved = resolvePath(filePath);
       const fileList = await getAllFiles(resolved, true);
+      let filterList: FileEntry[];
       if (useRegex) {
         try {
           const pattern = new RegExp(fileName);
-          const filterList = fileList.filter(file => match(file.name, pattern)).slice(0, 15);
-          return parseList(filterList);
+          filterList = fileList.filter(file => match(file.name, pattern)).slice(0, 15);
         } catch (error) {
-          return `无效的正则表达式 ${(error as any).message}`;
+          const errMsg = `无效的正则表达式 ${(error as any).message}`;
+          const bulk: SearchBulk = { type: 'search', filePath, pattern: fileName, results: [], totalCount: 0, truncated: false, error: errMsg };
+          return new ToolOutput(bulk, errMsg);
         }
       } else if (fileName.includes('*')) {
-        const filterList = fileList.filter(file => matchesWildcard(file.name, fileName)).slice(0, 15);
-        return parseList(filterList);
+        filterList = fileList.filter(file => matchesWildcard(file.name, fileName)).slice(0, 15);
       } else {
-        const filterList = fileList.filter(file => file.name.includes(fileName)).slice(0, 15);
-        return parseList(filterList);
+        filterList = fileList.filter(file => file.name.includes(fileName)).slice(0, 15);
       }
+      const resultText = parseList(filterList);
+      const bulk: SearchBulk = { type: 'search', filePath, pattern: fileName, results: filterList, totalCount: filterList.length, truncated: fileList.length > 15 };
+      return new ToolOutput(bulk, resultText);
     } catch (error) {
-      return `读取文件失败: ${(error as any).message}`;
+      const errMsg = `读取文件失败: ${(error as any).message}`;
+      const bulk: SearchBulk = { type: 'search', filePath, pattern: fileName, results: [], totalCount: 0, truncated: false, error: errMsg };
+      return new ToolOutput(bulk, errMsg);
     }
   },
 });
@@ -100,27 +101,32 @@ export const searchSubFile = tool({
     fileName: z.string(),
     useRegex: z.boolean(),
   }),
-  execute: async ({ filePath, fileName, useRegex}) : Promise<string>=> {
+  execute: async ({ filePath, fileName, useRegex }) => {
     try {
       const resolved = resolvePath(filePath);
       const fileList = await getAllFiles(resolved, false);
+      let filterList: FileEntry[];
       if (useRegex) {
         try {
           const pattern = new RegExp(fileName);
-          const filterList = fileList.filter(file => match(file.name, pattern));
-          return parseList(filterList);
+          filterList = fileList.filter(file => match(file.name, pattern));
         } catch (error) {
-          return `无效的正则表达式 ${(error as any).message}`;
+          const errMsg = `无效的正则表达式 ${(error as any).message}`;
+          const bulk: SearchBulk = { type: 'search', filePath, pattern: fileName, results: [], totalCount: 0, truncated: false, error: errMsg };
+          return new ToolOutput(bulk, errMsg);
         }
       } else if (fileName.includes('*')) {
-        const filterList = fileList.filter(file => matchesWildcard(file.name, fileName));
-        return parseList(filterList);
+        filterList = fileList.filter(file => matchesWildcard(file.name, fileName));
       } else {
-        const filterList = fileList.filter(file => file.name.includes(fileName));
-        return parseList(filterList);
+        filterList = fileList.filter(file => file.name.includes(fileName));
       }
+      const resultText = parseList(filterList);
+      const bulk: SearchBulk = { type: 'search', filePath, pattern: fileName, results: filterList, totalCount: filterList.length, truncated: false };
+      return new ToolOutput(bulk, resultText);
     } catch (error) {
-      return `读取文件失败: ${(error as any).message}`;
+      const errMsg = `读取文件失败: ${(error as any).message}`;
+      const bulk: SearchBulk = { type: 'search', filePath, pattern: fileName, results: [], totalCount: 0, truncated: false, error: errMsg };
+      return new ToolOutput(bulk, errMsg);
     }
   },
 });
@@ -132,10 +138,7 @@ async function getAllDirectories(dirPath: string): Promise<FileEntry[]> {
   for (const entry of entries) {
     const fullPath = path.join(dirPath, entry.name);
     if (entry.isDirectory()) {
-      results.push({
-        name: entry.name,
-        path: fullPath
-      });
+      results.push({ name: entry.name, path: fullPath });
       const subDirs = await getAllDirectories(fullPath);
       results = results.concat(subDirs);
     }
@@ -150,31 +153,35 @@ export const searchDirectory = tool({
   inputSchema: z.object({
     filePath: z.string(),
   }),
-  execute: async ({ filePath }): Promise<string> => {
+  execute: async ({ filePath }) => {
     try {
       const resolved = resolvePath(filePath);
       const dirList = await getAllDirectories(resolved);
+      let resultList: FileEntry[];
       if (dirList.length > 15) {
-        // 超过15项，只返回第一级子目录
         const entries = await fs.readdir(resolved, { withFileTypes: true });
-        const topDirs: FileEntry[] = [];
+        resultList = [];
         for (const entry of entries) {
           if (entry.isDirectory()) {
-            topDirs.push({
+            resultList.push({
               name: entry.name,
-              path: path.join(resolved, entry.name)
+              path: path.join(resolved, entry.name),
             });
           }
         }
-        return parseList(topDirs);
+      } else {
+        resultList = dirList;
       }
-      return parseList(dirList);
+      const resultText = parseList(resultList);
+      const bulk: SearchBulk = { type: 'search', filePath, pattern: 'directory', results: resultList, totalCount: dirList.length, truncated: dirList.length > 15 };
+      return new ToolOutput(bulk, resultText);
     } catch (error) {
-      return `读取文件夹失败: ${(error as any).message}`;
+      const errMsg = `读取文件夹失败: ${(error as any).message}`;
+      const bulk: SearchBulk = { type: 'search', filePath, pattern: 'directory', results: [], totalCount: 0, truncated: false, error: errMsg };
+      return new ToolOutput(bulk, errMsg);
     }
   },
 });
-
 
 export const searchContent = tool({
   description: `在指定文件中搜索特定内容，返回所有匹配行及其行号。
@@ -187,59 +194,59 @@ export const searchContent = tool({
     content: z.string(),
     useRegex: z.boolean(),
   }),
-  execute: async ({ filePath, content, useRegex }) : Promise<string> => {
+  execute: async ({ filePath, content, useRegex }) => {
     try {
       const resolved = resolvePath(filePath);
       const stat = await fs.stat(resolved);
       if (!stat.isFile()) {
-        return `路径 "${filePath}" 是一个目录，不是文件。请在 filePath 参数中传入文件路径。`;
+        const errMsg = `路径 "${filePath}" 是一个目录，不是文件。请在 filePath 参数中传入文件路径。`;
+        const bulk: SearchContentBulk = { type: 'search-content', filePath, pattern: content, totalCount: 0, matches: [], error: errMsg };
+        return new ToolOutput(bulk, errMsg);
       }
       const fileContent = await fs.readFile(resolved, 'utf-8');
       const lines = fileContent.split('\n');
-      const resultLines: string[] = [];
+      const matches: Array<{ lineNum: number; line: string }> = [];
 
       if (useRegex) {
         try {
           const pattern = new RegExp(content);
           for (let i = 0; i < lines.length; i++) {
             if (pattern.test(lines[i])) {
-              resultLines.push(`${i + 1}: ${lines[i]}`);
+              matches.push({ lineNum: i + 1, line: lines[i] });
             }
           }
         } catch (error) {
-          return `无效的正则表达式 ${(error as any).message}`;
+          const errMsg = `无效的正则表达式 ${(error as any).message}`;
+          const bulk: SearchContentBulk = { type: 'search-content', filePath, pattern: content, totalCount: 0, matches: [], error: errMsg };
+          return new ToolOutput(bulk, errMsg);
         }
       } else if (content.includes('*')) {
         for (let i = 0; i < lines.length; i++) {
           if (matchesWildcard(lines[i], content)) {
-            resultLines.push(`${i + 1}: ${lines[i]}`);
+            matches.push({ lineNum: i + 1, line: lines[i] });
           }
         }
       } else {
         for (let i = 0; i < lines.length; i++) {
           if (lines[i].includes(content)) {
-            resultLines.push(`${i + 1}: ${lines[i]}`);
+            matches.push({ lineNum: i + 1, line: lines[i] });
           }
         }
       }
 
-      if (resultLines.length === 0) {
-        return `未在文件 ${filePath} 中找到匹配内容"${content}"`;
+      if (matches.length === 0) {
+        const result = `未在文件 ${filePath} 中找到匹配内容"${content}"`;
+        const bulk: SearchContentBulk = { type: 'search-content', filePath, pattern: content, totalCount: 0, matches: [] };
+        return new ToolOutput(bulk, result);
       }
 
-      return `在文件 ${filePath} 中找到 ${resultLines.length} 处匹配：\n` + resultLines.join('\n');
+      const resultText = `在文件 ${filePath} 中找到 ${matches.length} 处匹配：\n` + matches.map(m => `${m.lineNum}: ${m.line}`).join('\n');
+      const bulk: SearchContentBulk = { type: 'search-content', filePath, pattern: content, totalCount: matches.length, matches };
+      return new ToolOutput(bulk, resultText);
     } catch (error) {
-      return `读取或搜索文件失败: ${(error as any).message}`;
+      const errMsg = `读取或搜索文件失败: ${(error as any).message}`;
+      const bulk: SearchContentBulk = { type: 'search-content', filePath, pattern: content, totalCount: 0, matches: [], error: errMsg };
+      return new ToolOutput(bulk, errMsg);
     }
   },
 });
-
-
-
-
-
-
-
-
-
-
