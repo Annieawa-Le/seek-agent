@@ -70,30 +70,18 @@ export interface FileWriteBulk {
   error?: string;
 }
 
-/** Patch 暂存操作结果 */
-export interface PatchStagingBulk {
+/** Patch 操作结果（直接写入模式） */
+export interface PatchBulk {
   type: 'patch';
-  action: 'add' | 'del' | 'modify' | 'pop' | 'ensure' | 'check' | 'revise';
+  action: 'add' | 'del' | 'modify' | 'undo' | 'history';
   filePath?: string;
   description: string;
-  stagingSize: number;
-  /** ensure_patch 的结果 */
-  applied?: number;
-  failed?: number;
-  perFile?: Array<{
-    filePath: string;
-    patchCount: number;
-    results: string[];
-  }>;
-  /** check_patch 的详情 */
-  patchDetail?: {
-    index: number;
-    toolType: string;
-    params: Record<string, unknown>;
-    resultMessage?: string;
-  };
-  /** ensure = false 时的清空记录 */
-  abandoned?: number;
+  /** diff 字符串 */
+  diff?: string;
+  /** 撤销 ID */
+  undoId?: string;
+  /** history 时暂存撤销栈大小 */
+  stagingSize?: number;
   error?: string;
 }
 
@@ -117,20 +105,8 @@ export type RawBulk =
   | SearchContentBulk
   | ExecBulk
   | FileWriteBulk
-  | PatchStagingBulk
+  | PatchBulk
   | DeskBulk;
-
-// ============================================================
-// 工具执行返回值
-// ============================================================
-
-export interface ToolResult {
-  /** 结构化功能数据 */
-  rawBulk: RawBulk;
-  /** AI 友好的格式化文本（可选，不提供则由通用 AI Formatter 生成） */
-  aiText?: string;
-}
-
 // ============================================================
 // 格式化器接口
 // ============================================================
@@ -145,3 +121,6 @@ export interface RawBulkFormatters {
   toTUIText(rawBulk: RawBulk): string;
   toWebUI(rawBulk: RawBulk): Record<string, unknown>;
 }
+
+
+

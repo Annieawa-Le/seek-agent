@@ -19,7 +19,7 @@ const __dirname = dirname(__filename);
 
 const ROOT = resolve(__dirname, '..');
 const AGENT_ENTRY = join(ROOT, 'src', 'electron-entry.ts');
-const RENDERER_HTML = join(__dirname, 'renderer', 'index.html');
+const RENDERER_HTML = join(__dirname, 'renderer', 'dist', 'index.html');
 
 let agentProcess = null;
 let mainWindow = null;
@@ -259,6 +259,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (agentProcess) { agentProcess.kill(); agentProcess = null; }
 });
+
 
 
 

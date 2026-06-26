@@ -7,7 +7,7 @@
  *   toWebUI   → Electron 结构化数据
  */
 
-import type { RawBulk, ReadFileBulk, SearchBulk, SearchContentBulk, ExecBulk, FileWriteBulk, PatchStagingBulk, DeskBulk } from './raw-bulk-types';
+import type { RawBulk, ReadFileBulk, SearchBulk, SearchContentBulk, ExecBulk, FileWriteBulk, PatchBulk, DeskBulk } from './raw-bulk-types';
 
 // ═════════════════════════════════════════════════════
 // AI Formatter — 保持现在对 AI 友好的格式，几乎不变
@@ -60,33 +60,17 @@ function formatFileWriteAIText(bulk: FileWriteBulk): string {
   return `✅ 写入成功：${bulk.filePath}\n📝 写入内容长度：${bulk.charCount} 字符`;
 }
 
-function formatPatchAIText(bulk: PatchStagingBulk): string {
+function formatPatchAIText(bulk: PatchBulk): string {
   if (bulk.error) return `❌ 错误：${bulk.error}`;
-  if (bulk.action === 'pop') {
-    if (!bulk.description) return '■ 暂存区为空，没有可弹出的操作。';
-    return `↩️ 已从暂存区弹出最近的一个操作：\n  📄 文件：${bulk.filePath}\n  ■ ${bulk.description}\n■ 暂存区还有 ${bulk.stagingSize} 个待应用的修改`;
+  switch (bulk.action) {
+    case 'undo':
+      return `↩️ 已撤销：[${bulk.description}]${bulk.filePath ? `\n  📄 ${bulk.filePath}` : ''}${bulk.diff ? `\n\n--- diff ---\n${bulk.diff}` : ''}`;
+    case 'history':
+      return bulk.description;
+    // add / del / modify: AI text 已由工具本身返回，这里做兜底
+    default:
+      return `✅ [${bulk.action.toUpperCase()}] ${bulk.description}${bulk.filePath ? `\n📄 ${bulk.filePath}` : ''}${bulk.diff ? `\n\n--- diff ---\n${bulk.diff}` : ''}`;
   }
-  if (bulk.action === 'check') {
-    if (!bulk.patchDetail) return `❌ 序号超出范围`;
-    return `📋 第 ${bulk.patchDetail.index} 个 patch 详情：\n工具: ${bulk.patchDetail.toolType}\n文件: ${bulk.filePath}\n描述: ${bulk.description}\n参数: ${JSON.stringify(bulk.patchDetail.params, null, 2)}\n\n📤 原始返回:\n${bulk.patchDetail.resultMessage || '(无原始返回记录)'}`;
-  }
-  if (bulk.action === 'ensure') {
-    const lines: string[] = [];
-    if (bulk.perFile) {
-      for (const f of bulk.perFile) {
-        lines.push(`📄 处理文件：${f.filePath}（${f.patchCount} 个补丁）`);
-        lines.push(...f.results);
-      }
-    }
-    lines.push('---');
-    lines.push(`✅ 所有 ${bulk.applied} 个修改已成功应用`);
-    return lines.join('\n');
-  }
-  if (bulk.action === 'revise') {
-    return `✅ 已替换第 ${bulk.patchDetail?.index} 个 patch 为 ${bulk.description}\n■ 暂存区现有 ${bulk.stagingSize} 个待应用的修改`;
-  }
-  // add/del/modify
-  return `${bulk.description}\n■ 操作尚未应用！请调用 ensure_patch 来确认或放弃。\n■ 暂存区现有 ${bulk.stagingSize} 个待应用的修改`;
 }
 
 function formatDeskAIText(bulk: DeskBulk): string {
@@ -168,12 +152,132 @@ function formatExecTUI(bulk: ExecBulk): string {
 }
 
 // ═════════════════════════════════════════════════════
-// WebUI Renderer — 结构化数据给 Electron
+// WebUI Renderer — 生成 HTML 供 Electron 前端渲染
 // ═════════════════════════════════════════════════════
 
-export function toWebUI(bulk: RawBulk): Record<string, unknown> {
-  return bulk as unknown as Record<string, unknown>;
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+function shortPath(fp: string): string {
+  const parts = fp.split(/[/\\]/);
+  return parts.length > 3 ? parts.slice(-3).join('/') : fp;
+}
+
+export function toWebUI(bulk: RawBulk): Record<string, unknown> {
+  switch (bulk.type) {
+    case 'read': return formatReadWebUI(bulk);
+    case 'search': return formatSearchWebUI(bulk);
+    case 'search-content': return formatSearchContentWebUI(bulk);
+    case 'exec': return formatExecWebUI(bulk);
+    case 'file-write': return formatFileWriteWebUI(bulk);
+    case 'patch': return formatPatchWebUI(bulk);
+    case 'desk': return formatDeskWebUI(bulk);
+    default: return { html: `<pre>${esc(JSON.stringify(bulk))}</pre>` };
+  }
+}
+
+// ── ReadFileBulk ──
+function formatReadWebUI(bulk: ReadFileBulk): Record<string, unknown> {
+  if (bulk.error) {
+    return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  }
+  const meta = `<div class="meta">${esc(bulk.filePath)} &nbsp;·&nbsp; ${bulk.lineCount} 行 / ${bulk.charCount} 字符</div>`;
+  if (bulk.numberedLines) {
+    const rows = bulk.numberedLines.map(l =>
+      `<div class="line"><span class="line-num">${l.lineNum}</span><span class="line-content">${esc(l.content)}</span></div>`
+    ).join('');
+    return { html: `<div class="read-result">${meta}${rows}</div>` };
+  }
+  const lines = bulk.content.split('\n');
+  const rows = lines.map((line, i) =>
+    `<div class="line"><span class="line-num">${i + 1}</span><span class="line-content">${esc(line)}</span></div>`
+  ).join('');
+  return { html: `<div class="read-result">${meta}${rows}</div>` };
+}
+
+// ── SearchBulk ──
+function formatSearchWebUI(bulk: SearchBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  if (bulk.totalCount === 0) return { html: '<div class="empty">未找到匹配结果</div>' };
+  const items = bulk.results.slice(0, 30).map(r =>
+    `<div class="search-item"><span class="name">${esc(r.name)}</span><span class="path">${esc(r.path)}</span></div>`
+  ).join('');
+  const more = bulk.truncated ? `<div class="more">… 还有 ${bulk.totalCount - 30} 个结果</div>` : '';
+  return { html: `<div class="search-result"><div class="meta">找到 ${bulk.totalCount} 条结果</div>${items}${more}</div>` };
+}
+
+// ── SearchContentBulk ──
+function formatSearchContentWebUI(bulk: SearchContentBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  if (bulk.totalCount === 0) {
+    return { html: `<div class="empty">未在 ${esc(bulk.filePath)} 中找到匹配内容</div>` };
+  }
+  const matches = bulk.matches.slice(0, 50).map(m =>
+    `<div class="match-line"><span class="line-num">${m.lineNum}</span><code>${esc(m.line)}</code></div>`
+  ).join('');
+  const more = bulk.totalCount > 50 ? `<div class="more">… 还有 ${bulk.totalCount - 50} 行匹配</div>` : '';
+  return { html: `<div class="search-content-result">${esc(bulk.filePath)}（共 ${bulk.totalCount} 处匹配）${matches}${more}</div>` };
+}
+
+// ── ExecBulk ──
+function formatExecWebUI(bulk: ExecBulk): Record<string, unknown> {
+  if (bulk.error) {
+    return { html: `<div class="exec-stderr">${esc(bulk.error)}</div>` };
+  }
+  let html = `<pre class="exec-output">${esc(bulk.stdout)}</pre>`;
+  if (bulk.stderr) html += `<pre class="exec-stderr">${esc(bulk.stderr)}</pre>`;
+  return { html };
+}
+
+// ── FileWriteBulk ──
+function formatFileWriteWebUI(bulk: FileWriteBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  const label = bulk.action === 'create' ? '创建文件' : '覆写文件';
+  const path = bulk.fileName ? `${esc(bulk.filePath)}/${esc(bulk.fileName)}` : esc(bulk.filePath);
+  return { html: `<div class="file-write"><span class="label">${label}</span><code>${path}</code><span class="meta">${bulk.charCount} 字符</span></div>` };
+}
+
+// ── PatchBulk ──
+function formatPatchWebUI(bulk: PatchBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  switch (bulk.action) {
+    case 'add': case 'del': case 'modify':
+      return {
+        html: `<div class="patch-result"><span class="label">[${bulk.action.toUpperCase()}]</span> ${esc(bulk.description)}<br><pre>${esc(bulk.diff || '')}</pre></div>`
+      };
+    case 'undo':
+      return {
+        html: `<div class="patch-result"><span class="label">UNDO</span> ${esc(bulk.description)}<br><pre>${esc(bulk.diff || '')}</pre></div>`
+      };
+    case 'history':
+      return { html: `<div class="patch-result"><pre>${esc(bulk.description)}</pre></div>` };
+    default: return { html: `<pre>${esc(JSON.stringify(bulk))}</pre>` };
+  }
+}
+
+// ── DeskBulk ──
+function formatDeskWebUI(bulk: DeskBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  switch (bulk.action) {
+    case 'add':
+      return { html: `<div class="desk-result"><span class="label">添加到桌面</span><code>${esc(bulk.filePath || '')}</code></div>` };
+    case 'list':
+      if (!bulk.entries || bulk.entries.length === 0) return { html: '<div class="empty">参考桌面为空</div>' };
+      const entries = bulk.entries.map(e => `<div><code>${esc(e.filePath)}</code>（${e.charCount} 字符）</div>`).join('');
+      return { html: `<div class="desk-result"><span class="label">参考桌面（共 ${bulk.totalCount} 项）</span><div class="desk-entries">${entries}</div></div>` };
+    case 'remove':
+      return { html: `<div class="desk-result"><span class="label">从桌面移除</span><code>${esc(bulk.filePath || '')}</code></div>` };
+    case 'clear':
+      return { html: `<div class="desk-result"><span class="label">清空桌面</span><span class="meta">移除了 ${bulk.totalCount} 项</span></div>` };
+    default: return { html: `<pre>${esc(JSON.stringify(bulk))}</pre>` };
+  }
+}
+
+
+
+
+
 
 
 

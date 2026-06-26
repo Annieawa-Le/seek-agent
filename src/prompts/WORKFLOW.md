@@ -18,15 +18,13 @@
 
 ### 2. 修改文件
 
-你修改文件的流程**必须遵循以下流程**
+1. 读取文件内容，确定修改点位
+2. 直接使用 `add_patch` / `del_patch` / `modify_patch` 执行修改（以 diff 为核心载体，自动持久化）
+3. 确认 diff 无误后，通过 `undo_patch()` 可撤销最近一次操作
+4. 如需查看操作历史，使用 `history_patch`
 
-1. 之前暂存区还没应用的patch修改，**必须先应用**
-2. 读取文件的部分行内容，确定修改点位
-3. 用add/del/modify三种模式添加你想要的patch。
-4. **如果你需要基于前面patch应用后的文件进行修改**（极其不推荐），你需要使用resume 续批模式。
-5. **如果你在应用patch之前需要读取模拟修改后的行号结果，**你同样需要使用`read-num-line`的续批模式。
-6. 当一次的patch数量超过3个，或者切换到其它文件时，你必须**尽快应用patch**，除非修改足够小，修改点位足够固定或者你很有把握。
-7. 当确认你的修改没有问题时，你使用`ensure_patch`来确认对文件的修改。
+> 所有 patch 工具直接生效，无需经过暂存区。
+> 系统自动生成 diff 并持久化到磁盘（`.seek-agent/history/`），可跨会话撤销。
 
 ### 3. 每轮修改后
 
@@ -45,50 +43,26 @@
 |------|------|
 | `read_file` | 读取文件内容 |
 | `read_lines` | 读取特定行范围 |
-| `read_num_line` | 读取带行号的内容（可调用续批参数！） |
-| `create_file` | 创建新文件（独占写入，不进入暂存区） |
-| `replace_file` | 替换文件内容（非独占，不进入暂存区） |
-| `scan_file` | 用于扫描大文件 |
+| `read_num_line` | 读取带行号的内容 |
+| `create_file` | 创建新文件（独占写入） |
+| `replace_file` | 替换文件全部内容（diff 化 + 持久化） |
+| `scan_file` | 扫描大文件（仅供参考，几乎不改） |
 
-### Patch 暂存系统（推荐）
+### Patch 工具系统（推荐）
 
-所有修改操作通过暂存区先预览后应用，避免行号漂移。
+所有 patch 工具**直接执行**，以 diff 为核心载体：
+旧内容 + 新内容 → 生成 diff → 持久化到磁盘 → 写入文件 → 展示 diff。
+无需暂存区，每步操作都可追溯。
 
 | 工具 | 用途 |
 |------|------|
-| `add_patch` | 在指定行前插入内容（行号基于原始文件） |
-| `del_patch` | 删除指定行范围 |
-| `modify_patch` | 替换指定行范围的内容（注意转义！） |
-| `ensure_patch` | 应用（`{apply: true}`）或放弃（`{apply: false}`）所有暂存修改 |
-| `pop_patch` | 撤销最近一次暂存的 patch（后进先出） |
-| `check_patch` | 查看指定序号的 patch 详情和原始返回 |
-| `revise_patch` | 替换指定序号的 patch 为新内容 |
+| `add_patch` | 在指定行前插入内容（`lineIndex=-1` 追加到末尾） |
+| `del_patch` | 删除指定行范围（支持智能定位修正行号偏移） |
+| `modify_patch` | 替换指定行范围的内容（自动内容特征匹配定位） |
+| `undo_patch` | 撤销最近一次文件修改操作（跨会话） |
+| `history_patch` | 查看文件操作历史记录 |
 
-### Resume 续批模式
-
-每个 patch 工具（add/del/modify）都有一个可选参数 `resume`（默认 `false`）。
-
-**传统模式（`resume: false`）：**
-- 行号基于**原始文件**
-- 所有 patch 在同一批次内，从底部向上排列后一次性应用
-
-**续批模式（`resume: true`）：**
-- 行号基于**前一批次 patch 应用后的文件状态**
-- 触发新批次，与前一批次严格顺序叠加
-- 预览时会先模拟先前所有 patch 后的结果，再在其上展示本次效果
-
-**典型场景：**
-```
-add_patch(filePath="a.ts", lineIndex=5, Lines=["// line 5a"])
-→ 基于原始文件，在第 5 行前插入
-
-add_patch(filePath="a.ts", lineIndex=7, Lines=["// line 7a"], resume=true)
-→ 基于前一次插入后的文件，在第 7 行前插入
-```
-
-**冲突规则：**
-- 同批次内：modify/del 范围相交则冲突，add 与 modify/del 永不冲突
-- 跨批次（resume=true）：不与任何已有 patch 冲突
+> **注意**：`create_file` 和 `replace_file` 也经过 diff 持久化，可通过 `undo_patch` 撤销。
 
 ---
 
@@ -225,3 +199,7 @@ spawn_agent(
 每当完成一组文件修改后，执行编译检查，
 
 如果环境不允许，告知用户。
+
+
+
+

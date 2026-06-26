@@ -150,12 +150,13 @@ def('del_patch', 'patch', '■', (args) => {
 
 def('modify_patch', 'patch', '■', (args) => {
   const fp = (args?.filePath ?? '(?)') as string;
-  const start = args?.startLine ?? '?';
-  const end = args?.endLine ?? '?';
-  return `暂存修改: ${fp} (行 ${start}-${end})`;
+  return `修改: ${fp}`;
 }, 'after-round');
-def('ensure_patch', 'patch', '■', (args) => {
-  return `${args?.apply ?? true ? '应用' : '放弃'}暂存修改`;
+def('undo_patch', 'patch', '↩', () => {
+  return '撤销最近的文件修改';
+}, 'after-round');
+def('history_patch', 'patch', '■', () => {
+  return '查看操作历史';
 }, 'after-round');
 
 
@@ -327,6 +328,8 @@ export function registerSkillTranslations(
     registerTool(name, trans);
   }
 }
+
+
 
 
 

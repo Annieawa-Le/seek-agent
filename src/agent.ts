@@ -504,7 +504,7 @@ export class CLIAAgent {
         this.ui.collapseToolMessages([this.lastSingleCollapse]);
         this.lastSingleCollapse = null;
       }
-
+      // TODO：此处没做三端分离
       this.ui.addToolMessage(friendlyToolCallLabel(toolName, args), { toolName, args });
 
       // ── 检查中断或新输入 ──

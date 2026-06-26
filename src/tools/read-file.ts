@@ -4,8 +4,6 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import fs from 'fs/promises';
 import { resolvePath } from '../workdir.js';
-import { patchStaging } from './patch-staging.js';
-import { getPreviewBaseLines } from './file-manipulation.js';
 
 export const readFileTool = tool({
   description: '读取文件内容。参数 filePath 是文件的绝对路径或相对当前工作目录的路径。',
@@ -63,28 +61,19 @@ export const readCertainLines = tool({
 export const readNumline = tool({
   description: `读取带行号的特定行范围的文件内容。
    filePath 是文件的绝对路径或相对当前工作目录的路径。
-   startLine, endLine 分别是 int 类型整数，表示始末行号.
-   resume 为 true 时行号基于暂存区中所有未应用 patch 模拟后的文件状态，续批模式。`,
+   startLine, endLine 分别是 int 类型整数，表示始末行号.`,
   inputSchema: z.object({
     filePath: z.string(),
     startLine: z.int(),
     endLine: z.int(),
-    resume: z.boolean().optional().default(false).describe('续批模式：基于暂存区所有未应用 patch 模拟后的文件状态'),
   }),
-  execute: async ({ filePath, startLine, endLine, resume }) => {
+  execute: async ({ filePath, startLine, endLine }) => {
     try {
       const resolved = resolvePath(filePath);
 
       let lines: string[];
-      if (resume) {
-        const sessionPatches = patchStaging.getByFile(resolved)
-          .filter(p => p.sessionId === patchStaging.getSessionId());
-        const { lines: previewLines } = await getPreviewBaseLines(resolved, true, sessionPatches);
-        lines = previewLines;
-      } else {
-        const content = await fs.readFile(resolved, 'utf-8');
-        lines = content.split('\n');
-      }
+      const content = await fs.readFile(resolved, 'utf-8');
+      lines = content.split('\n');
 
       let result = '';
       for (let i = startLine; i <= endLine; i++) {
@@ -132,3 +121,9 @@ export const scanFileTool = tool({
     }
   },
 });
+
+
+
+
+
+

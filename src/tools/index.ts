@@ -13,7 +13,7 @@ import { readFileTool, readCertainLines, readNumline, scanFileTool } from './rea
 import { executeCommandTool } from './execute-command';
 import { memoryFocus, memoryShorten } from './memory';
 import { searchAllFile, searchSubFile, searchDirectory, searchContent } from './search-files';
-import { createFile, addPatch, delPatch, modifyPatch, replaceFile, ensurePatch, popPatch, checkPatch, revisePatch } from './file-manipulation';
+import { createFile, addPatch, delPatch, modifyPatch, replaceFile, undoPatch, historyPatch } from './file-manipulation';
 import { createTodo, finishStep, undoStep, rerollStep, delStep, readTodo, delTodo, activeTodo } from './todo';
 import { toolCache } from './tool-cache';
 
@@ -32,7 +32,6 @@ const coreTools = {
   read_lines: wrapTool('read_lines', readCertainLines),
   read_num_line: wrapTool('read_num_line', readNumline),
   scan_file: wrapTool('scan_file', scanFileTool),
-  pop_patch: wrapTool('pop_patch', popPatch),
   execute_command: wrapTool('execute_command', executeCommandTool),
   search_all_file: wrapTool('search_all_file', searchAllFile),
   search_sub_file: wrapTool('search_sub_file', searchSubFile),
@@ -43,9 +42,8 @@ const coreTools = {
   add_patch: wrapTool('add_patch', addPatch),
   del_patch: wrapTool('del_patch', delPatch),
   modify_patch: wrapTool('modify_patch', modifyPatch),
-  ensure_patch: ensurePatch,
-  check_patch: checkPatch,
-  revise_patch: revisePatch,
+  undo_patch: wrapTool('undo_patch', undoPatch),
+  history_patch: wrapTool('history_patch', historyPatch),
   // 参考桌面管理
   desk_add: wrapTool('desk_add', deskAddTool),
   desk_list: wrapTool('desk_list', deskListTool),
@@ -228,6 +226,8 @@ export function removeTool(toolName: string): string | null {
   setToolRegistry(toolsContainer as any);
   return '__anonymous__';
 }
+
+
 
 
 

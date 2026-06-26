@@ -4,11 +4,8 @@
  * 替代 TerminalUI，通过 stdio JSON 协议与 Electron 主进程通信。
  * 主进程再转发到渲染进程，实现 Web 界面。
  */
-
-import { randomUUID } from 'node:crypto';
-import { ansiToHtml } from './assets/tool-translations-web';
 import { toWebUI } from './tools/raw-bulk-formatters';
-import { friendlyToolCallLabel } from './assets/tool-translations';
+
 import type { UIMessage } from './ui';
 
 // ═════════════════════════════════════════════════════
@@ -112,37 +109,35 @@ export class ElectronUIBridge {
  // 消息发布
  // ═══════════════════════════════════════════════════
 
- addUserMessage(content: string): void {
- this.messages.push({ role: 'user', content, createdAt: Date.now() });
- this.send({ type: 'message', role: 'user', content });
- }
+  addUserMessage(content: string): void {
+    this.messages.push({ role: 'user', content, createdAt: Date.now() });
+    this.send({ type: 'message', role: 'user', content });
+  }
 
- addAgentMessage(content: string): void {
- this.messages.push({ role: 'agent', content, createdAt: Date.now() });
- this.send({ type: 'message', role: 'agent', content });
- }
+  addAgentMessage(content: string): void {
+  this.messages.push({ role: 'agent', content, createdAt: Date.now() });
+  this.send({ type: 'message', role: 'agent', content });
+  }
 
   addToolMessage(content: string, toolMeta?: { toolName: string; args: Record<string, unknown> }, fullOutput?: string, rawBulk?: Record<string, unknown>): void {
-  let toolCallHtml: string | undefined;
-  let toolResultHtml: string | undefined;
-  if (toolMeta) {
-  toolCallHtml = ansiToHtml(friendlyToolCallLabel(toolMeta.toolName, toolMeta.args));
-  } else if (rawBulk) {
-  // rawBulk 存在时用 WebUI 格式化器生成结构化 HTML
-  const webUIResult = toWebUI(rawBulk as any);
-  toolResultHtml = (webUIResult as any).html as string;
-  } else {
-  // 工具结果——content 是 friendlyToolResultLabel 输出，含 ANSI 码
-  toolResultHtml = ansiToHtml(content);
-  }
-  this.messages.push({ role: 'tool', content, toolMeta, fullOutput, rawBulk, createdAt: Date.now() });
-  this.send({ type: 'message', role: 'tool', content, toolMeta, toolCallHtml, toolResultHtml, fullOutput, rawBulk });
+    let toolCallHtml: string | undefined;
+    let toolResultHtml: string | undefined;
+    if (toolMeta) {
+      toolCallHtml = formatToolCallHtml(toolMeta.toolName, toolMeta.args);
+      console.error('[bridge] toolMETA:', toolMeta.toolName, toolCallHtml?.slice(0,100));
+    } else if (rawBulk) {
+      console.error('[bridge] RAWBULK type:', (rawBulk as any).type, 'keys:', Object.keys(rawBulk as any).join(','));
+      const webUIResult = toWebUI(rawBulk as any);
+      toolResultHtml = (webUIResult as any).html as string;
+    }
+    this.messages.push({ role: 'tool', content, toolMeta, fullOutput, rawBulk, createdAt: Date.now() });
+    this.send({ type: 'message', role: 'tool', content, toolMeta, toolCallHtml, toolResultHtml, fullOutput, rawBulk });
   }
 
- addSystemMessage(content: string): void {
- this.messages.push({ role: 'system', content, createdAt: Date.now() });
- this.send({ type: 'message', role: 'system', content });
- }
+  addSystemMessage(content: string): void {
+  this.messages.push({ role: 'system', content, createdAt: Date.now() });
+  this.send({ type: 'message', role: 'system', content });
+  }
 
  addSubAgentMessage(name: string, content: string): void {
  const last = this.messages[this.messages.length - 1];
@@ -331,6 +326,30 @@ export class ElectronUIBridge {
  this.send({ type: 'init-done' });
  }
 }
+
+
+
+
+
+
+/** 从 toolMeta 生成干净的 HTML 工具调用标签（不经过 ANSI 转义码） */
+function formatToolCallHtml(toolName: string, args: Record<string, unknown>): string {
+  const argStr = Object.entries(args).map(([k, v]) => {
+    const vs = typeof v === 'string' ? v : JSON.stringify(v);
+    return vs.length > 60 ? `${k}=${vs.slice(0, 60)}…` : `${k}=${vs}`;
+  }).join(', ');
+  return `<span class="tool-call-label"><span class="tool-call-name">${escapeHtml(toolName)}</span> <span class="tool-call-args">${escapeHtml(argStr)}</span></span>`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+
+
+
+
+
 
 
 

@@ -1,6 +1,7 @@
 packages:
   - 'extension'
   - 'packages/*'
+  - 'electron/renderer'
 allowBuilds:
   c: true
   e: true
