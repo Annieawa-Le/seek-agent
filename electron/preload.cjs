@@ -74,6 +74,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   /** 读取 git 变更状态 */
+
+  // ─── 窗口控制 ───
+
+  /** 最小化窗口 */
+  minimizeWindow: () => {
+    ipcRenderer.send('window:minimize');
+  },
+
+  /** 最大化/还原窗口 */
+  maximizeWindow: () => {
+    ipcRenderer.send('window:maximize');
+  },
+
+  /** 关闭窗口 */
+  closeWindow: () => {
+    ipcRenderer.send('window:close');
+  },
+
+  /** 监听最大化状态变化 */
+  onMaximizedChange: (callback) => {
+    const handler = (_event, isMaximized) => callback(isMaximized);
+    ipcRenderer.on('window:maximized', handler);
+    return () => ipcRenderer.removeListener('window:maximized', handler);
+  },
+
+  /** 查询窗口是否最大化 */
+  isMaximized: async () => {
+    return ipcRenderer.invoke('window:isMaximized');
+  },
   readGitStatus: async () => {
     return ipcRenderer.invoke('fs:readGitStatus');
   },
@@ -83,6 +112,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('fs:listSessions');
   },
 });
+
 
 
 

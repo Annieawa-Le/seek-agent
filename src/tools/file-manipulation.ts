@@ -26,6 +26,7 @@ import type { FileWriteBulk } from './raw-bulk-types.js';
 import { undoStack } from './patch-undo.js';
 import { smartLocate } from './patch-locator.js';
 import { checkSyntax, formatSyntaxErrors } from './syntax-validator.js';
+import { autoRepair } from './syntax-repairer.js';
 
 // ============================================================
 // 公共辅助函数
@@ -176,16 +177,25 @@ export const addPatch = tool({
         `❌ 错误：行号 ${lineIndex} 超出范围`);
     }
 
-    const newLines = [...fileLines.slice(0, insertIndex), ...Lines, ...fileLines.slice(insertIndex)];
+    let newLines = [...fileLines.slice(0, insertIndex), ...Lines, ...fileLines.slice(insertIndex)];
     const description = lineIndex === -1 ? `在末尾追加 ${Lines.length} 行` : `在第 ${lineIndex} 行前插入 ${Lines.length} 行`;
 
-      // 语法检查
+      // 语法检查 + 自动修复
       if (!force) {
         const newContent = newLines.join(lineEnding) + (hasTrailingNewline ? lineEnding : '');
         const checkResult = checkSyntax(resolvedPath, newContent);
         if (!checkResult.ok) {
-          const errMsg = formatSyntaxErrors(checkResult);
-          return new ToolOutput({ type: 'patch', action: 'add', description: '', error: errMsg }, errMsg);
+          // 尝试自动修复
+          const insertLine = lineIndex === -1 ? fileLines.length + 1 : lineIndex;
+          const repairResult = autoRepair(resolvedPath, newLines,
+            { start: insertLine, end: insertLine + Lines.length - 1 },
+            lineEnding, hasTrailingNewline);
+          if (repairResult.repaired) {
+            newLines = repairResult.newLines;
+          } else {
+            const errMsg = formatSyntaxErrors(checkResult);
+            return new ToolOutput({ type: 'patch', action: 'add', description: '', error: errMsg }, errMsg);
+          }
         }
       }
     const record = await undoStack.executeWrite(
@@ -249,13 +259,22 @@ export const delPatch = tool({
     const deletedInfo = merged.map(([s, e]) => s === e ? `行 ${s}` : `行 ${s}-${e}`).join('、');
     const description = `删除 ${deletedCount} 行（${deletedInfo}）`;
 
-      // 语法检查
+      // 语法检查 + 自动修复
       if (!force) {
         const newContent = newLines.join(lineEnding) + (hasTrailingNewline ? lineEnding : '');
         const checkResult = checkSyntax(resolvedPath, newContent);
         if (!checkResult.ok) {
-          const errMsg = formatSyntaxErrors(checkResult);
-          return new ToolOutput({ type: 'patch', action: 'del', description: '', error: errMsg }, errMsg);
+          // 尝试自动修复：删除位置附近可能产生括号不平衡
+          const firstDel = Math.min(...merged.map(([s]) => s));
+          const repairResult = autoRepair(resolvedPath, newLines,
+            { start: Math.max(1, firstDel - 2), end: Math.min(newLines.length, firstDel + 2) },
+            lineEnding, hasTrailingNewline);
+          if (repairResult.repaired) {
+            newLines = repairResult.newLines;
+          } else {
+            const errMsg = formatSyntaxErrors(checkResult);
+            return new ToolOutput({ type: 'patch', action: 'del', description: '', error: errMsg }, errMsg);
+          }
         }
       }
     const record = await undoStack.executeWrite(
@@ -298,16 +317,24 @@ export const modifyPatch = tool({
     if (actualStart < 1) actualStart = 1;
     if (actualEnd > fileLines.length) actualEnd = fileLines.length;
 
-    const newLines = [...fileLines.slice(0, actualStart - 1), ...replaceLines, ...fileLines.slice(actualEnd)];
+    let newLines = [...fileLines.slice(0, actualStart - 1), ...replaceLines, ...fileLines.slice(actualEnd)];
     const description = `修改行 ${actualStart}-${actualEnd}（${replaceLines.length} 行）`;
 
-      // 语法检查
+      // 语法检查 + 自动修复
       if (!force) {
         const newContent = newLines.join(lineEnding) + (hasTrailingNewline ? lineEnding : '');
         const checkResult = checkSyntax(resolvedPath, newContent);
         if (!checkResult.ok) {
-          const errMsg = formatSyntaxErrors(checkResult);
-          return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: errMsg }, errMsg);
+          // 尝试自动修复：替换区域附近可能产生括号不平衡
+          const repairResult = autoRepair(resolvedPath, newLines,
+            { start: actualStart, end: actualStart + replaceLines.length - 1 },
+            lineEnding, hasTrailingNewline);
+          if (repairResult.repaired) {
+            newLines = repairResult.newLines;
+          } else {
+            const errMsg = formatSyntaxErrors(checkResult);
+            return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: errMsg }, errMsg);
+          }
         }
       }
     const record = await undoStack.executeWrite(
@@ -448,6 +475,12 @@ export async function applyPatchesToFile(
 
 // ── 导出 UndoStack 以供外部使用 ──
 export { UndoStack } from './patch-undo.js';
+
+
+
+
+
+
 
 
 

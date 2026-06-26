@@ -1,3 +1,6 @@
+# Patch history
+.seek-agent/
+
 node_modules/
 
 # Build outputs
@@ -35,4 +38,5 @@ sessions/
 
 # Cloned skill repos
 repos/
+
 

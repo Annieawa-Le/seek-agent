@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
 import { useAgentStatus } from '@/hooks/useAgentStatus.ts';
 import { useMessages } from '@/hooks/useMessages.ts';
@@ -13,6 +13,16 @@ import type { AgentMessage } from '@/types/index.ts';
 export function App() {
   const api = useElectronAPI();
   const status = useAgentStatus();
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  // 同步主题到 data-theme 属性
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  }, []);
   const {
     messages,
     panelState,
@@ -76,8 +86,8 @@ export function App() {
         if (!msg.processing) {
           endStreaming();
         } else {
-          // 新轮次开始，清理上一轮残留的最后一个 agent 气泡
-          removeLastAgent();
+          // 新轮次开始，仅清理上一轮未正常结束（卡在流式状态）的残留气泡
+          removeLastAgent(true);
         }
         break;
 
@@ -131,7 +141,7 @@ export function App() {
 
   return (
     <div id="app">
-      <Header status={status} ctxTokens={status.ctxTokens} />
+      <Header status={status} ctxTokens={status.ctxTokens} theme={theme} onToggleTheme={toggleTheme} />
       <div id="body-content">
         <div id="body-row">
           <LeftSidebar onNewSession={handleNewSession} />
@@ -162,3 +172,9 @@ export function App() {
     </div>
   );
 }
+
+
+
+
+
+

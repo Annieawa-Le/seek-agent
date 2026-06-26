@@ -146,10 +146,11 @@ export function useMessages() {
     panelRef.current = { totalMessages: 0, userMessages: 0, agentMessages: 0, toolCallCount: 0 };
   }, []);
 
-  const removeLastAgent = useCallback(() => {
+  const removeLastAgent = useCallback((onlyIfStreaming?: boolean) => {
     setMessages(prev => {
       for (let i = prev.length - 1; i >= 0; i--) {
         if (prev[i].role === 'agent') {
+          if (onlyIfStreaming && !prev[i].streaming) return prev;
           const updated = [...prev];
           updated.splice(i, 1);
           return updated;
@@ -171,4 +172,5 @@ export function useMessages() {
     setToolCallCount, navigateToolHistory, clearMessages, removeLastAgent, endStreaming,
   };
 }
+
 

@@ -1,18 +1,30 @@
 /**
  * 全局未捕获异常/未处理 Promise 拒绝处理器
- * 防止 NoOutputGeneratedError 等异常在 async 边界逃逸后导致进程退出
+ * 防止 tsx hook 传播到 worker_threads 导致的模块解析错误等异常使进程崩溃
  */
-process.on('uncaughtException', (error) => {
-  // 只拦截 AI SDK 内部已知的「无害」错误，其余重新抛出
-  if (error?.name === 'AI_NoOutputGeneratedError' || error?.message?.includes('No output generated')) {
-    return; // 静默吞掉，主循环自身有处理逻辑
+process.on('uncaughtException', (error: any) => {
+  // 只拦截已知的「无害」错误或 tsx/worker 相关的模块解析错误
+  const msg = error?.message || '';
+  if (
+    error?.name === 'AI_NoOutputGeneratedError' ||
+    msg.includes('No output generated') ||
+    // tesseract.js worker_threads 在 tsx 下的模块解析错误
+    msg.includes('Cannot find module') && msg.includes('tesseract.js') && msg.includes('.jsx') ||
+    msg.includes('worker-script')
+  ) {
+    return; // 静默吞掉
   }
   console.error('[FATAL] Uncaught exception:', error);
 });
 
-process.on('unhandledRejection', (reason) => {
-  if (reason?.name === 'AI_NoOutputGeneratedError' || reason?.message?.includes('No output generated')) {
-    return; // 静默吞掉
+process.on('unhandledRejection', (reason: any) => {
+  const msg = reason?.message || reason?.toString() || '';
+  if (
+    reason?.name === 'AI_NoOutputGeneratedError' ||
+    msg.includes('No output generated') ||
+    msg.includes('worker-script')
+  ) {
+    return;
   }
   console.error('[FATAL] Unhandled rejection:', reason);
 });
@@ -51,7 +63,7 @@ ui.onSubmit = async (input: string) => {
 
 // ── 退出回调 ──
 ui.onExit = async () => {
-  // 优先级：主 agent 清理 → 销毁所有子 agent → 退出进程
+  // 优先级：主 agent 清理 → 销毁所有子 agent → 关闭 OCR 进程 → 退出
   try {
     // 1) 销毁所有子 agent
     const { subAgentManager } = await import('./tools/inner_skills/sub-agent/manager');
@@ -62,7 +74,14 @@ ui.onExit = async () => {
   } catch {
     // 子 agent 相关错误不阻止退出
   }
-  // 2) 退出进程
+  try {
+    // 2) 关闭 OCR 进程
+    const { ocrManager } = await import('./tools/inner_skills/image-identifier/scripts/ocr-manager');
+    ocrManager.shutdown();
+  } catch {
+    // OCR 清理错误不阻止退出
+  }
+  // 3) 退出进程
   process.exit(0);
 };
 // ── 快捷键命令 ──
@@ -100,18 +119,6 @@ ui.onCommand = async (cmd: string) => {
 
 // ── 启动 UI ──
 ui.start();
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

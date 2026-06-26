@@ -68,6 +68,29 @@ export function useElectronAPI() {
     return api.listSessions();
   }, [api]);
 
+  const onMaximizedChange = useCallback((cb: (isMaximized: boolean) => void) => {
+    if (!api) return () => {};
+    const unsub = api.onMaximizedChange(cb);
+    listenersRef.current.push(unsub);
+    return unsub;
+  }, [api]);
+
+  const minimizeWindow = useCallback(() => {
+    api?.minimizeWindow();
+  }, [api]);
+
+  const maximizeWindow = useCallback(() => {
+    api?.maximizeWindow();
+  }, [api]);
+
+  const closeWindow = useCallback(() => {
+    api?.closeWindow();
+  }, [api]);
+
+  const isWindowMaximized = useCallback(async (): Promise<boolean> => {
+    if (!api) return false;
+    return api.isMaximized();
+  }, [api]);
   return {
     isAvailable: !!api,
     onMessage,
@@ -80,5 +103,15 @@ export function useElectronAPI() {
     readFileTree,
     readGitStatus,
     listSessions,
+    minimizeWindow,
+    maximizeWindow,
+    closeWindow,
+    isWindowMaximized,
+    onMaximizedChange,
   };
 }
+
+
+
+
+

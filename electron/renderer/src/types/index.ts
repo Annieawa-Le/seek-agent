@@ -10,6 +10,12 @@ export interface ElectronAPI {
   readFileTree: (dirPath: string) => Promise<FileTreeNode[]>;
   readGitStatus: () => Promise<GitChange[]>;
   listSessions: () => Promise<SessionInfo[]>;
+  // 窗口控制
+  minimizeWindow: () => void;
+  maximizeWindow: () => void;
+  closeWindow: () => void;
+  onMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void;
+  isMaximized: () => Promise<boolean>;
 }
 
 declare global {
@@ -87,3 +93,5 @@ export interface ToolHistoryEntry {
   resultHtml: string | null;
   fullOutput: string | null;
 }
+
+

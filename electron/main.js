@@ -113,6 +113,7 @@ function createWindow() {
     minWidth: 600,
     minHeight: 400,
     title: 'Seek Agent',
+    frame: false,
     backgroundColor: '#f5f5f5',
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
@@ -129,6 +130,14 @@ function createWindow() {
   }
 
   mainWindow.on('closed', () => { mainWindow = null; });
+
+  // 最大化状态变化时通知渲染进程
+  mainWindow.on('maximize', () => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send('window:maximized', true);
+  });
+  mainWindow.on('unmaximize', () => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.send('window:maximized', false);
+  });
 }
 
 // ═════════════════════════════════════════════════════
@@ -152,6 +161,26 @@ ipcMain.on('renderer:restart', () => {
   agentReady = false;
   pendingMessages = [];
   startAgent();
+});
+
+
+// ─── 窗口控制（自定义标题栏）───
+ipcMain.on('window:minimize', () => {
+  if (mainWindow) mainWindow.minimize();
+});
+
+ipcMain.on('window:maximize', () => {
+  if (mainWindow) {
+    mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
+  }
+});
+
+ipcMain.on('window:close', () => {
+  if (mainWindow) mainWindow.close();
+});
+
+ipcMain.handle('window:isMaximized', () => {
+  return mainWindow ? mainWindow.isMaximized() : false;
 });
 
 
@@ -259,6 +288,10 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (agentProcess) { agentProcess.kill(); agentProcess = null; }
 });
+
+
+
+
 
 
 

@@ -18,7 +18,6 @@ export function MessageItem({ msg, onNavigateTool }: Props) {
     case 'agent':
       return (
         <div className={`message agent${msg.streaming ? ' streaming' : ''}${!msg.streaming ? ' round-ended' : ''}`}>
-          <div className="message-agent-header"><span>小鲸鱼Deepseek</span></div>
           <div className="content">
             {msg.content && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />}
             {msg.toolHistory && msg.toolHistory.length > 0 && (
