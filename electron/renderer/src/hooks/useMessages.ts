@@ -74,11 +74,20 @@ export function useMessages() {
 
   const addToolToAgent = useCallback((toolMsg: AgentMessage) => {
     setMessages(prev => {
+      // 优先找当前 streaming 的 agent 气泡
       let agentIdx = -1;
       for (let i = prev.length - 1; i >= 0; i--) {
         if (prev[i].role === 'agent' && prev[i].streaming) { agentIdx = i; break; }
       }
 
+      // 没有 streaming 气泡时，找最后一个 agent 气泡合并
+      if (agentIdx === -1) {
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === 'agent') { agentIdx = i; break; }
+        }
+      }
+
+      // 真的没有 agent 气泡时才新建
       if (agentIdx === -1) {
         const id = nextId();
         panelRef.current.totalMessages++;
@@ -180,6 +189,7 @@ export function useMessages() {
     setToolCallCount, navigateToolHistory, clearMessages, removeLastAgent, endStreaming,
   };
 }
+
 
 
 

@@ -1,12 +1,14 @@
+import { useState, useEffect, useRef } from 'react';
 import type { DisplayMessage } from '@/hooks/useMessages.ts';
 import { renderMarkdown, renderAnsi, escapeHtml } from '@/utils/markdown.ts';
+import type { ToolHistoryEntry } from '@/types/index.ts';
 
 interface Props {
   msg: DisplayMessage;
-  onNavigateTool?: (msgId: number, dir: 'prev' | 'next') => void;
 }
 
-export function MessageItem({ msg, onNavigateTool }: Props) {
+
+export function MessageItem({ msg }: Props) {
   switch (msg.role) {
     case 'user':
       return (
@@ -21,7 +23,7 @@ export function MessageItem({ msg, onNavigateTool }: Props) {
           <div className="content">
             {msg.content && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />}
             {msg.toolHistory && msg.toolHistory.length > 0 && (
-              <ToolHistoryDisplay msg={msg} onNavigate={onNavigateTool} />
+              <ToolHistoryDisplay history={msg.toolHistory} />
             )}
           </div>
         </div>
@@ -69,34 +71,63 @@ export function MessageItem({ msg, onNavigateTool }: Props) {
     default: return null;
   }
 }
-
-function ToolHistoryDisplay({ msg, onNavigate }: {
-  msg: DisplayMessage;
-  onNavigate?: (msgId: number, dir: 'prev' | 'next') => void;
+function ToolHistoryDisplay({ history: rawHistory }: {
+  history: ToolHistoryEntry[];
 }) {
-  const history = msg.toolHistory!;
-  const idx = msg.toolHistoryIndex ?? history.length - 1;
-  const entry = history[idx];
-  if (!entry) return null;
-  const lines = entry.fullOutput ? entry.fullOutput.split('\n').length : 0;
+  // 过滤掉还没有结果返回的条目（正在执行中的）
+  const history = rawHistory.filter(e => e.fullOutput !== null || e.resultHtml !== null);
+  if (history.length === 0) return null;
+
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const lastIdxRef = useRef(history.length - 1);
+
+  // 默认展开最后一个，新调用进来时自动折叠到新的最后一个
+  useEffect(() => {
+    if (history.length > lastIdxRef.current) {
+      // 有新增调用 → 展开新的最后一个
+      setExpandedIdx(history.length - 1);
+    } else if (expandedIdx === null && history.length > 0) {
+      // 首次渲染
+      setExpandedIdx(history.length - 1);
+    }
+    lastIdxRef.current = history.length;
+  }, [history.length]);
 
   return (
-    <>
-      {entry.paramsHtml && <div className="agent-tool-params" dangerouslySetInnerHTML={{ __html: entry.paramsHtml }} />}
-      <div className="agent-tool-container">
-        <div className="agent-tool-call">{entry.toolName}</div>
-        <div className="agent-tool-result">
-          <ToolResultContent entry={entry} lines={lines} />
-        </div>
+    <div className="tool-timeline">
+      <div className="tool-timeline-steps">
+        {history.map((entry, i) => {
+          const isLast = i === history.length - 1;
+          const isExpanded = expandedIdx === i;
+          const hasResult = entry.fullOutput !== null || entry.resultHtml !== null;
+          return (
+            <div key={i} className={`timeline-step${isLast ? ' is-last' : ''}${isExpanded ? ' is-expanded' : ''}${!hasResult ? ' no-result' : ''}`}>
+              <div className="timeline-dot" />
+              <div className="timeline-content">
+                <div
+                  className={`timeline-step-header${hasResult ? ' clickable' : ''}`}
+                  onClick={() => hasResult && setExpandedIdx(isExpanded ? null : i)}
+                >
+                  <span className="timeline-tool-name">{escapeHtml(entry.toolName)}</span>
+                  {hasResult && (
+                    <span className={`timeline-expand-icon${isExpanded ? ' expanded' : ''}`}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </span>
+                  )}
+                </div>
+                {isExpanded && hasResult && (
+                  <div className="timeline-step-result">
+                    <ToolResultContent entry={entry} lines={entry.fullOutput ? entry.fullOutput.split('\n').length : 0} />
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
-      {history.length > 1 && (
-        <div className="agent-tool-counter">
-          <span className={`tool-counter-arrow${idx <= 0 ? ' disabled' : ''}`} onClick={() => onNavigate?.(msg.id, 'prev')}>◀</span>
-          <span className="tool-counter-text">{idx + 1}/{history.length}</span>
-          <span className={`tool-counter-arrow${idx >= history.length - 1 ? ' disabled' : ''}`} onClick={() => onNavigate?.(msg.id, 'next')}>▶</span>
-        </div>
-      )}
-    </>
+    </div>
   );
 }
 
@@ -126,5 +157,12 @@ function ToolResultContent({ entry, lines }: { entry: { resultHtml?: string | nu
     </div>
   );
 }
+
+
+
+
+
+
+
 
 

@@ -4,10 +4,10 @@ import { MessageItem } from './MessageItem.tsx';
 
 interface Props {
   messages: DisplayMessage[];
-  onNavigateTool?: (msgId: number, dir: 'prev' | 'next') => void;
 }
 
-export function MessageList({ messages, onNavigateTool }: Props) {
+
+export function MessageList({ messages }: Props) {
   const areaRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
 
@@ -29,9 +29,12 @@ export function MessageList({ messages, onNavigateTool }: Props) {
     <div id="message-area" ref={areaRef} onScroll={handleScroll}>
       <div id="message-list">
         {messages.map(msg => (
-          <MessageItem key={msg.id} msg={msg} onNavigateTool={onNavigateTool} />
+          <MessageItem key={msg.id} msg={msg} />
         ))}
       </div>
     </div>
   );
 }
+
+
+
