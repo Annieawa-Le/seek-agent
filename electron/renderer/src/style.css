@@ -146,6 +146,7 @@
   --tool-msg-border: rgba(255, 255, 255, 0.04);
   --system-msg-color: var(--text-dim);
   --subagent-msg-accent: var(--purple-400);
+
   --agent-msg-bg: rgba(255, 255, 255, 0.03);
   --agent-msg-border: rgba(255, 255, 255, 0.06);
   --tool-msg-bg: rgba(255, 255, 255, 0.02);
@@ -305,13 +306,31 @@ html, body {
 .header-left {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 4px;
 }
 
 
+
+/* ─── 标题栏图标 — mask 渲染，支持主题色 ─── */
 .header-icon {
-  font-size: 18px;
-  filter: drop-shadow(0 0 6px rgba(212, 168, 67, 0.35));
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  background-color: var(--text-primary);
+  mask: url('../favicon.svg') no-repeat center / contain;
+  -webkit-mask: url('../favicon.svg') no-repeat center / contain;
+  flex-shrink: 0;
+}
+
+.header-title-img {
+  display: inline-block;
+  width: 97px;
+  height: 18px;
+  margin-left: -8px;
+  background-color: var(--text-primary);
+  mask: url('../icon.svg') no-repeat center / contain;
+  -webkit-mask: url('../icon.svg') no-repeat center / contain;
+  flex-shrink: 0;
 }
 
 .header-title {
@@ -1370,42 +1389,47 @@ html, body {
 
 .content strong { font-weight: 600; }
 .content em { font-style: italic; }
-
 /* ═══════════════════════════════════════════════════════════════
-   底部输入栏
+   底部输入栏 — 参考图 v2
+   所有按钮控件都在输入框框体内部
    ═══════════════════════════════════════════════════════════════ */
 .input-bar {
   display: flex;
-  align-items: flex-end;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4) var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4) var(--space-4);
   background: rgba(13, 10, 8, 0.5);
   -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   border-top: 1px solid var(--border-subtle);
 }
 
-.thinking-spinner {
-  font-size: 18px;
-  color: var(--accent);
-  padding-bottom: 6px;
-  animation: spin 1s linear infinite;
-  flex-shrink: 0;
-  width: 22px;
-  text-align: center;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.input-wrapper {
+.input-bar-body {
   flex: 1;
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* ─── 顶部上下文提示 ─── */
+.input-context-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 0 2px;
+  user-select: none;
+  font-weight: 400;
+}
+
+/* ─── 统一框体容器 — 胶囊按钮 + 输入区 + 操作按钮都在边框内部 ─── */
+.input-wrapper {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.03);
   transition: all var(--duration-normal) var(--ease-out);
+  min-width: 0;
+  padding: 6px 8px;
 }
 
 .input-wrapper:focus-within {
@@ -1414,19 +1438,108 @@ html, body {
   box-shadow: 0 0 0 3px rgba(212, 168, 67, 0.08), var(--shadow-glow-gold);
 }
 
+/* ─── 上排工具栏 — 左侧胶囊 + 右侧操作按钮 ─── */
+.input-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.input-toolbar-spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ─── 胶囊按钮组 ─── */
+.capsule-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.capsule-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--duration-fast) var(--ease-out);
+  font-family: var(--font-sans);
+  line-height: 1;
+}
+
+.capsule-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border-color: var(--border-strong);
+}
+
+.capsule-btn.capsule-active {
+  background: rgba(212, 168, 67, 0.12);
+  border-color: rgba(212, 168, 67, 0.25);
+  color: var(--accent);
+}
+
+.capsule-btn.capsule-active:hover {
+  background: rgba(212, 168, 67, 0.18);
+  border-color: rgba(212, 168, 67, 0.35);
+}
+
+.capsule-icon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.capsule-btn.capsule-active .capsule-icon {
+  opacity: 1;
+}
+
+.capsule-btn.capsule-active .capsule-icon {
+  opacity: 1;
+}
+/* ─── 文本输入区 ─── */
+.input-field-area {
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+  position: relative;
+  border-top: 1px solid transparent;
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.input-field-area::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-subtle);
+  pointer-events: none;
+}
+
 #message-input {
   width: 100%;
   border: none;
   outline: none;
   background: transparent;
-  padding: 10px 14px;
+  padding: 6px 4px;
   font-family: var(--font-sans);
   font-size: 13.5px;
   color: var(--text-primary);
   resize: none;
   line-height: 1.5;
   max-height: 150px;
-  min-height: var(--input-min-height);
+  min-height: 32px;
 }
 
 #message-input::placeholder {
@@ -1434,20 +1547,66 @@ html, body {
   font-size: 13px;
 }
 
+.thinking-indicator {
+  position: absolute;
+  right: 6px;
+  bottom: 10px;
+  font-size: 16px;
+  color: var(--accent);
+  animation: spin 1s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ─── 右侧操作按钮 ─── */
+.input-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.action-btn:active {
+  transform: scale(0.95);
+}
+
 .send-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 30px;
+  height: 30px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 50%;
   background: var(--accent);
   color: white;
   cursor: pointer;
   transition: all var(--duration-normal) var(--ease-out);
   flex-shrink: 0;
-  margin-bottom: 1px;
   position: relative;
   overflow: hidden;
 }
@@ -1462,12 +1621,11 @@ html, body {
 
 .send-btn:hover {
   background: var(--accent-hover);
-  transform: translateY(-1px);
   box-shadow: var(--shadow-glow-gold);
 }
 
 .send-btn:active {
-  transform: translateY(0) scale(0.96);
+  transform: scale(0.96);
 }
 
 .send-btn:disabled {
@@ -1481,14 +1639,27 @@ html, body {
 .send-btn:disabled::before { display: none; }
 
 .send-btn.stop-mode {
-  background: var(--danger);
+  background: var(--accent);
 }
 .send-btn.stop-mode:hover {
-  background: var(--danger-hover);
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.3);
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-glow-gold);
 }
 
 .btn-icon { display: flex; }
+
+/* ─── 响应式 ─── */
+@media (max-width: 780px) {
+  .capsule-btn span { display: none; }
+  .capsule-btn { padding: 4px 8px; }
+}
+
+@media (max-width: 640px) {
+  .capsule-group { gap: 2px; }
+  .capsule-btn { padding: 4px 6px; }
+  .input-bar { padding: var(--space-2) var(--space-3) var(--space-3); }
+  .input-wrapper { padding: 4px 6px; }
+}
 
 /* ═══════════════════════════════════════════════════════════════
    面板统计（右栏信息）
@@ -1908,6 +2079,9 @@ html, body {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
+[data-theme='light'] .input-bar-body .input-context-label {
+  color: var(--text-muted);
+}
 [data-theme='light'] .input-wrapper {
   background: rgba(0, 0, 0, 0.02);
 }
@@ -1916,7 +2090,15 @@ html, body {
   background: rgba(57, 100, 254, 0.02);
   box-shadow: 0 0 0 3px rgba(57, 100, 254, 0.08);
 }
-
+[data-theme='light'] .capsule-btn.capsule-active {
+  background: rgba(57, 100, 254, 0.08);
+  border-color: rgba(57, 100, 254, 0.2);
+  color: #3964fe;
+}
+[data-theme='light'] .capsule-btn.capsule-active:hover {
+  background: rgba(57, 100, 254, 0.14);
+  border-color: rgba(57, 100, 254, 0.3);
+}
 /* 亮色状态栏 */
 [data-theme='light'] #main-status {
   background: rgba(240, 242, 245, 0.85);
@@ -1951,9 +2133,6 @@ html, body {
 }
 [data-theme='light'] .content pre::before {
   color: var(--text-dim);
-}
-[data-theme='light'] .header-icon {
-  filter: drop-shadow(0 0 6px rgba(57, 100, 254, 0.3));
 }
 
 /* 亮色选择 */
@@ -2017,6 +2196,31 @@ html, body {
 [data-theme='light'] .panel-tab.active {
   border-bottom-color: #3964fe;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

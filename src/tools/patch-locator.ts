@@ -116,16 +116,16 @@ function scoreCandidate(
     // 差 1-2 行也还行
     score += 20;
   }
-
-  // 2. 基准缩进匹配（+30）
+  // 2. 基准缩进匹配（+60 / +10 / +0）
+  // 单行匹配时缩进是最强区分信号，完全一致得高分，稍有偏差就大幅扣分
   const oldFirstLine = oldLines.find(l => l.trim().length > 0);
   if (oldFirstLine) {
     const oldIndent = oldFirstLine.match(/^(\s*)/)?.[1].length ?? 0;
     const indentDiff = Math.abs(oldIndent - newFeatures.baseIndent);
     if (indentDiff === 0) {
-      score += 30;
+      score += 60;
     } else if (indentDiff <= 2) {
-      score += 20;
+      score += 10;
     }
   }
 
@@ -211,7 +211,6 @@ export async function smartLocate(
   const windowEnd = Math.min(totalLines, anchorEnd + radius);
 
   // 需要匹配的行数 = 用户要修改的范围长度
-  const targetLen = anchorEnd - anchorStart + 1;
 
   if (operation === 'add') {
     // add 没有"旧内容"可匹配，只做位置合理性检查
@@ -227,42 +226,6 @@ export async function smartLocate(
   // del 操作：用目标范围的内容和对应半径匹配
   // 但 del 没有 replaceLines，所以用空行数 + 位置邻近度做简化匹配
   if (operation === 'del') {
-    // 对于删除操作，我们实际上没有新内容特征来反向搜索
-    // 但可以做合理性检查：如果用户锚点全是空行/注释，可能偏移了
-    const anchorLines = fileLines.slice(anchorStart - 1, anchorEnd);
-    const nonEmpty = anchorLines.filter(l => l.trim().length > 0 && !l.trim().startsWith('//') && !l.trim().startsWith('/*') && !l.trim().startsWith('*'));
-    if (nonEmpty.length === 0 && targetLen > 0) {
-      // 锚点位置全是空白/注释 → 向前后搜索最近的代码块
-      // 向后搜索
-      for (let i = anchorEnd + 1; i <= Math.min(totalLines, anchorEnd + radius); i++) {
-        const line = fileLines[i - 1].trim();
-        if (line.length > 0 && !line.startsWith('//') && !line.startsWith('/*') && !line.startsWith('*')) {
-          // 找到一个有内容的行，修正到该行
-          const newEnd = Math.min(i + targetLen - 1, totalLines);
-          return {
-            matched: true,
-            startLine: i,
-            endLine: newEnd,
-            confidence: 60,
-            message: `锚点位置无有效内容，已向下漂移到行 ${i}`,
-          };
-        }
-      }
-      // 向前搜索
-      for (let i = anchorStart - 1; i >= Math.max(1, anchorStart - radius); i--) {
-        const line = fileLines[i - 1].trim();
-        if (line.length > 0 && !line.startsWith('//') && !line.startsWith('/*') && !line.startsWith('*')) {
-          const newEnd = Math.min(i + targetLen - 1, totalLines);
-          return {
-            matched: true,
-            startLine: i,
-            endLine: newEnd,
-            confidence: 60,
-            message: `锚点位置无有效内容，已向上漂移到行 ${i}`,
-          };
-        }
-      }
-    }
     return {
       matched: false,
       startLine: anchorStart,
@@ -273,40 +236,86 @@ export async function smartLocate(
   }
 
   // modify 操作：用新内容的特征反向搜索
-  // 窗口中的每个位置 [pos, pos + targetLen - 1] 作为候选
-  let bestScore = 0;
-  let bestLine = anchorStart;
+  // 分别匹配首行和尾行，然后拉伸范围
+  let bestStartScore = 0;
+  let bestEndScore = 0;
+  let bestStartLine = anchorStart;
   let bestEndLine = anchorEnd;
 
-  for (let pos = windowStart; pos + targetLen - 1 <= windowEnd; pos++) {
-    const candidateLines = fileLines.slice(pos - 1, pos - 1 + targetLen);
+  // 首行匹配：在窗口内找与新内容首行最匹配的行
+  for (let pos = windowStart; pos <= windowEnd; pos++) {
+    const oldLine = fileLines[pos - 1];
+    if (!oldLine) continue;
     const anchorDistance = Math.abs(pos - anchorStart);
-    const score = scoreCandidate(candidateLines, newFeatures, anchorDistance);
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestLine = pos;
-      bestEndLine = pos + targetLen - 1;
+    // 用新内容首行的特征来匹配单行
+    const firstLineFeatures = {
+      baseIndent: newFeatures.baseIndent,
+      firstLineTokens: newFeatures.firstLineTokens,
+      lastLineTokens: newFeatures.firstLineTokens,
+      lineCount: 1,
+      nonEmptyCount: oldLine.trim().length > 0 ? 1 : 0,
+    };
+    const score = scoreCandidate([oldLine], firstLineFeatures, anchorDistance);
+    if (score > bestStartScore) {
+      bestStartScore = score;
+      bestStartLine = pos;
     }
   }
 
-  // 阈值判断
-  const CONFIDENCE_THRESHOLD = 80;
-  if (bestScore >= CONFIDENCE_THRESHOLD && (bestLine !== anchorStart || bestEndLine !== anchorEnd)) {
-    return {
-      matched: true,
-      startLine: bestLine,
-      endLine: bestEndLine,
-      confidence: bestScore,
-      message: `已自动修正行号 ${anchorStart}-${anchorEnd} → ${bestLine}-${bestEndLine}（置信度 ${bestScore}/150）`,
+  // 尾行匹配：在窗口内找与新内容末行最匹配的行
+  if (newLines.length > 1) {
+    const lastLineFeatures = {
+      baseIndent: newFeatures.baseIndent,
+      firstLineTokens: newFeatures.lastLineTokens,
+      lastLineTokens: newFeatures.lastLineTokens,
+      lineCount: 1,
+      nonEmptyCount: 1,
     };
-  } else if (bestScore >= CONFIDENCE_THRESHOLD) {
+    for (let pos = windowStart; pos <= windowEnd; pos++) {
+      const oldLine = fileLines[pos - 1];
+      if (!oldLine) continue;
+      const anchorDistance = Math.abs(pos - anchorEnd);
+      const score = scoreCandidate([oldLine], lastLineFeatures, anchorDistance);
+      if (score > bestEndScore) {
+        bestEndScore = score;
+        bestEndLine = pos;
+      }
+    }
+  } else {
+    // 单行替换：首尾相同
+    bestEndLine = bestStartLine;
+    bestEndScore = bestStartScore;
+  }
+
+  // 确保 start <= end
+  if (bestStartLine > bestEndLine) {
+    const tmp = bestStartLine;
+    bestStartLine = bestEndLine;
+    bestEndLine = tmp;
+    const tmpScore = bestStartScore;
+    bestStartScore = bestEndScore;
+    bestEndScore = tmpScore;
+  }
+
+  // 阈值判断
+  const CONFIDENCE_THRESHOLD = 60;
+  const hasMoved = bestStartLine !== anchorStart || bestEndLine !== anchorEnd;
+  const bestScore = Math.min(bestStartScore, bestEndScore);
+  if (bestScore >= CONFIDENCE_THRESHOLD && hasMoved) {
     return {
       matched: true,
-      startLine: bestLine,
+      startLine: bestStartLine,
       endLine: bestEndLine,
       confidence: bestScore,
-      message: `行号 ${bestLine}-${bestEndLine} 位置已确认（置信度 ${bestScore}/150）`,
+      message: `已自动修正行号 ${anchorStart}-${anchorEnd} → ${bestStartLine}-${bestEndLine}（拉伸 ${newLines.length} 行替换原 ${anchorEnd - anchorStart + 1} 行，置信度 ${bestScore}/150）`,
+    };
+  } else if (bestScore >= CONFIDENCE_THRESHOLD && !hasMoved) {
+    return {
+      matched: true,
+      startLine: bestStartLine,
+      endLine: bestEndLine,
+      confidence: bestScore,
+      message: `行号 ${bestStartLine}-${bestEndLine} 位置已确认（置信度 ${bestScore}/150）`,
     };
   }
 
@@ -318,3 +327,6 @@ export async function smartLocate(
     message: `未找到高置信度匹配（最佳得分 ${bestScore}/${CONFIDENCE_THRESHOLD}），保持用户行号`,
   };
 }
+
+
+

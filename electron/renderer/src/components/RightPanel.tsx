@@ -95,3 +95,5 @@ function GitChangesContent({ changes }: { changes: GitChange[] }) {
     ))}
   </div>;
 }
+
+

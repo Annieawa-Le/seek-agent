@@ -31,7 +31,15 @@ export function useMessages() {
     const entry: DisplayMessage = { id, content: msg.content ?? '', createdAt: msg.createdAt ?? Date.now(), ...msg };
 
     setMessages(prev => {
-      if (entry.role === 'agent' && !entry.content && !msg.toolMeta) return prev;
+      // 空气泡（来自 addAgentMessage('')）不创建可见气泡，仅 commit 上一轮
+      if (entry.role === 'agent' && !entry.content && !msg.toolMeta) {
+        const cleaned = prev.map(m => ({
+          ...m,
+          streaming: m.role === 'agent' ? false : m.streaming
+        }));
+        return cleaned;
+      }
+
       panelRef.current.totalMessages++;
       if (entry.role === 'user') panelRef.current.userMessages++;
       else if (entry.role === 'agent') panelRef.current.agentMessages++;
@@ -51,7 +59,7 @@ export function useMessages() {
     setMessages(prev => {
       for (let i = prev.length - 1; i >= 0; i--) {
         const m = prev[i];
-        if (m.role === 'agent' && m.streaming && !m.toolHistory?.length) {
+        if (m.role === 'agent' && m.streaming) {
           const updated = [...prev];
           updated[i] = { ...m, content: m.content + text };
           return updated;
@@ -68,7 +76,7 @@ export function useMessages() {
     setMessages(prev => {
       let agentIdx = -1;
       for (let i = prev.length - 1; i >= 0; i--) {
-        if (prev[i].role === 'agent') { agentIdx = i; break; }
+        if (prev[i].role === 'agent' && prev[i].streaming) { agentIdx = i; break; }
       }
 
       if (agentIdx === -1) {
@@ -172,5 +180,14 @@ export function useMessages() {
     setToolCallCount, navigateToolHistory, clearMessages, removeLastAgent, endStreaming,
   };
 }
+
+
+
+
+
+
+
+
+
 
 

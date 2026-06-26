@@ -9,7 +9,11 @@
 
 import { ChildProcess, spawn } from 'node:child_process';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface OCRRequest {
   id: string;

@@ -159,7 +159,7 @@ export class ElectronUIBridge {
  this.send({ type: 'blank' });
  }
 
- /** 流式追加到最后一条 agent 消息 */
+ /** 流式追加（追加到当前空气泡，不新建气泡） */
  appendToLastAgent(text: string): void {
  for (let i = this.messages.length - 1; i >= 0; i--) {
  if (this.messages[i].role === 'agent') {
@@ -344,6 +344,11 @@ function formatToolCallHtml(toolName: string, args: Record<string, unknown>): st
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+
+
+
+
 
 
 
