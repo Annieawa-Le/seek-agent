@@ -20,8 +20,10 @@
   "packageManager": "pnpm@10.33.2",
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.35",
+    "@ai-sdk/mcp": "^2.0.3",
     "@ai-sdk/openai": "^3.0.66",
     "@ai-sdk/openai-compatible": "^2.0.48",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tavily/core": "^0.7.6",
     "ai": "^6.0.193",
     "dotenv": "^17.4.2",
@@ -36,6 +38,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1"
+    "@types/node": "^25.9.1",
+    "electron": "^42.5.0"
   }
 }

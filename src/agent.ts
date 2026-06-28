@@ -1,3 +1,4 @@
+import { getMcpManager } from './mcp';
 import { streamText, type TextPart, type ToolCallPart, type ModelMessage, NoOutputGeneratedError } from 'ai';
 import { tools } from './tools';
 import { TerminalUI } from './ui';
@@ -77,6 +78,12 @@ export class CLIAAgent {
     setSystemPrompt(this.systemPrompt);
     this.tokenizer = new TokenizerService();
     this.tokenizer.start().catch(() => {});
+
+    // 注册进程退出时的 MCP 清理
+    const cleanup = () => {
+      import('./mcp').then(({ shutdownMCP }) => shutdownMCP()).catch(() => {});
+    };
+    process.on('beforeExit', cleanup);
   }
 
   /**
@@ -189,6 +196,13 @@ export class CLIAAgent {
 
     // ── 当前工作目录 ──
     parts.push(`> 当前工作目录：${getWorkspaceRoot()}`);
+
+    // ── MCP Server 指令注入 ──
+    const mcpManager = getMcpManager();
+    const mcpInstructions = mcpManager?.getAllInstructions() ?? [];
+    if (mcpInstructions.length > 0) {
+      parts.push(`## 已连接的 MCP Server 使用说明\n${mcpInstructions.join('\n\n')}`);
+    }
 
     // ── 智能搜索模式：禁用普通搜索，仅使用 tavily ──
     if (smartSearch) {
@@ -885,6 +899,10 @@ export class CLIAAgent {
     }
   }
 }
+
+
+
+
 
 
 

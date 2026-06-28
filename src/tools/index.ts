@@ -3,6 +3,7 @@ import path from 'node:path';
 import { readFile, readdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { registerSkillTranslations } from '../assets/tool-translations';
+import { initializeMCP } from '../mcp';
 import { registerPanelProvider } from './panel-registry';
 // ── 核心工具（硬编码） ──
 // ── 核心工具（硬编码） ──
@@ -152,12 +153,43 @@ async function loadInnerSkills(): Promise<Record<string, any>> {
 }
 const skillTools = await loadInnerSkills();
 
+// ── MCP 工具集成 ──
+// 从 mcp.json 配置中初始化 MCP Server 并获取远程工具
+// 这些工具会自动合并到 toolsContainer 中，与本地工具无缝协作
+let mcpIntegration: Awaited<ReturnType<typeof initializeMCP>> | null = null;
+let mcpInitialized = false;
+
+async function initMcpTools(): Promise<void> {
+  if (mcpInitialized) return;
+  mcpInitialized = true;
+  try {
+    mcpIntegration = await initializeMCP();
+    if (Object.keys(mcpIntegration.tools).length > 0) {
+      // 将 MCP 工具注册到 toolsContainer
+      for (const [name, toolImpl] of Object.entries(mcpIntegration.tools)) {
+        if (name in toolsContainer) {
+          console.warn(`⚠ MCP 工具 "${name}" 与已有工具重名，已跳过`);
+          continue;
+        }
+        toolsContainer[name] = toolImpl;
+      }
+    }
+  } catch (err) {
+    console.warn('[MCP] 初始化失败:', (err as Error).message);
+  }
+}
+
 // 可变的 tools 容器 —— 静态 import 拿到的是同一对象引用，
 // reload_skills 通过 Object.assign 更新其属性
 const toolsContainer: Record<string, any> = {
   ...coreTools,
   ...skillTools,
 };
+
+// 非阻塞初始化 MCP（工具会在连接完成后动态注入到 toolsContainer）
+initMcpTools().catch(err =>
+  console.warn('[MCP] 异步初始化失败:', (err as Error).message)
+);
 
 export const tools = toolsContainer;
 
@@ -182,6 +214,24 @@ export async function reloadSkills(): Promise<string> {
   report.push('');
   // 刷新子 agent 工具注册表
   toolCache.reset();
+
+  // ── 重新加载 MCP 工具 ──
+  try {
+    const { reloadMCP } = await import('../mcp');
+    const mcp = await reloadMCP();
+    for (const [name, toolImpl] of Object.entries(mcp.tools)) {
+      if (name in coreTools || name in toolsContainer) {
+        report.push(`  ⏭ 跳过 MCP 工具 ${name}（重名）`);
+        continue;
+      }
+      toolsContainer[name] = toolImpl;
+      report.push(`  ✅ 添加 MCP 工具 ${name}`);
+    }
+    mcpIntegration = mcp as any;
+  } catch (err) {
+    report.push(`  ⚠ MCP 重载失败: ${(err as Error).message}`);
+  }
+
   report.push(`共新增 ${report.filter(r => r.includes('✅')).length} 个工具。`);
   return report.join('\n');
 }
@@ -310,4 +360,11 @@ export async function loadSingleSkill(skillName: string): Promise<boolean> {
 
 
 
+
+
+
+
+
+// ── MCP 相关导出 ──
+export { getMcpManager, shutdownMCP, reloadMCP } from '../mcp';
 
