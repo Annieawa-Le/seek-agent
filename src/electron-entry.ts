@@ -55,7 +55,7 @@ bridge.onExit = async () => {
   process.exit(0);
 };
 
-// ── 快捷键命令 ──
+// ── 命令转发 ──
 bridge.onCommand = async (cmd: string) => {
   switch (cmd) {
     case 'memory_shorten': {
@@ -81,6 +81,14 @@ bridge.onCommand = async (cmd: string) => {
       subAgentManager.fireAll();
       break;
     }
+    default: {
+      // 尝试通过指令系统执行（如 workdir-global <path>）
+      const handled = await commandRegistry.tryExecute(cmd, { ui: bridge as any, agent });
+      if (!handled) {
+        console.warn(`[entry] unknown command: ${cmd}`);
+      }
+      break;
+    }
   }
 };
 
@@ -89,3 +97,4 @@ bridge.startListening();
 
 // ── 通知主进程已就绪 ──
 bridge.emitReady();
+

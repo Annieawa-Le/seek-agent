@@ -4,7 +4,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { registerSkillTranslations } from '../assets/tool-translations';
 import { registerPanelProvider } from './panel-registry';
-import { setToolRegistry } from './inner_skills/sub-agent/manager';
+// ── 核心工具（硬编码） ──
 // ── 核心工具（硬编码） ──
 import {
   deskAddTool, deskListTool, deskRemoveTool, deskClearTool,
@@ -161,8 +161,6 @@ const toolsContainer: Record<string, any> = {
 
 export const tools = toolsContainer;
 
-// ── 向 sub-agent 管理器注入工具注册表 ──
-setToolRegistry(toolsContainer as any);
 
 
 
@@ -183,7 +181,6 @@ export async function reloadSkills(): Promise<string> {
   }
   report.push('');
   // 刷新子 agent 工具注册表
-  setToolRegistry(toolsContainer as any);
   toolCache.reset();
   report.push(`共新增 ${report.filter(r => r.includes('✅')).length} 个工具。`);
   return report.join('\n');
@@ -203,7 +200,6 @@ export function removeSkill(skillName: string): string[] {
     }
   }
   delete skillToolMap[skillName];
-  setToolRegistry(toolsContainer as any);
   return removed;
 }
 
@@ -219,13 +215,14 @@ export function removeTool(toolName: string): string | null {
     if (idx !== -1) {
       names.splice(idx, 1);
       if (names.length === 0) delete skillToolMap[skill];
-      setToolRegistry(toolsContainer as any);
       return skill;
     }
   }
-  setToolRegistry(toolsContainer as any);
   return '__anonymous__';
 }
+
+
+
 
 
 

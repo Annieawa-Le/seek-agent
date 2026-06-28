@@ -8,11 +8,11 @@
  *   4. 通过 IPC 在 agent 与渲染进程之间中转消息
  */
 
-import { app, BrowserWindow, ipcMain } from 'electron';
-import { spawn } from 'child_process';
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
-import { readdirSync, readFileSync, statSync } from 'fs';
+import { readdirSync, readFileSync, statSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,11 +20,48 @@ const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, '..');
 const AGENT_ENTRY = join(ROOT, 'src', 'electron-entry.ts');
 const RENDERER_HTML = join(__dirname, 'renderer', 'dist', 'index.html');
+const RECENT_DIRS_FILE = join(ROOT, '.seek-agent', 'recent-dirs.json');
 
 let agentProcess = null;
 let mainWindow = null;
 let pendingMessages = [];
 let agentReady = false;
+
+// 当前工作区目录（初始为 ROOT）
+let currentWorkDir = ROOT;
+
+// ═════════════════════════════════════════════════════
+// 最近目录管理
+// ═════════════════════════════════════════════════════
+
+function loadRecentDirs() {
+  try {
+    if (!existsSync(RECENT_DIRS_FILE)) return [];
+    const data = readFileSync(RECENT_DIRS_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentDirs(dirs) {
+  try {
+    const dir = dirname(RECENT_DIRS_FILE);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(RECENT_DIRS_FILE, JSON.stringify(dirs, null, 2), 'utf8');
+  } catch { /* ignore */ }
+}
+
+function addRecentDir(dirPath) {
+  let dirs = loadRecentDirs();
+  // 去重：移除已有同名项
+  dirs = dirs.filter(d => d !== dirPath);
+  // 插入到最前面
+  dirs.unshift(dirPath);
+  // 最多保留 10 个
+  if (dirs.length > 10) dirs = dirs.slice(0, 10);
+  saveRecentDirs(dirs);
+}
 
 // ═════════════════════════════════════════════════════
 // Agent 进程管理
@@ -32,7 +69,7 @@ let agentReady = false;
 
 function startAgent() {
   agentProcess = spawn(process.platform === 'win32' ? 'node.exe' : 'node', ['--import', 'tsx/esm', AGENT_ENTRY], {
-    cwd: ROOT,
+    cwd: currentWorkDir,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, ELECTRON_MODE: '1' },
     shell: false,
@@ -184,9 +221,65 @@ ipcMain.handle('window:isMaximized', () => {
 });
 
 
+// ─── 工作区目录管理 ───
+
+/** 获取当前工作目录 */
+ipcMain.handle('workdir:get', () => {
+  return currentWorkDir;
+});
+
+/** 设置工作目录 */
+ipcMain.handle('workdir:set', async (_e, newDir) => {
+  try {
+    const resolved = resolve(newDir);
+    if (!existsSync(resolved)) {
+      return { error: '目录不存在' };
+    }
+    const stat = statSync(resolved);
+    if (!stat.isDirectory()) {
+      return { error: '路径不是目录' };
+    }
+    currentWorkDir = resolved;
+    addRecentDir(resolved);
+
+    // 通知 agent 切换工作目录（通过 workdir-global 命令）
+    if (agentReady) {
+      sendToAgent({ type: 'command', cmd: `workdir-global ${resolved}`, id: 'workdir-change' });
+    }
+
+    // 通知渲染进程工作目录已变更
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('workdir:changed', resolved);
+    }
+
+    return { success: true, path: resolved };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+/** 打开系统对话框选择文件夹 */
+ipcMain.handle('workdir:select', async () => {
+  if (!mainWindow) return { error: '窗口不可用' };
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: '选择工作区目录',
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return { canceled: true };
+  }
+  return { canceled: false, path: result.filePaths[0] };
+});
+
+/** 获取最近目录列表 */
+ipcMain.handle('workdir:getRecent', () => {
+  return loadRecentDirs();
+});
+
+
 // ─── 渲染进程请求：读取目录文件树 ───
 ipcMain.handle('fs:readFileTree', async (_e, dirPath) => {
-  const targetDir = dirPath ? resolve(ROOT, dirPath) : ROOT;
+  const targetDir = dirPath ? resolve(currentWorkDir, dirPath) : currentWorkDir;
   try {
     return buildFileTree(targetDir, '');
   } catch (err) {
@@ -219,7 +312,7 @@ function buildFileTree(dir, relativePath) {
 // ─── 渲染进程请求：读取 git 变更 ───
 ipcMain.handle('fs:readGitStatus', async () => {
   try {
-    const output = execSync('git status --porcelain', { cwd: ROOT, encoding: 'utf8', timeout: 5000 });
+    const output = execSync('git status --porcelain', { cwd: currentWorkDir, encoding: 'utf8', timeout: 5000 });
     const lines = output.trim().split('\n').filter(Boolean);
     return lines.map(line => ({
       status: line.slice(0, 2).trim(),
@@ -288,12 +381,4 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (agentProcess) { agentProcess.kill(); agentProcess = null; }
 });
-
-
-
-
-
-
-
-
 

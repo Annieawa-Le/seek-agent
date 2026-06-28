@@ -15,7 +15,7 @@ import {
   getToolCollapse,
 } from './assets/tool-translations';
 import { toolCache } from './tools/tool-cache';
-import { triggerListenInterceptors, triggerResultListenInterceptors, drainPendingInjections, subAgentManager } from './tools/inner_skills/sub-agent/manager';
+import { drainPendingInjections, subAgentManager } from './tools/inner_skills/sub-agent/manager';
 import { extractBulk } from './tools/tool-output';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -75,6 +75,14 @@ export class CLIAAgent {
     setSystemPrompt(this.systemPrompt);
     this.tokenizer = new TokenizerService();
     this.tokenizer.start().catch(() => {});
+  }
+
+  /**
+   * 重新加载 system prompt（切换工作目录后调用，刷新 SEEK.md）
+   */
+  reloadPrompt(): void {
+    this.systemPrompt = this.loadDefaultPrompts();
+    setSystemPrompt(this.systemPrompt);
   }
 
   // ────────────────────────────────────────────────
@@ -167,6 +175,9 @@ export class CLIAAgent {
       }
     }
 
+
+    // ── 当前工作目录 ──
+    parts.push(`> 当前工作目录：${getWorkspaceRoot()}`);
     return parts.join('\n\n');
   }
 
@@ -552,12 +563,6 @@ export class CLIAAgent {
       }
 
 
-      // ── Listen 模式自动拦截 ──
-      try {
-        await triggerListenInterceptors(toolName, args, this.messages);
-      } catch {
-        // 拦截失败不影响工具执行
-      }
       // ── 执行 ──
       let execResult: unknown;
       try {
@@ -606,14 +611,6 @@ export class CLIAAgent {
         }],
       });
 
-      // ── Result 模式监听拦截（阻塞执行，同时显示「审查中」状态） ──
-      this.ui.showListenStatus('Listen');
-      try {
-        await triggerResultListenInterceptors(toolName, args, sout, this.messages);
-      } catch {
-        // 拦截失败不影响工具结果
-      }
-      this.ui.hideListenStatus();
     }
 
     // ── 处理中断/中止（submission 留在队列中，下一轮安全时再排空） ──
@@ -872,6 +869,12 @@ export class CLIAAgent {
     }
   }
 }
+
+
+
+
+
+
 
 
 

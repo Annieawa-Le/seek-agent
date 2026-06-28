@@ -3,6 +3,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import path from 'path';
 import { getExplorerPath, setExplorerPath, getExplorerRoot } from './explorer-state.js';
+import { resolvePath } from '../../../workdir.js';
 
 export const goUp = tool({
   description: `从当前路径返回上级目录路径。如果已在根目录则返回当前路径。`,
@@ -11,7 +12,7 @@ export const goUp = tool({
   }),
   execute: async ({ currentPath }): Promise<string> => {
     try {
-      const absPath = path.resolve(currentPath);
+      const absPath = resolvePath(currentPath);
       const parentPath = path.dirname(absPath);
 
       if (parentPath === absPath) {
@@ -53,3 +54,4 @@ export const explorerGoUp = tool({
     return `${parentPath}\n\n${listing}`;
   },
 });
+

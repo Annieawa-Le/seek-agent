@@ -366,31 +366,8 @@ export const modifyPatch = tool({
     let actualEnd = endLine;
     let locateMessage = '';
 
-    // 先用用户指定的行号构建 newLines
-    let newLines = [...fileLines.slice(0, actualStart - 1), ...replaceLines, ...fileLines.slice(actualEnd)];
-    const description = `修改行 ${actualStart}-${actualEnd}（${replaceLines.length} 行）`;
-
-    let needRepair = false;
+    // 先执行 smartLocate 修正行号，再用修正后的行号构建 newLines
     if (!force) {
-      const newContent = newLines.join(lineEnding) + (hasTrailingNewline ? lineEnding : '');
-      const checkResult = checkSyntax(resolvedPath, newContent);
-      if (!checkResult.ok) {
-        needRepair = true;
-      } else {
-        // 语法通过，直接写
-        const record = await undoStack.executeWrite(
-          resolvedPath, 'modify', description, fileLines, newLines, hasTrailingNewline, lineEnding,
-          async (nl: string[]) => { await fs.writeFile(resolvedPath, nl.join(lineEnding) + (hasTrailingNewline ? lineEnding : ''), 'utf8'); },
-        );
-        let msg = `✅ [MODIFY] ${description}\n📄 文件：${resolvedPath}\n📐 行数：${fileLines.length} → ${newLines.length}\n📝 diff 已持久化到：${record.diffFilePath}\n`;
-        if (record.diff) msg += `\n--- diff ---\n${record.diff}`;
-        msg += '\n💡 如需撤销：undo_patch()';
-        return new ToolOutput({ type: 'patch', action: 'modify', description, filePath: resolvedPath, diff: record.diff, undoId: record.meta.id }, msg);
-      }
-    }
-
-    // 语法检查失败，尝试 smartLocate 拉伸行号后重试
-    if (!force && needRepair) {
       const locateResult = await smartLocate(resolvedPath, { anchorStart: startLine, anchorEnd: endLine, fileLines, newLines: replaceLines, operation: 'modify', radius: 10 });
       if (locateResult.matched) {
         actualStart = locateResult.startLine;
@@ -399,43 +376,35 @@ export const modifyPatch = tool({
       }
       if (actualStart < 1) actualStart = 1;
       if (actualEnd > fileLines.length) actualEnd = fileLines.length;
+    }
 
-      newLines = [...fileLines.slice(0, actualStart - 1), ...replaceLines, ...fileLines.slice(actualEnd)];
-      const newDesc = `修改行 ${actualStart}-${actualEnd}（${replaceLines.length} 行）`;
+    let newLines = [...fileLines.slice(0, actualStart - 1), ...replaceLines, ...fileLines.slice(actualEnd)];
+    const description = `修改行 ${actualStart}-${actualEnd}（${replaceLines.length} 行）`;
 
-      // 第二次语法检查 + 自动修复
+    if (!force) {
       const newContent = newLines.join(lineEnding) + (hasTrailingNewline ? lineEnding : '');
-      const checkResult2 = checkSyntax(resolvedPath, newContent);
-      if (!checkResult2.ok) {
+      const checkResult = checkSyntax(resolvedPath, newContent);
+      if (!checkResult.ok) {
+        // 语法检查失败，尝试自动修复
         const repairResult = autoRepair(resolvedPath, newLines,
           { start: actualStart, end: actualStart + replaceLines.length - 1 },
           lineEnding, hasTrailingNewline);
         if (repairResult.repaired) {
           newLines = repairResult.newLines;
         } else {
-          const errMsg = formatSyntaxErrors(checkResult2);
+          const errMsg = formatSyntaxErrors(checkResult);
           return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: errMsg }, errMsg);
         }
       }
-
-      const record = await undoStack.executeWrite(
-        resolvedPath, 'modify', newDesc, fileLines, newLines, hasTrailingNewline, lineEnding,
-        async (nl: string[]) => { await fs.writeFile(resolvedPath, nl.join(lineEnding) + (hasTrailingNewline ? lineEnding : ''), 'utf8'); },
-      );
-
-      let msg = `✅ [MODIFY] ${newDesc}\n📄 文件：${resolvedPath}\n📐 行数：${fileLines.length} → ${newLines.length}\n📝 diff 已持久化到：${record.diffFilePath}\n`;
-      if (locateMessage) msg += `🔍 ${locateMessage}\n`;
-      if (record.diff) msg += `\n--- diff ---\n${record.diff}`;
-      msg += '\n💡 如需撤销：undo_patch()';
-      return new ToolOutput({ type: 'patch', action: 'modify', description: newDesc, filePath: resolvedPath, diff: record.diff, undoId: record.meta.id }, msg);
     }
 
-    // force 模式：直接写
     const record = await undoStack.executeWrite(
       resolvedPath, 'modify', description, fileLines, newLines, hasTrailingNewline, lineEnding,
       async (nl: string[]) => { await fs.writeFile(resolvedPath, nl.join(lineEnding) + (hasTrailingNewline ? lineEnding : ''), 'utf8'); },
     );
+
     let msg = `✅ [MODIFY] ${description}\n📄 文件：${resolvedPath}\n📐 行数：${fileLines.length} → ${newLines.length}\n📝 diff 已持久化到：${record.diffFilePath}\n`;
+    if (locateMessage) msg += `🔍 ${locateMessage}\n`;
     if (record.diff) msg += `\n--- diff ---\n${record.diff}`;
     msg += '\n💡 如需撤销：undo_patch()';
     return new ToolOutput({ type: 'patch', action: 'modify', description, filePath: resolvedPath, diff: record.diff, undoId: record.meta.id }, msg);
@@ -567,6 +536,7 @@ export async function applyPatchesToFile(
 
 // ── 导出 UndoStack 以供外部使用 ──
 export { UndoStack } from './patch-undo.js';
+
 
 
 

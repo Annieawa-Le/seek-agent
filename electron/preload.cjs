@@ -9,6 +9,7 @@
  *   5. sendCommand(cmd)            — 发送快捷键命令
  *   6. abort()                     — 中断 AI 处理
  *   7. restart()                   — 重启 agent
+ *   8. workdir 相关                — 工作区目录管理
  */
 
 const { contextBridge, ipcRenderer } = require('electron');
@@ -40,6 +41,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('agent:stderr', handler);
   },
 
+  /** 监听工作目录变更 */
+  onWorkdirChanged: (callback) => {
+    const handler = (_event, path) => callback(path);
+    ipcRenderer.on('workdir:changed', handler);
+    return () => ipcRenderer.removeListener('workdir:changed', handler);
+  },
+
   // ─── 发送 ───
 
   /** 发送用户输入到 agent */
@@ -66,6 +74,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('renderer:restart');
   },
 
+  // ─── 工作区目录管理 ───
+
+  /** 获取当前工作目录 */
+  getWorkdir: async () => {
+    return ipcRenderer.invoke('workdir:get');
+  },
+
+  /** 设置工作目录 */
+  setWorkdir: async (dirPath) => {
+    return ipcRenderer.invoke('workdir:set', dirPath);
+  },
+
+  /** 打开系统对话框选择文件夹 */
+  selectFolder: async () => {
+    return ipcRenderer.invoke('workdir:select');
+  },
+
+  /** 获取最近目录列表 */
+  getRecentDirs: async () => {
+    return ipcRenderer.invoke('workdir:getRecent');
+  },
+
   // ─── 文件系统 API ───
 
   /** 读取项目文件树 */
@@ -74,6 +104,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   /** 读取 git 变更状态 */
+  readGitStatus: async () => {
+    return ipcRenderer.invoke('fs:readGitStatus');
+  },
+
+  /** 读取 sessions 列表 */
+  listSessions: async () => {
+    return ipcRenderer.invoke('fs:listSessions');
+  },
 
   // ─── 窗口控制 ───
 
@@ -103,16 +141,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isMaximized: async () => {
     return ipcRenderer.invoke('window:isMaximized');
   },
-  readGitStatus: async () => {
-    return ipcRenderer.invoke('fs:readGitStatus');
-  },
-
-  /** 读取 sessions 列表 */
-  listSessions: async () => {
-    return ipcRenderer.invoke('fs:listSessions');
-  },
 });
-
-
-
 

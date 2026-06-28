@@ -37,6 +37,13 @@ export function useElectronAPI() {
     return unsub;
   }, [api]);
 
+  const onWorkdirChanged = useCallback((cb: (path: string) => void) => {
+    if (!api) return () => {};
+    const unsub = api.onWorkdirChanged(cb);
+    listenersRef.current.push(unsub);
+    return unsub;
+  }, [api]);
+
   const sendInput = useCallback((content: string) => {
     api?.sendInput(content);
   }, [api]);
@@ -51,6 +58,26 @@ export function useElectronAPI() {
 
   const restart = useCallback(() => {
     api?.restart();
+  }, [api]);
+
+  const getWorkdir = useCallback(async (): Promise<string> => {
+    if (!api) return '';
+    return api.getWorkdir();
+  }, [api]);
+
+  const setWorkdir = useCallback(async (dirPath: string) => {
+    if (!api) return { error: 'API 不可用' };
+    return api.setWorkdir(dirPath);
+  }, [api]);
+
+  const selectFolder = useCallback(async () => {
+    if (!api) return { canceled: true };
+    return api.selectFolder();
+  }, [api]);
+
+  const getRecentDirs = useCallback(async (): Promise<string[]> => {
+    if (!api) return [];
+    return api.getRecentDirs();
   }, [api]);
 
   const readFileTree = useCallback(async (dirPath = '') => {
@@ -91,15 +118,21 @@ export function useElectronAPI() {
     if (!api) return false;
     return api.isMaximized();
   }, [api]);
+
   return {
     isAvailable: !!api,
     onMessage,
     onStatus,
     onStderr,
+    onWorkdirChanged,
     sendInput,
     sendCommand,
     abort,
     restart,
+    getWorkdir,
+    setWorkdir,
+    selectFolder,
+    getRecentDirs,
     readFileTree,
     readGitStatus,
     listSessions,
@@ -110,8 +143,4 @@ export function useElectronAPI() {
     onMaximizedChange,
   };
 }
-
-
-
-
 

@@ -48,11 +48,13 @@ export default function renderPanel(pw: number): string[] {
     let modeLabel: string;
     switch (agent.mode) {
       case 'clone':   modeLabel = '克隆'; break;
+    // 模式标签
+    let modeLabel: string;
+    switch (agent.mode) {
+      case 'clone':   modeLabel = '克隆'; break;
       case 'mission': modeLabel = '任务'; break;
-      case 'listen':  modeLabel = '监听'; break;
       default:        modeLabel = agent.mode;
     }
-
     const nameStr = `${statusColor}${statusIcon}${RESET_BG} ${agent.name}`;
     const modeStr = `${DIM}${modeLabel}${RESET_BG}`;
     const statusStr = `${DIM}${statusIcon === '●' ? '运行中' : statusIcon === '✓' ? '已完成' : statusIcon === '✗' ? '出错' : '空闲'}${RESET_BG}`;
@@ -65,3 +67,4 @@ export default function renderPanel(pw: number): string[] {
 
   return lines;
 }
+

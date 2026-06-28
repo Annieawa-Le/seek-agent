@@ -8,6 +8,7 @@ import {
   resetExplorerPath,
   resetExplorerRoot,
 } from '../../tools/inner_skills/virtual-explorer/explorer-state';
+
 export const WorkdirGlobalCommand: Command = {
   name: 'workdir-global',
   description: '切换或查看 virtual-explorer 的根目录位置',
@@ -17,8 +18,8 @@ export const WorkdirGlobalCommand: Command = {
     return t.startsWith('/workdir-global') || t.startsWith('workdir-global');
   },
   execute(input: string, ctx): void {
-    const trimmed = input.trim();
-    const match = trimmed.match(/^\/workdir-global\s+(.+)/i);
+    const trimmed = input.trim().replace(/^\/+/, '');
+    const match = trimmed.match(/^workdir-global\s+(.+)/i);
 
     if (match) {
       const raw = match[1].trim();
@@ -34,6 +35,7 @@ export const WorkdirGlobalCommand: Command = {
           `virtual-explorer 根目录和工作目录已重置为工作区根目录:
 ${getExplorerRoot()}`
         );
+        ctx.agent.reloadPrompt();
         return;
       }
 
@@ -71,6 +73,7 @@ ${resolved}
 ` +
           `提示：当前 explorer 位置已重置到新根目录。`
         );
+        ctx.agent.reloadPrompt();
       } catch (err: any) {
         ctx.ui.addUserMessage(`/workdir-global ${raw}`);
         ctx.ui.addAgentMessage(`❌ 路径无效: ${err.message}`);
@@ -85,11 +88,4 @@ ${resolved}
     }
   },
 };
-
-
-
-
-
-
-
 

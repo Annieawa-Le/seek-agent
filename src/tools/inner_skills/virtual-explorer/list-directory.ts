@@ -3,6 +3,7 @@ import { z } from 'zod';
 import fs from 'fs/promises';
 import path from 'path';
 import { getExplorerPath } from './explorer-state.js';
+import { getCwd, resolvePath } from '../../../workdir.js';
 
 /** 共享：对给定路径做目录列表的格式化，供 enter-subfolder / go-up 等复用 */
 export async function formatDirectoryContents(absPath: string): Promise<string> {
@@ -22,13 +23,21 @@ export const listDirectory = tool({
   }),
   execute: async ({ path: targetPath }): Promise<string> => {
     try {
-      const absPath = path.resolve(targetPath);
+      // 优先使用 workdir 的 resolvePath（尊重 setCwd 更新的工作目录）
+      const absPath = resolvePath(targetPath);
       return await formatDirectoryContents(absPath);
     } catch (error) {
       const msg = (error as Error).message;
       if (msg.includes('ENOENT')) return `❌ 目录不存在: ${targetPath}`;
       if (msg.includes('ENOTDIR')) return `❌ 路径不是目录: ${targetPath}`;
       if (msg.includes('EACCES')) return `❌ 无权限访问: ${targetPath}`;
+      // 如果 resolvePath 拒绝（路径越界），回退到 path.resolve
+      if (msg.includes('路径访问被拒绝')) {
+        try {
+          const absPath = path.resolve(targetPath);
+          return await formatDirectoryContents(absPath);
+        } catch { /* fall through */ }
+      }
       return `❌ list_directory 执行出错: ${msg}`;
     }
   },
@@ -49,3 +58,4 @@ export const explorerListDirectory = tool({
     }
   },
 });
+

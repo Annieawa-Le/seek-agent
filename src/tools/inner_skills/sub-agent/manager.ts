@@ -2,24 +2,9 @@
  * manager.ts — SubAgentManager 单例
  *
  * 管理所有子 agent 的生命周期。
- * 持有一个懒惰解析的工具注册表引用，避免与 tools/index.ts 的循环依赖。
  */
 
-import type { SubAgentState, SubAgentMode, SubAgentStatus, SubmissionPayload, ListenMode } from './types';
-import { PatchStaging } from '../../patch-staging';
-
-// ── 工具注册表（懒惰注入，避免循环依赖） ──
-let _toolRegistry: Record<string, any> | null = null;
-
-/** 注入全局工具注册表引用（由 tools/index.ts 在构建完成后调用） */
-export function setToolRegistry(registry: Record<string, any>): void {
-  _toolRegistry = registry;
-}
-
-/** 获取全局工具注册表引用 */
-export function getToolRegistry(): Record<string, any> {
-  return _toolRegistry ?? {};
-}
+import type { SubAgentState, SubAgentMode, SubAgentStatus, SubmissionPayload } from './types';
 
 // ── 子 agent 注入队列 ──
 const pendingInjections: Array<{ name: string; payload: SubmissionPayload }> = [];
@@ -59,10 +44,6 @@ class SubAgentManager {
     tools: string[];
     systemPrompt?: string;
     context?: string;
-    listenMode?: ListenMode;
-    listenTools?: string[];
-    analyzeTarget?: string;
-    returnTemplate?: string;
     // instructor 模式
     requirement?: string;
     maxRounds?: number;
@@ -78,13 +59,6 @@ class SubAgentManager {
       systemPrompt: config.systemPrompt,
       context: config.context,
       createdAt: Date.now(),
-      listenMode: config.listenMode ?? 'call',
-      listenTools: config.listenTools,
-      analyzeTarget: config.analyzeTarget,
-      returnTemplate: config.returnTemplate,
-      patchStaging: (config.mode === 'clone' || config.mode === 'mission')
-        ? new PatchStaging()
-        : undefined,
     };
     this.agents.set(config.name, agent);
     return agent;
@@ -189,129 +163,8 @@ class SubAgentManager {
     this.submissionWaiters.clear();
     this.agents.clear();
   }
-
-  /** 获取监听指定工具的 listen 模式 agent */
-  /** 获取监听指定工具的 call 模式 listen agent */
-  getListenersForTool(toolName: string): SubAgentState[] {
-    return this.getAll().filter(
-      a => a.mode === 'listen' && a.listenMode === 'call' && a.listenTools?.includes(toolName),
-    );
-  }
-
-  /** 获取监听指定工具的 result 模式 listen agent */
-  getResultListenersForTool(toolName: string): SubAgentState[] {
-    return this.getAll().filter(
-      a => a.mode === 'listen' && a.listenMode === 'result' && a.listenTools?.includes(toolName),
-    );
-  }
 }
 
 /** 全局单例 */
 export const subAgentManager = new SubAgentManager();
-
-// ── Listen 模式自动拦截触发器 ──
-
-/**
- * 在主模型调用某个工具前触发 listen 模式分析。
- * 如果存在监听此工具的 listen agent，自动触发分析并排队提交结果。
- */
-export async function triggerListenInterceptors(
-  toolName: string,
-  args: Record<string, unknown>,
-  messages: any[],
-): Promise<void> {
-  const listeners = subAgentManager.getListenersForTool(toolName);
-  if (listeners.length === 0) return;
-
-  const { executeListenAgent } = await import('./runner');
-
-  for (const listener of listeners) {
-    try {
-      const toolCallData = JSON.stringify({
-        tool: toolName,
-        arguments: args,
-        context: messages.slice(-6).map(m => ({
-          role: m.role,
-          content: typeof m.content === 'string'
-            ? m.content.slice(0, 300)
-            : `[${(m.content as any[])?.length || 0} parts]`,
-        })),
-      }, null, 2);
-
-      subAgentManager.updateStatus(listener.name, 'running');
-      const result = await executeListenAgent(
-        listener,
-        toolCallData,
-        `自动监听分析: 主模型调用了 ${toolName}`,
-      );
-
-      if (result !== null) {
-        try {
-          const parsed = JSON.parse(result);
-          queueSubmissionInjection(listener.name, parsed);
-        } catch {
-          queueSubmissionInjection(listener.name, { summary: `监听分析: ${toolName}`, details: result });
-        }
-      }
-    } catch (err: any) {
-      subAgentManager.setError(listener.name, `监听分析出错: ${err.message}`);
-    }
-  }
-}
-
-/**
- * 在主模型执行完某个工具后触发 result 模式分析。
- * 如果存在监听此工具结果的 listen agent，自动触发分析工具执行结果并排队提交。
- */
-export async function triggerResultListenInterceptors(
-  toolName: string,
-  args: Record<string, unknown>,
-  output: string,
-  messages: any[],
-): Promise<void> {
-  const listeners = subAgentManager.getResultListenersForTool(toolName);
-  if (listeners.length === 0) return;
-
-  const { executeListenAgent } = await import('./runner');
-
-  for (const listener of listeners) {
-    try {
-      const resultData = JSON.stringify({
-        tool: toolName,
-        arguments: args,
-        output: output.slice(0, 2000),
-        context: messages.slice(-6).map(m => ({
-          role: m.role,
-          content: typeof m.content === 'string'
-            ? m.content.slice(0, 300)
-            : `[${(m.content as any[])?.length || 0} parts]`,
-        })),
-      }, null, 2);
-
-      subAgentManager.updateStatus(listener.name, 'running');
-      const result = await executeListenAgent(
-        listener,
-        resultData,
-        `自动监听分析: 主模型调用了 ${toolName} 并得到结果`,
-      );
-
-      if (result !== null) {
-        try {
-          const parsed = JSON.parse(result);
-          queueSubmissionInjection(listener.name, parsed);
-        } catch {
-          queueSubmissionInjection(listener.name, { summary: `结果分析: ${toolName}`, details: result });
-        }
-      }
-    } catch (err: any) {
-      subAgentManager.setError(listener.name, `结果监听分析出错: ${err.message}`);
-    }
-  }
-}
-
-
-
-
-
-
 

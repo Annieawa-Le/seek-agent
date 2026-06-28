@@ -3,10 +3,7 @@
  */
 
 /** 子模型工作模式 */
-export type SubAgentMode = 'clone' | 'mission' | 'listen' | 'instructor';
-
-/** listen 子模式：拦截调用前 / 拦截结果后 */
-export type ListenMode = 'call' | 'result';
+export type SubAgentMode = 'clone' | 'mission' | 'instructor';
 
 /** 子模型运行状态 */
 export type SubAgentStatus = 'idle' | 'running' | 'done' | 'error';
@@ -32,17 +29,6 @@ export interface SubAgentState {
   createdAt: number;
   /** 最近活跃时间 */
   lastActiveAt?: number;
-  // listen 模式专用
-  /** listen 子模式 */
-  listenMode?: ListenMode;
-  /** 需要监听的工具列表 */
-  listenTools?: string[];
-  /** 需要分析的方面 */
-  analyzeTarget?: string;
-  /** 返回模板 */
-  returnTemplate?: string;
-  /** 独立 patch 暂存区实例（clone/mission 模式） */
-  patchStaging?: import('../../patch-staging').PatchStaging;
   // instructor 模式专用
   /** instructor 的自定义要求 */
   requirement?: string;
@@ -68,10 +54,6 @@ export interface SpawnParams {
   systemPrompt?: string;
   task?: string;
   contextAndTask?: string;
-  listenMode?: ListenMode;
-  analyzeTarget?: string;
-  returnTemplate?: string;
-  listenTools?: string[];
   // instructor 模式
   requirement?: string;
   maxRounds?: number;
@@ -83,5 +65,4 @@ export interface TaskParams {
   task: string;
   context?: string;
 }
-
 

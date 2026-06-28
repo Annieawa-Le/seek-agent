@@ -3,14 +3,18 @@ export interface ElectronAPI {
   onAgentMessage: (callback: (msg: AgentMessage) => void) => () => void;
   onAgentStatus: (callback: (status: AgentStatus) => void) => () => void;
   onAgentStderr: (callback: (text: string) => void) => () => void;
+  onWorkdirChanged: (callback: (path: string) => void) => () => void;
   sendInput: (content: string) => number;
   sendCommand: (cmd: string) => number;
   abort: () => void;
   restart: () => void;
+  getWorkdir: () => Promise<string>;
+  setWorkdir: (dirPath: string) => Promise<{ success?: boolean; error?: string; path?: string }>;
+  selectFolder: () => Promise<{ canceled: boolean; path?: string; error?: string }>;
+  getRecentDirs: () => Promise<string[]>;
   readFileTree: (dirPath: string) => Promise<FileTreeNode[]>;
   readGitStatus: () => Promise<GitChange[]>;
   listSessions: () => Promise<SessionInfo[]>;
-  // 窗口控制
   minimizeWindow: () => void;
   maximizeWindow: () => void;
   closeWindow: () => void;
@@ -93,5 +97,4 @@ export interface ToolHistoryEntry {
   resultHtml: string | null;
   fullOutput: string | null;
 }
-
 

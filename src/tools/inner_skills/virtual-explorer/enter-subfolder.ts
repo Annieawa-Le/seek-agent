@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getExplorerPath, setExplorerPath } from './explorer-state.js';
 import { formatDirectoryContents } from './list-directory.js';
+import { resolvePath } from '../../../workdir.js';
 
 export const enterSubfolder = tool({
   description: `进入指定路径下的某个子文件夹，返回该子文件夹的规范路径。`,
@@ -13,7 +14,7 @@ export const enterSubfolder = tool({
   }),
   execute: async ({ parentPath, folderName }): Promise<string> => {
     try {
-      const parentResolved = path.resolve(parentPath);
+      const parentResolved = resolvePath(parentPath);
       const childPath = path.join(parentResolved, folderName);
 
       const stat = await fs.stat(childPath);
@@ -64,3 +65,4 @@ export const explorerEnterSubfolder = tool({
     }
   },
 });
+
