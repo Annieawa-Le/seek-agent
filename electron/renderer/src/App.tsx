@@ -15,6 +15,9 @@ export function App() {
   const api = useElectronAPI();
   const status = useAgentStatus();
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [kbEnabled, setKbEnabled] = useState(true);
+  const [smartSearchEnabled, setSmartSearchEnabled] = useState(false);
+  const [skillsList, setSkillsList] = useState<Array<{ name: string; description: string }>>([]);
 
   // 同步主题到 data-theme 属性
   useEffect(() => {
@@ -24,6 +27,18 @@ export function App() {
   const toggleTheme = useCallback(() => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   }, []);
+  const onToggleKb = useCallback(() => {
+    setKbEnabled(prev => {
+      const next = !prev;
+      api.sendCommand(next ? 'kb_enable' : 'kb_disable');
+      return next;
+    });
+  }, [api]);
+  const onToggleSmartSearch = useCallback((enabled: boolean) => {
+    setSmartSearchEnabled(enabled);
+    api.sendCommand(enabled ? 'smart_search_enable' : 'smart_search_disable');
+  }, [api]);
+
   const {
     messages,
     panelState,
@@ -111,6 +126,13 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 加载可选技能列表
+  useEffect(() => {
+    api.getSkillsList().then(list => {
+      if (list.length > 0) setSkillsList(list);
+    });
+  }, [api]);
+
   const handleSend = useCallback((text: string) => {
     // 本地立即显示用户消息（原版 renderer.js 的行为）
     appendMessage({ role: 'user', content: text, createdAt: Date.now() });
@@ -157,8 +179,13 @@ export function App() {
             <InputBar
               processing={status.processing}
               thinking={status.thinking}
+              kbEnabled={kbEnabled}
+              smartSearchEnabled={smartSearchEnabled}
+              skillsList={skillsList}
               onSend={handleSend}
               onAbort={handleAbort}
+              onToggleKb={onToggleKb}
+              onToggleSmartSearch={onToggleSmartSearch}
             />
           </div>
           <RightPanel />
@@ -172,6 +199,17 @@ export function App() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -70,6 +70,11 @@ export function useElectronAPI() {
     return api.setWorkdir(dirPath);
   }, [api]);
 
+
+  const getSkillsList = useCallback(async (): Promise<Array<{ name: string; description: string }>> => {
+    if (!api) return [];
+    return api.getSkillsList();
+  }, [api]);
   const selectFolder = useCallback(async () => {
     if (!api) return { canceled: true };
     return api.selectFolder();
@@ -136,6 +141,7 @@ export function useElectronAPI() {
     readFileTree,
     readGitStatus,
     listSessions,
+    getSkillsList,
     minimizeWindow,
     maximizeWindow,
     closeWindow,
@@ -143,4 +149,7 @@ export function useElectronAPI() {
     onMaximizedChange,
   };
 }
+
+
+
 

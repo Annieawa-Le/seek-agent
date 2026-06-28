@@ -46,6 +46,7 @@ export type ChildToParent =
   | { type: 'blank' }
   | { type: 'init-done' }
   | { type: 'subagent'; name: string; content: string }
+  | { type: 'kb-build'; phase: 'building' | 'done' | 'failed'; message: string }
   | { type: 'exit' };
 
 /** 主进程 → 子进程 */
@@ -132,6 +133,11 @@ export class ElectronUIBridge {
     }
     this.messages.push({ role: 'tool', content, toolMeta, fullOutput, rawBulk, createdAt: Date.now() });
     this.send({ type: 'message', role: 'tool', content, toolMeta, toolCallHtml, toolResultHtml, fullOutput, rawBulk });
+  }
+
+  /** 发送知识库构建状态到 UI */
+  addKbStatus(phase: 'building' | 'done' | 'failed', message: string): void {
+    this.send({ type: 'kb-build', phase, message });
   }
 
   addSystemMessage(content: string): void {
@@ -344,6 +350,9 @@ function formatToolCallHtml(toolName: string, args: Record<string, unknown>): st
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+
+
 
 
 

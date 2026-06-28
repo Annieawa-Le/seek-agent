@@ -358,6 +358,30 @@ ipcMain.handle('fs:listSessions', async () => {
     return { error: err.message };
   }
 });
+
+// ─── 渲染进程请求：读取可选技能列表 ───
+ipcMain.handle('skills:list', async () => {
+  const skillsDir = join(ROOT, 'src', 'tools', 'inner_skills');
+  try {
+    const dirs = readdirSync(skillsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    const skills = [];
+    for (const dir of dirs) {
+      const enablePath = join(skillsDir, dir.name, 'enable.json');
+      try {
+        const raw = readFileSync(enablePath, 'utf8');
+        const config = JSON.parse(raw);
+        if (config.enable) {
+          skills.push({ name: dir.name, description: config.description || '' });
+        }
+      } catch {
+        // 无 enable.json 或解析失败，跳过
+      }
+    }
+    return skills.sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+});
 // ═════════════════════════════════════════════════════
 // 应用生命周期
 // ═════════════════════════════════════════════════════
@@ -381,4 +405,5 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (agentProcess) { agentProcess.kill(); agentProcess = null; }
 });
+
 

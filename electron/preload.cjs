@@ -109,6 +109,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   /** 读取 sessions 列表 */
+
+  /** 读取可用技能列表 */
+  getSkillsList: async () => {
+    return ipcRenderer.invoke('skills:list');
+  },
   listSessions: async () => {
     return ipcRenderer.invoke('fs:listSessions');
   },
@@ -142,4 +147,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('window:isMaximized');
   },
 });
+
 

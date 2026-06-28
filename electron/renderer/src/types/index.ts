@@ -15,6 +15,7 @@ export interface ElectronAPI {
   readFileTree: (dirPath: string) => Promise<FileTreeNode[]>;
   readGitStatus: () => Promise<GitChange[]>;
   listSessions: () => Promise<SessionInfo[]>;
+  getSkillsList: () => Promise<Array<{ name: string; description: string }>>;
   minimizeWindow: () => void;
   maximizeWindow: () => void;
   closeWindow: () => void;
@@ -38,7 +39,7 @@ export interface ToolMeta {
 }
 
 export interface AgentMessage {
-  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'listen' | 'subagent' | 'append';
+  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'listen' | 'subagent' | 'append' | 'kb-build';
   role?: MessageRole;
   content?: string;
   toolMeta?: ToolMeta;
@@ -52,12 +53,9 @@ export interface AgentMessage {
   chars?: number;
   tokens?: number;
   count?: number;
+  phase?: 'building' | 'done' | 'failed';
+  message?: string;
   msgId?: string;
-}
-
-export interface AgentStatus {
-  connected: boolean;
-  code?: number;
 }
 
 export interface FileTreeNode {
@@ -97,4 +95,10 @@ export interface ToolHistoryEntry {
   resultHtml: string | null;
   fullOutput: string | null;
 }
+
+
+
+
+
+
 

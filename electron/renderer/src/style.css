@@ -917,6 +917,26 @@ html, body {
   border-radius: 10px;
   color: var(--accent);
   border: 1px solid rgba(212, 168, 67, 0.1);
+
+.kb-status {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.kb-status.building {
+  color: #e8a317;
+  background: rgba(232, 163, 23, 0.15);
+}
+.kb-status.done {
+  color: #4caf50;
+  background: rgba(76, 175, 80, 0.12);
+}
+.kb-status.failed {
+  color: #f44336;
+  background: rgba(244, 67, 54, 0.12);
+}
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1415,11 +1435,19 @@ html, body {
   color: var(--text-muted);
 }
 
-/* ─── 工具结果可滚动容器 ─── */
-.tool-result-scroll-wrap {
-  width: 100%;
-  position: relative;
+/* ─── 工具结果 ANSI fallback（无 resultHtml 时用 renderAnsi 转换） ─── */
+.tool-result-ansi {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre;
+  word-break: normal;
+  color: var(--text-muted);
 }
+
+/* ─── 工具结果可滚动容器 ─── */
 
 .tool-result-scroll-wrap.collapsed {
   max-height: 340px;
@@ -2457,6 +2485,23 @@ html, body {
   border-bottom-color: #3964fe;
 }
 
+/* ─── 亮色模式：工具结果文字颜色（避免 `--text-muted` 太浅看不清） ─── */
+[data-theme='light'] .tool-result-pre,
+[data-theme='light'] .tool-result-ansi,
+[data-theme='light'] .timeline-step .tool-result-pre,
+[data-theme='light'] .tool-timeline-last-result .tool-result-pre {
+  color: var(--text-secondary);
+}
+[data-theme='light'] .tool-result-scroll-container {
+  background: var(--bg-elevated);
+  border-color: var(--border-default);
+}
+[data-theme='light'] .timeline-step-result {
+  background: var(--bg-elevated);
+}
+[data-theme='light'] .tool-timeline-last-result {
+  background: var(--bg-elevated);
+}
 
 
 
@@ -2503,6 +2548,150 @@ html, body {
 
 
 
+
+
+
+
+
+
+
+
+
+/* ─── 技能上拉列表 ─── */
+.skill-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 -8px 24px rgba(0,0,0,0.3), 0 -2px 8px rgba(0,0,0,0.15);
+  max-height: 320px;
+  display: none;
+  flex-direction: column;
+  z-index: 100;
+  overflow: hidden;
+}
+
+.skill-dropdown.open {
+  display: flex;
+  animation: skill-dropdown-in 0.15s ease-out;
+}
+
+.skill-dropdown.open {
+  display: flex;
+}
+
+@keyframes skill-dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.skill-dropdown-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 99;
+  background: transparent;
+}
+
+.skill-dropdown-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.skill-dropdown-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.skill-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+  user-select: none;
+}
+
+.skill-dropdown-item:hover {
+  background: var(--bg-hover);
+}
+
+.skill-dropdown-item.selected {
+  background: rgba(212, 168, 67, 0.08);
+  color: var(--accent);
+}
+
+.skill-dropdown-item.selected:hover {
+  background: rgba(212, 168, 67, 0.14);
+}
+
+.skill-check {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.skill-dropdown-item.selected .skill-check {
+  color: var(--accent);
+  stroke: var(--accent);
+}
+
+.skill-name {
+  flex: 1;
+  font-size: 12.5px;
+  color: inherit;
+}
+
+.skill-key {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  opacity: 0.6;
+  margin-left: auto;
+}
+
+.skill-dropdown-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.skill-dropdown-footer code {
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(212, 168, 67, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.input-bar {
+  position: relative;
+}
+
+.input-bar-body {
+  position: relative;
+}
+
+.input-wrapper {
+  position: relative;
+}
 
 
 

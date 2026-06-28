@@ -30,6 +30,28 @@ agent.messageHook = composeHooks(
 // ── 指令注册 ──
 const commandRegistry = createCommandRegistry();
 
+// ── 知识库开关状态 ──
+let kbEnabled = true;
+
+/** 自动构建知识库索引（忽略构建失败，不阻塞用户输入） */
+async function ensureKbIndex() {
+  bridge.addKbStatus('building', '正在构建知识库索引...');
+  try {
+    const { kbBuildIndex } = await import('./tools/inner_skills/kb-query/scripts/build-index');
+    const result = await kbBuildIndex.execute({ force: false });
+    kbIndexBuilt = !result.startsWith('❌');
+    if (kbIndexBuilt) {
+      bridge.addKbStatus('done', '知识库索引已就绪');
+    } else {
+      bridge.addKbStatus('failed', '知识库索引构建失败');
+    }
+  } catch (e: any) {
+    console.warn('[kb] 自动构建失败:', e.message);
+    bridge.addKbStatus('failed', `知识库构建失败: ${e.message}`);
+  }
+}
+let kbIndexBuilt = false;
+
 // ── 用户提交输入 ──
 bridge.onSubmit = async (input: string) => {
   const trimmed = input.trim();
@@ -37,6 +59,12 @@ bridge.onSubmit = async (input: string) => {
 
   const handled = await commandRegistry.tryExecute(trimmed, { ui: bridge as any, agent });
   if (handled) return;
+
+  // 若知识库启用且尚未构建，后台异步构建（不阻塞消息）
+  if (kbEnabled && !kbIndexBuilt) {
+    kbIndexBuilt = true; // 防止重复触发
+    ensureKbIndex(); // 不 await，放后台跑
+  }
 
   await agent.run(trimmed);
 };
@@ -81,6 +109,42 @@ bridge.onCommand = async (cmd: string) => {
       subAgentManager.fireAll();
       break;
     }
+    case 'kb_enable': {
+      kbEnabled = true;
+      // 只加载 kb-query 一个技能
+      try {
+        const { loadSingleSkill } = await import('./tools/index');
+        await loadSingleSkill('kb-query');
+      } catch {}
+      // 如果索引没构建过，立即触发
+      if (!kbIndexBuilt) {
+        ensureKbIndex().then(() => {
+          bridge.addToolMessage('知识库已启用，索引已就绪');
+        });
+      }
+      bridge.addToolMessage('知识库已启用');
+      break;
+    }
+    case 'kb_disable': {
+      kbEnabled = false;
+      // 卸载整个 kb-query 技能，工具立即可见消失
+      try {
+        const { removeSkill } = await import('./tools/index');
+        removeSkill('kb-query');
+      } catch {}
+      bridge.addToolMessage('知识库已禁用');
+      break;
+    }
+    case 'smart_search_enable': {
+      agent.setSmartSearch(true);
+      bridge.addToolMessage('智能搜索已启用');
+      break;
+    }
+    case 'smart_search_disable': {
+      agent.setSmartSearch(false);
+      bridge.addToolMessage('智能搜索已禁用');
+      break;
+    }
     default: {
       // 尝试通过指令系统执行（如 workdir-global <path>）
       const handled = await commandRegistry.tryExecute(cmd, { ui: bridge as any, agent });
@@ -97,4 +161,16 @@ bridge.startListening();
 
 // ── 通知主进程已就绪 ──
 bridge.emitReady();
+
+
+
+
+
+
+
+
+
+
+
+
 

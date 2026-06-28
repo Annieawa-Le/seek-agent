@@ -1,0 +1,4 @@
+{
+  "enable": true,
+  "description": "代码知识库查询引擎，支持对整个项目源码进行向量化索引和语义检索。基于 OpenAI 兼容的 embedding API，适配 PostgreSQL / SQLite / JSON 三种存储后端。"
+}

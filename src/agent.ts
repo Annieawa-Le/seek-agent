@@ -62,6 +62,8 @@ export class CLIAAgent {
   private roundActualToolCalls = 0;
   private afterRoundCollapseQueue: Array<{ msgIndex: number; toolName: string; args: Record<string, unknown> }> = [];
   /** 上一个 single 模式工具结果（下一个工具调用时折叠渲染） */
+  /** 智能搜索模式开关 */
+  private smartSearchEnabled = false;
   private lastSingleCollapse: { msgIndex: number; toolName: string; args: Record<string, unknown> } | null = null;
 
   messageHook: MessageHook | null = null;
@@ -80,16 +82,25 @@ export class CLIAAgent {
   /**
    * 重新加载 system prompt（切换工作目录后调用，刷新 SEEK.md）
    */
+  /**
+   * 重新加载 system prompt（切换工作目录后调用，刷新 SEEK.md）
+   */
   reloadPrompt(): void {
-    this.systemPrompt = this.loadDefaultPrompts();
+    this.systemPrompt = this.loadDefaultPrompts(this.smartSearchEnabled);
     setSystemPrompt(this.systemPrompt);
+  }
+
+  /** 启用/禁用智能搜索模式 */
+  setSmartSearch(enabled: boolean): void {
+    this.smartSearchEnabled = enabled;
+    this.reloadPrompt();
   }
 
   // ────────────────────────────────────────────────
   // 默认 Prompt 加载
   // ────────────────────────────────────────────────
 
-  private loadDefaultPrompts(): string {
+  private loadDefaultPrompts(smartSearch = false): string {
     const promptsDir = path.join(__dirname, 'prompts');
     const parts: string[] = [];
 
@@ -178,6 +189,11 @@ export class CLIAAgent {
 
     // ── 当前工作目录 ──
     parts.push(`> 当前工作目录：${getWorkspaceRoot()}`);
+
+    // ── 智能搜索模式：禁用普通搜索，仅使用 tavily ──
+    if (smartSearch) {
+      parts.push("当前处于【智能搜索】模式。在此模式下，你应当优先并使用 tavily_search / tavily_extract / tavily_crawl / tavily_map / tavily_research 等 Tavily 工具获取外部信息。不要使用 search_web、fetch_page、crawl_site、extract_links 等普通搜索/爬取工具。");
+    }
     return parts.join('\n\n');
   }
 
@@ -869,6 +885,10 @@ export class CLIAAgent {
     }
   }
 }
+
+
+
+
 
 
 

@@ -14,6 +14,8 @@ export interface AgentStatusState {
   ctxChars: number;
   ctxTokens: number;
   toolCallTotal: number;
+  /** 知识库索引构建状态 */
+  kbStatus: { phase: 'idle' | 'building' | 'done' | 'failed'; message: string };
 }
 
 export function useAgentStatus() {
@@ -28,6 +30,7 @@ export function useAgentStatus() {
     ctxChars: 0,
     ctxTokens: 0,
     toolCallTotal: 0,
+    kbStatus: { phase: 'idle', message: '' },
   });
 
   const updateActivity = useCallback((s: AgentStatusState): AgentActivity => {
@@ -71,6 +74,12 @@ export function useAgentStatus() {
         case 'tool-call':
           setStatus(prev => ({ ...prev, toolCallTotal: msg.count ?? prev.toolCallTotal }));
           break;
+        case 'kb-build':
+          setStatus(prev => ({
+            ...prev,
+            kbStatus: { phase: msg.phase, message: msg.message },
+          }));
+          break;
       }
     });
 
@@ -89,3 +98,4 @@ export function useAgentStatus() {
 
   return status;
 }
+

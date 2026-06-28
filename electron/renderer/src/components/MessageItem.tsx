@@ -132,9 +132,11 @@ function ToolHistoryDisplay({ history: rawHistory }: {
 }
 
 function ToolResultContent({ entry, lines }: { entry: { resultHtml?: string | null; fullOutput?: string | null }; lines: number }) {
+  // 有 resultHtml（来自 rawBulk 的 toWebUI）→ 结构化 HTML 渲染
+  // 无 resultHtml → 用 renderAnsi 增强纯文本（转义 + ANSI 颜色）
   const content = entry.resultHtml
     ? <div dangerouslySetInnerHTML={{ __html: entry.resultHtml }} />
-    : <pre className="tool-result-pre">{entry.fullOutput || ''}</pre>;
+    : <div className="tool-result-ansi" dangerouslySetInnerHTML={{ __html: renderAnsi(entry.fullOutput || '') }} />;
 
   if (lines > 8) {
     return (
@@ -157,6 +159,7 @@ function ToolResultContent({ entry, lines }: { entry: { resultHtml?: string | nu
     </div>
   );
 }
+
 
 
 

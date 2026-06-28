@@ -222,6 +222,72 @@ export function removeTool(toolName: string): string | null {
 }
 
 
+// ── 加载单个 inner_skill ──
+/** 加载指定名称的单个 inner_skill（避免全量 reload 开销） */
+export async function loadSingleSkill(skillName: string): Promise<boolean> {
+  const skillsDir = path.join(__dirname, 'inner_skills', skillName);
+
+  // 检查 enable.json
+  try {
+    const configRaw = await readFile(path.join(skillsDir, 'enable.json'), 'utf-8');
+    const config = JSON.parse(configRaw);
+    if (!config.enable) {
+      console.warn(`[loadSingleSkill] ${skillName} 已禁用`);
+      return false;
+    }
+  } catch {
+    console.warn(`[loadSingleSkill] ${skillName} 缺少 enable.json`);
+    return false;
+  }
+
+  // 如果已加载则跳过
+  if (skillToolMap[skillName]?.some(name => name in toolsContainer)) {
+    return true;
+  }
+
+  const ts = Date.now();
+
+  // 加载工具
+  try {
+    const indexUrl = pathToFileURL(path.join(skillsDir, 'index.ts')).href + `?t=${ts}`;
+    const skillModule = await import(indexUrl);
+    const skillTools: Record<string, any> = skillModule.default || skillModule;
+
+    const loadedNames: string[] = [];
+    for (const [name, toolImpl] of Object.entries(skillTools)) {
+      if (name in coreTools || name in toolsContainer) {
+        console.warn(`[loadSingleSkill] ${name} 重名，跳过`);
+        continue;
+      }
+      toolsContainer[name] = wrapTool(name, toolImpl);
+      loadedNames.push(name);
+    }
+    skillToolMap[skillName] = loadedNames;
+
+    // 加载翻译
+    try {
+      const transUrl = pathToFileURL(path.join(skillsDir, 'translation.ts')).href + `?t=${ts}`;
+      const transModule = await import(transUrl);
+      const translations = transModule.default || transModule;
+      if (translations && typeof translations === 'object' && !Array.isArray(translations)) {
+        registerSkillTranslations(translations);
+      }
+    } catch { /* 没有翻译文件，跳过 */ }
+
+    // 加载面板
+    try {
+      const panelUrl = pathToFileURL(path.join(skillsDir, 'panel.ts')).href + `?t=${ts}`;
+      await import(panelUrl);
+    } catch { /* 没有面板文件，跳过 */ }
+
+    return true;
+  } catch (e: any) {
+    console.warn(`[loadSingleSkill] 加载 ${skillName} 失败: ${e.message}`);
+    return false;
+  }
+}
+
+
 
 
 

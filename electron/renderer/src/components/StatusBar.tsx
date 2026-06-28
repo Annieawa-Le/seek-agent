@@ -14,12 +14,18 @@ export function StatusBar({ status, toolCallTotal, totalMessages }: Props) {
     : status.activity === 'processing' ? '处理中...'
     : status.connected ? '就绪' : '已断开';
 
+  const kb = status.kbStatus;
+  const kbLabel = kb.phase === 'building' ? `知识库 ${kb.message}` : '';
+
   return (
     <div id="main-status">
       <span className="ms-left">
         <span className="status-dot-mini" data-state={status.connectionState} />
         <span className="status-text">{text}</span>
         {toolCallTotal > 0 && <span className="tools-badge">工具 {toolCallTotal}</span>}
+        {kb.phase === 'building' && <span className="kb-status building">{kbLabel}</span>}
+        {kb.phase === 'done' && <span className="kb-status done">知识库✓</span>}
+        {kb.phase === 'failed' && <span className="kb-status failed">知识库✗</span>}
       </span>
       <span className="ms-right">
         <span className="ms-stat">消息 {totalMessages}</span>
