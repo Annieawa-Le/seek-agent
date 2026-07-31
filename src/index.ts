@@ -34,6 +34,7 @@ import { TerminalUI } from './ui';
 import { CLIAAgent } from './agent';
 import { createMessageHook } from './message_managing';
 import { composeHooks } from './memory_agent';
+import { registerRoundHooks } from './register-round-hooks';
 import { buildEditModePinningHook } from './tools/desk-edit';
 import { createCommandRegistry } from './command';
 
@@ -44,6 +45,10 @@ agent.messageHook = composeHooks(
   createMessageHook(),
   buildEditModePinningHook(),
 );
+
+// ── 每轮结束后的后台任务（做梦沉淀 + 会话标题刷新），TUI 与 Electron 共用 ──
+registerRoundHooks(agent, (msg) => ui.addToolMessage(msg));
+
 
 // ── 指令注册中心 ──
 const commandRegistry = createCommandRegistry();
@@ -119,6 +124,12 @@ ui.onCommand = async (cmd: string) => {
 
 // ── 启动 UI ──
 ui.start();
+
+
+
+
+
+
 
 
 

@@ -1,5 +1,5 @@
 /**
- * electron/preload.js — 安全的 IPC 桥接
+ * electron/preload.cjs — 安全的 IPC 桥接
  *
  * 使用 contextBridge 向渲染进程暴露有限 API：
  *   1. onAgentMessage(callback)    — 接收 agent 消息
@@ -10,6 +10,8 @@
  *   6. abort()                     — 中断 AI 处理
  *   7. restart()                   — 重启 agent
  *   8. workdir 相关                — 工作区目录管理
+ *   9. 多会话控制                  — switchSession / newSession / closeSession 等
+ *   10. 侧边栏数据                 — getSidebarStatic / readInstruction
  */
 
 const { contextBridge, ipcRenderer } = require('electron');
@@ -50,26 +52,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ─── 发送 ───
 
-  /** 发送用户输入到 agent */
+  /** 发送用户输入到 agent（主进程路由到当前活动会话） */
   sendInput: (content) => {
     const id = ++requestId;
     ipcRenderer.send('renderer:input', { content, id });
     return id;
   },
 
-  /** 发送命令到 agent */
+  /** 发送命令到 agent（主进程路由到当前活动会话） */
   sendCommand: (cmd) => {
     const id = ++requestId;
     ipcRenderer.send('renderer:command', { cmd, id });
     return id;
   },
 
-  /** 中断 agent 处理 */
+  /** 中断当前活动会话的 agent 处理 */
   abort: () => {
     ipcRenderer.send('renderer:abort');
   },
 
-  /** 重启 agent */
+  /** 重启当前活动会话的 agent */
   restart: () => {
     ipcRenderer.send('renderer:restart');
   },
@@ -127,6 +129,45 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** 读取 sessions 列表 */
   listSessions: async () => {
     return ipcRenderer.invoke('fs:listSessions');
+  },
+
+  // ─── 多会话控制 ───
+
+  /** 切换到指定会话（已保存会话传 name，将自动拉起独立 Agent 进程） */
+  switchSession: async (sessionId, name) => {
+    return ipcRenderer.invoke('session:switch', sessionId, name);
+  },
+
+  /** 新建会话（拉起全新 Agent 进程并切换过去） */
+  newSession: async () => {
+    return ipcRenderer.invoke('session:new');
+  },
+
+  /** 关闭会话（杀掉对应 Agent 进程，不影响其他会话） */
+  closeSession: async (sessionId) => {
+    return ipcRenderer.invoke('session:close', sessionId);
+  },
+
+  /** 查询当前活动会话 */
+  getCurrentSession: async () => {
+    return ipcRenderer.invoke('session:current');
+  },
+
+  /** 查询存活的会话进程列表 */
+  listActiveSessions: async () => {
+    return ipcRenderer.invoke('session:list');
+  },
+
+  // ─── 侧边栏数据 ───
+
+  /** 获取侧边栏静态数据（Skills/Instructions/Agents/MCP 配置） */
+  getSidebarStatic: async () => {
+    return ipcRenderer.invoke('sidebar:static');
+  },
+
+  /** 读取 Instruction / Agent 描述文件内容 */
+  readInstruction: async (kind, file) => {
+    return ipcRenderer.invoke('sidebar:instruction', kind, file);
   },
 
   // ─── 窗口控制 ───

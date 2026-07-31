@@ -6,6 +6,9 @@
  *
  * 由 Electron 主进程以 child_process 方式启动：
  *   npx tsx src/electron-entry.ts
+ *
+ * 多会话：每个会话由主进程拉起一个独立的本入口进程，
+ * 通过环境变量 AGENT_SESSION_ID 标识会话身份。
  */
 
 import 'dotenv/config';
@@ -13,6 +16,7 @@ import { CLIAAgent } from './agent';
 import { ElectronUIBridge } from './electron-bridge';
 import { createMessageHook } from './message_managing';
 import { composeHooks } from './memory_agent';
+import { registerRoundHooks } from './register-round-hooks';
 import { buildEditModePinningHook } from './tools/desk-edit';
 import { createCommandRegistry } from './command';
 
@@ -26,6 +30,9 @@ agent.messageHook = composeHooks(
   createMessageHook(),
   buildEditModePinningHook(),
 );
+
+// ── 每轮结束后的后台任务（做梦沉淀 + 会话标题刷新），与 TUI 入口一致 ──
+registerRoundHooks(agent, (msg) => bridge.addToolMessage(msg));
 
 // ── 指令注册 ──
 const commandRegistry = createCommandRegistry();
@@ -51,6 +58,37 @@ async function ensureKbIndex() {
   }
 }
 let kbIndexBuilt = false;
+
+/** 收集侧边栏运行时数据（hooks / 子 agent / MCP 状态） */
+async function collectSidebarData() {
+  const hooks: Array<{ name: string; description?: string }> = [];
+  if (agent.messageHook) hooks.push({ name: 'messageHook', description: '发送给模型前的消息预处理（去重/编辑模式固定）' });
+  if (agent.postRoundHook) hooks.push({ name: 'postRoundHook', description: '每轮结束后的后台任务（记忆沉淀/标题刷新）' });
+
+  let subAgents: Array<{ name: string; mode?: string; status?: string }> = [];
+  try {
+    const { subAgentManager } = await import('./tools/inner_skills/sub-agent/manager');
+    subAgents = subAgentManager.getAll().map((a) => ({
+      name: a.name,
+      mode: a.mode,
+      status: a.status,
+    }));
+  } catch { /* 子 agent 系统不可用时忽略 */ }
+
+  let mcp: Array<{ name: string; initialized: boolean; error?: string }> = [];
+  try {
+    const { getMcpManager } = await import('./mcp');
+    mcp = getMcpManager()?.getStatus() ?? [];
+  } catch { /* MCP 未初始化时忽略 */ }
+
+  return {
+    sessionId: process.env.AGENT_SESSION_ID || 'default',
+    hooks,
+    subAgents,
+    mcp,
+    context: { messageCount: agent.getMessages().length },
+  };
+}
 
 // ── 用户提交输入 ──
 bridge.onSubmit = async (input: string) => {
@@ -155,6 +193,24 @@ bridge.onCommand = async (cmd: string) => {
       bridge.addToolMessage('思考模式已禁用');
       break;
     }
+    // ── 多会话控制（由主进程按会话路由下发） ──
+    case 'session:activate': {
+      // 切换回本会话时重放当前 UI 消息（复用会话加载的消息重建逻辑）
+      const { reconstructUIMessages } = await import('./command/commands/loadsession.command');
+      const uiMessages = reconstructUIMessages({ agentMessages: agent.getMessages() });
+      bridge.replaceMessages(uiMessages);
+      break;
+    }
+    case 'session:new': {
+      // 新建会话：清空 agent 消息与 UI
+      agent.clear();
+      break;
+    }
+    case 'sidebar:data': {
+      const data = await collectSidebarData();
+      bridge.sendSidebarData(data);
+      break;
+    }
     default: {
       // 尝试通过指令系统执行（如 workdir-global <path>）
       const handled = await commandRegistry.tryExecute(cmd, { ui: bridge as any, agent });
@@ -171,21 +227,4 @@ bridge.startListening();
 
 // ── 通知主进程已就绪 ──
 bridge.emitReady();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

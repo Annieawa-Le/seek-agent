@@ -49,6 +49,7 @@ export type ChildToParent =
   | { type: 'init-done' }
   | { type: 'subagent'; name: string; content: string }
   | { type: 'kb-build'; phase: 'building' | 'done' | 'failed'; message: string }
+  | { type: 'sidebar-data'; data: Record<string, unknown> }
   | { type: 'exit' };
 
 /** 主进程 → 子进程 */
@@ -140,6 +141,11 @@ export class ElectronUIBridge {
   /** 发送知识库构建状态到 UI */
   addKbStatus(phase: 'building' | 'done' | 'failed', message: string): void {
     this.send({ type: 'kb-build', phase, message });
+  }
+
+  /** 发送侧边栏运行时数据（hooks/子agent/MCP 状态） */
+  sendSidebarData(data: Record<string, unknown>): void {
+    this.send({ type: 'sidebar-data', data });
   }
 
   addSystemMessage(content: string): void {

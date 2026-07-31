@@ -266,15 +266,13 @@ html, body {
   visibility: hidden;
   box-shadow: 2px 0 24px rgba(0, 0, 0, 0.35);
   transition: transform var(--duration-normal) var(--ease-out),
-              box-shadow var(--duration-normal) var(--ease-out),
               visibility 0s linear var(--duration-normal);
 }
 
 #left-sidebar.open {
   transform: translateX(0);
   visibility: visible;
-  transition: transform var(--duration-normal) var(--ease-out),
-              box-shadow var(--duration-normal) var(--ease-out);
+  transition: transform var(--duration-normal) var(--ease-out);
 }
 
 .sidebar-overlay {
@@ -933,7 +931,6 @@ html, body {
 .status-dot-mini[data-state='connecting'] {
   background: var(--warning);
   box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
-  animation: pulse-dot 1.5s ease-in-out infinite;
 }
 .status-dot-mini[data-state='disconnected'] {
   background: var(--danger);
@@ -2930,6 +2927,67 @@ html, body {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* ═══════════════════════════════════════════════════════════════
+   侧边栏增强（多会话 / Customizations 真实数据）
+   ═══════════════════════════════════════════════════════════════ */
+.custom-subname {
+  display: inline-block;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.custom-submeta {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.8;
+}
+
+.custom-instruction-preview {
+  margin: 0 8px 6px 26px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+/* ─── 会话运行状态圆点 ─── */
+.session-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+  vertical-align: middle;
+}
+.session-dot.running {
+  background: var(--warning);
+}
 
 
 

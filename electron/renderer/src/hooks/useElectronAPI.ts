@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useMemo } from 'react';
 import type { AgentMessage, AgentStatus, FileTreeNode, GitChange, SessionInfo } from '@/types/index.ts';
 
 export function isElectron(): boolean {
@@ -70,11 +70,11 @@ export function useElectronAPI() {
     return api.setWorkdir(dirPath);
   }, [api]);
 
-
   const getSkillsList = useCallback(async (): Promise<Array<{ name: string; description: string }>> => {
     if (!api) return [];
     return api.getSkillsList();
   }, [api]);
+
   const openFileDialog = useCallback(async () => {
     if (!api) return { canceled: true, files: [] };
     return api.openFileDialog();
@@ -94,6 +94,7 @@ export function useElectronAPI() {
     if (!api) return { connected: false };
     return api.getAgentStatus();
   }, [api]);
+
   const readFileTree = useCallback(async (dirPath = '') => {
     if (!api) return [];
     return api.readFileTree(dirPath);
@@ -107,6 +108,45 @@ export function useElectronAPI() {
   const listSessions = useCallback(async (): Promise<SessionInfo[]> => {
     if (!api) return [];
     return api.listSessions();
+  }, [api]);
+
+  // ─── 多会话控制 ───
+
+  const switchSession = useCallback(async (sessionId: string, name?: string) => {
+    if (!api) return { error: 'API 不可用' };
+    return api.switchSession(sessionId, name);
+  }, [api]);
+
+  const newSession = useCallback(async () => {
+    if (!api) return { error: 'API 不可用' };
+    return api.newSession();
+  }, [api]);
+
+  const closeSession = useCallback(async (sessionId: string) => {
+    if (!api) return { error: 'API 不可用' };
+    return api.closeSession(sessionId);
+  }, [api]);
+
+  const getCurrentSession = useCallback(async () => {
+    if (!api) return { sessionId: 'default' };
+    return api.getCurrentSession();
+  }, [api]);
+
+  const listActiveSessions = useCallback(async () => {
+    if (!api) return [];
+    return api.listActiveSessions();
+  }, [api]);
+
+  // ─── 侧边栏数据 ───
+
+  const getSidebarStatic = useCallback(async () => {
+    if (!api) return { skills: [], instructions: [], addonAgents: [], mcpConfig: [] };
+    return api.getSidebarStatic();
+  }, [api]);
+
+  const readInstruction = useCallback(async (kind: string, file: string) => {
+    if (!api) return { error: 'API 不可用' };
+    return api.readInstruction(kind, file);
   }, [api]);
 
   const onMaximizedChange = useCallback((cb: (isMaximized: boolean) => void) => {
@@ -132,8 +172,10 @@ export function useElectronAPI() {
     if (!api) return false;
     return api.isMaximized();
   }, [api]);
+  // api 对象本身（preload contextBridge 暴露）是稳定的；
+  // useMemo 保证返回的包裹对象引用稳定，避免 useCallback(…, [api]) 每次渲染失效导致 useEffect 无限重跑
+  return useMemo(() => ({
 
-  return {
     isAvailable: !!api,
     onMessage,
     onStatus,
@@ -153,16 +195,20 @@ export function useElectronAPI() {
     readGitStatus,
     listSessions,
     getSkillsList,
+    switchSession,
+    newSession,
+    closeSession,
+    getCurrentSession,
+    listActiveSessions,
+    getSidebarStatic,
+    readInstruction,
     minimizeWindow,
     maximizeWindow,
     closeWindow,
     isWindowMaximized,
     onMaximizedChange,
-  };
+  }), [api]);
 }
-
-
-
 
 
 

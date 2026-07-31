@@ -17,6 +17,7 @@ import {
 } from './assets/tool-translations';
 import { toolCache } from './tools/tool-cache';
 import { drainPendingInjections, subAgentManager } from './tools/inner_skills/sub-agent/manager';
+import { summarizeSessionTitle, fallbackTitle, sanitizeTitle } from './tools/session-title';
 import { extractBulk } from './tools/tool-output';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,6 +54,14 @@ export class CLIAAgent {
 
   /** 当前会话唯一标识，用于会话文件命名 */
   private sessionId: string;
+  /** 会话标题（由轻量模型总结，用于 session 文件名） */
+  private sessionTitle = '';
+  /** 当前实际保存的 session 文件名（用于标题变化时清理旧文件） */
+  private savedSessionFileName = '';
+  /** 上次刷新标题的时间戳（节流用） */
+  private lastTitleRefreshAt = 0;
+  /** 上次刷新标题时的用户消息数（用于检测对话是否有实质进展） */
+  private lastTitleRefreshMsgCount = 0;
 
   /** 当前处理循环的 Promise（用作并发门控） */
   private processingPromise: Promise<void> | null = null;
@@ -1008,6 +1017,8 @@ export class CLIAAgent {
   clear(): void {
     this.messages = [];
     this.inputQueue = [];
+    this.sessionTitle = '';
+    this.savedSessionFileName = '';
     this.sessionId = this.generateSessionId();
     this.ui.clearMessages();
   }
@@ -1031,8 +1042,9 @@ export class CLIAAgent {
   // ────────────────────────────────────────────────
 
   /**
-   * 每轮结束后自动保存当前会话到 sessions/ 目录
-   * 使用 session-{sessionId}.json，同一会话周期内覆盖更新
+   * 每轮结束后自动保存当前会话到 sessions/ 目录。
+   * 文件名使用轻量模型总结的会话标题：session-{标题}.json；
+   * 标题未生成前回退到首条用户输入；标题变化时清理旧文件。
    */
   private autoSaveSession(): void {
     const messages = this.messages;
@@ -1043,22 +1055,80 @@ export class CLIAAgent {
       fs.mkdirSync(sessionDir, { recursive: true });
     }
 
-    const fileName = `session-${this.sessionId}.json`;
+    const title = this.sessionTitle || fallbackTitle(messages);
+    const fileName = `session-${sanitizeTitle(title)}.json`;
     const filePath = path.join(sessionDir, fileName);
+
+    // 标题变化：清理旧文件，避免同一会话产生多个文件
+    if (this.savedSessionFileName && this.savedSessionFileName !== fileName) {
+      try {
+        fs.unlinkSync(path.join(sessionDir, this.savedSessionFileName));
+      } catch {
+        // 旧文件不存在则忽略
+      }
+    }
 
     const data = {
       version: 1,
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
+      title: this.sessionTitle,
       cwd: process.cwd(),
       agentMessages: messages,
     };
 
     try {
       fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+      this.savedSessionFileName = fileName;
     } catch {
       // 自动保存失败不影响主流程
     }
+  }
+
+  /**
+   * 用轻量模型刷新会话标题（后台调用）。
+   * 节流：标题为空（首次）总是刷新；否则需满足 30 秒间隔 + 新增 ≥2 条用户消息。
+   */
+  async refreshSessionTitle(): Promise<string> {
+    const now = Date.now();
+    const isFirst = !this.sessionTitle;
+    const enoughGap = now - this.lastTitleRefreshAt >= 30_000;
+    const newMessages =
+      this.countUserInputs() - this.lastTitleRefreshMsgCount >= 2;
+
+    if (!isFirst && (!enoughGap || !newMessages)) {
+      return this.sessionTitle;
+    }
+    this.lastTitleRefreshAt = now;
+    this.lastTitleRefreshMsgCount = this.countUserInputs();
+    const title = await summarizeSessionTitle(this.messages);
+    if (title && title !== this.sessionTitle) {
+      this.sessionTitle = title;
+      // 立即用新标题重存（旧文件由 autoSaveSession 清理）
+      this.autoSaveSession();
+    }
+    return this.sessionTitle;
+  }
+
+  /** 统计真实用户输入条数（排除系统注入的 [工作记忆] 与子模型提交） */
+  private countUserInputs(): number {
+    return this.messages.filter(
+      (m) =>
+        m.role === 'user' &&
+        typeof m.content === 'string' &&
+        !m.content.startsWith('[工作记忆]') &&
+        !m.content.startsWith('【'),
+    ).length;
+  }
+
+  /** 设置会话标题（用于从文件恢复会话时指定） */
+  setSessionTitle(title: string): void {
+    if (title) this.sessionTitle = title;
+  }
+
+  /** 获取当前会话标题 */
+  getSessionTitle(): string {
+    return this.sessionTitle;
   }
 
   /** 生成新的会话 ID */
@@ -1072,14 +1142,6 @@ export class CLIAAgent {
     this.sessionId = id;
   }
 }
-
-
-
-
-
-
-
-
 
 
 

@@ -1,11 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
-import type { SessionInfo } from '@/types/index.ts';
+import type { SessionInfo, SidebarStaticData, SidebarRuntimeData } from '@/types/index.ts';
 
 interface Props {
-  onNewSession: () => void;
   open: boolean;
   onClose: () => void;
+  /** 当前活动会话 ID */
+  currentSessionId: string;
+  /** 当前会话的运行时数据（hooks/子agent/MCP 状态） */
+  runtimeData: SidebarRuntimeData | null;
+  onNewSession: () => void;
+  /** 切换到指定会话（已保存会话传 name） */
+  onSwitchSession: (sessionId: string, name?: string) => void;
 }
 
 const customItems = [
@@ -17,30 +23,140 @@ const customItems = [
   { key: 'plugins', label: 'Plugins', icon: 'M20 12H4M12 4v16' },
 ];
 
-const subItemsMap: Record<string, string[]> = {
-  agents: ['seek-agent', 'custom-agent'],
-  skills: ['code-reader', 'web-accessor', 'html-toolkit', 'image-identifier', 'pdf-reader'],
-  instructions: ['system-prompt', 'user-prompt'],
-  hooks: ['pre-message', 'post-message', 'on-error'],
-  mcp: ['file-server', 'search-server'],
-  plugins: ['plugin-a', 'plugin-b'],
+const modeLabelMap: Record<string, string> = {
+  clone: '克隆', mission: '任务', listen: '监听', instructor: '指导',
+};
+const statusLabelMap: Record<string, string> = {
+  idle: '空闲', running: '运行中', done: '完成', error: '错误',
 };
 
-export function LeftSidebar({ onNewSession, open, onClose }: Props) {
-  const { listSessions, sendCommand } = useElectronAPI();
+export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession, onSwitchSession }: Props) {
+  const api = useElectronAPI();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [staticData, setStaticData] = useState<SidebarStaticData | null>(null);
+  /** 正在运行（processing）的会话集合 */
+  const [runningSessions, setRunningSessions] = useState<Set<string>>(new Set());
+  /** 主进程存活的会话进程 */
+  const [activeSessionIds, setActiveSessionIds] = useState<string[]>([]);
   const [expandedCustom, setExpandedCustom] = useState<string | null>(null);
-  const [activeSession, setActiveSession] = useState<string | null>(null);
   const [customCollapsed, setCustomCollapsed] = useState(false);
+  /** 已展开的 Instruction 内容（key = kind:file） */
+  const [instructionContent, setInstructionContent] = useState<Record<string, string>>({});
+  const [loadingInstruction, setLoadingInstruction] = useState<string | null>(null);
 
   const loadSessions = useCallback(async () => {
-    const data = await listSessions();
+    const data = await api.listSessions();
     if (Array.isArray(data)) setSessions(data);
-  }, [listSessions]);
+  }, [api]);
 
-  useEffect(() => { loadSessions(); }, [loadSessions]);
+  const loadStatic = useCallback(async () => {
+    const data = await api.getSidebarStatic();
+    if (data) setStaticData(data);
+  }, [api]);
 
-  const handleNewSession = () => { onNewSession(); loadSessions(); };
+  const loadActive = useCallback(async () => {
+    const data = await api.listActiveSessions();
+    if (Array.isArray(data)) setActiveSessionIds(data.map(d => d.sessionId));
+  }, [api]);
+
+  useEffect(() => {
+    loadSessions();
+    loadStatic();
+    loadActive();
+    const t = setInterval(loadActive, 5000);
+    return () => clearInterval(t);
+  }, [loadSessions, loadStatic, loadActive]);
+
+  // 监听消息流：更新各会话的运行状态（后台会话也在继续跑）
+  useEffect(() => {
+    const unsub = api.onMessage((msg) => {
+      if (!msg.sessionId) return;
+      if (msg.type === 'state') {
+        setRunningSessions(prev => {
+          const next = new Set(prev);
+          if (msg.processing) next.add(msg.sessionId as string);
+          else next.delete(msg.sessionId as string);
+          return next;
+        });
+      } else if (msg.type === 'tool-call' || msg.type === 'thinking' || msg.type === 'thinking-bubble') {
+        if (msg.type === 'thinking' && !msg.active) {
+          setRunningSessions(prev => {
+            const next = new Set(prev);
+            next.delete(msg.sessionId as string);
+            return next;
+          });
+        } else {
+          setRunningSessions(prev => new Set(prev).add(msg.sessionId as string));
+        }
+      }
+    });
+    return unsub;
+  }, [api]);
+
+  const handleNewSession = () => {
+    onNewSession();
+    // 稍后刷新（新进程拉起需要时间）
+    setTimeout(() => { loadSessions(); loadActive(); }, 800);
+  };
+
+  const handleSwitchSession = (s: SessionInfo) => {
+    onSwitchSession(s.name, s.name);
+  };
+
+  /** 展开/收起 Instruction 文件内容 */
+  const toggleInstruction = async (kind: string, file: string) => {
+    const key = `${kind}:${file}`;
+    if (instructionContent[key]) {
+      setInstructionContent(prev => {
+        const { [key]: _removed, ...rest } = prev;
+        return rest;
+      });
+      return;
+    }
+    setLoadingInstruction(key);
+    const res = await api.readInstruction(kind, file);
+    if (res.content) {
+      setInstructionContent(prev => ({ ...prev, [key]: res.content as string }));
+    }
+    setLoadingInstruction(null);
+  };
+
+  // ── Customizations 真实数据组装 ──
+  const enabledSkills = (staticData?.skills || []).filter(s => s.enabled);
+  const agents = [
+    { name: 'seek-agent (主)', desc: '默认主 Agent 循环' },
+    ...(staticData?.addonAgents || []).map(a => ({ name: a.name, desc: '领域 Agent（addon）' })),
+    ...(runtimeData?.subAgents || []).map(a => ({
+      name: a.name,
+      desc: `子 Agent · ${modeLabelMap[a.mode || ''] || a.mode} · ${statusLabelMap[a.status || ''] || a.status}`,
+    })),
+  ];
+  const mcpItems = (staticData?.mcpConfig || []).map(cfg => {
+    const st = (runtimeData?.mcp || []).find(m => m.name === cfg.name);
+    return { name: cfg.name, desc: st ? (st.initialized ? `已连接 · ${cfg.command}` : `未连接 · ${cfg.command}`) : `未连接 · ${cfg.command}` };
+  });
+  const pluginItems = (staticData?.skills || []).map(s => ({
+    name: s.name,
+    desc: s.enabled ? '已启用' : '未启用',
+  }));
+
+  const subItemsMap: Record<string, Array<{ name: string; desc?: string }>> = {
+    agents,
+    skills: enabledSkills.map(s => ({ name: s.name, desc: s.description })),
+    instructions: (staticData?.instructions || []).map(i => ({ name: i.name, desc: i.kind })),
+    hooks: (runtimeData?.hooks || []).map(h => ({ name: h.name, desc: h.description })),
+    mcp: mcpItems,
+    plugins: pluginItems,
+  };
+
+  const badgeCount: Record<string, number> = {
+    agents: agents.length,
+    skills: enabledSkills.length,
+    instructions: staticData?.instructions.length || 0,
+    hooks: runtimeData?.hooks.length || 0,
+    mcp: staticData?.mcpConfig.length || 0,
+    plugins: staticData?.skills.length || 0,
+  };
 
   return (
     <aside id="left-sidebar" className={open ? 'open' : ''}>
@@ -59,16 +175,33 @@ export function LeftSidebar({ onNewSession, open, onClose }: Props) {
       </button>
 
       <div id="session-list" className="session-list">
-        {sessions.length === 0 ? <div className="session-empty">暂无会话</div> : sessions.map(s => {
-          const timeStr = s.timestamp ? new Date(s.timestamp).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-          return (
-            <div key={s.name} className={`session-item${activeSession === s.name ? ' active' : ''}`} onClick={() => setActiveSession(s.name)}>
-              <div className="session-name">{s.name}</div>
-              <div className="session-meta">{s.messageCount} msgs{timeStr ? ` · ${timeStr}` : ''}</div>
-              {s.preview && <div className="session-preview">{s.preview.slice(0, 60)}</div>}
+        {sessions.length === 0 && activeSessionIds.length === 0 ? <div className="session-empty">暂无会话</div> : <>
+          {sessions.map(s => {
+            const timeStr = s.timestamp ? new Date(s.timestamp).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+            const isActive = currentSessionId === s.name;
+            const isRunning = runningSessions.has(s.name) || (activeSessionIds.includes(s.name) && isActive);
+            return (
+              <div key={s.name} className={`session-item${isActive ? ' active' : ''}`} onClick={() => handleSwitchSession(s)} title={`切换到会话 ${s.name}`}>
+                <div className="session-name">
+                  {s.name}
+                  {isRunning && <span className="session-dot" title="该会话正在运行">●</span>}
+                </div>
+                <div className="session-meta">{s.messageCount} msgs{timeStr ? ` · ${timeStr}` : ''}</div>
+                {s.preview && <div className="session-preview">{s.preview.slice(0, 60)}</div>}
+              </div>
+            );
+          })}
+          {/* 运行中但尚未落盘的新会话 */}
+          {activeSessionIds.filter(id => !sessions.some(s => s.name === id)).map(id => (
+            <div key={id} className={`session-item${currentSessionId === id ? ' active' : ''}`} onClick={() => onSwitchSession(id)} title={`切换到运行中会话 ${id}`}>
+              <div className="session-name">
+                {id}
+                <span className="session-dot running" title="该会话正在运行">●</span>
+              </div>
+              <div className="session-meta">运行中（未保存）</div>
             </div>
-          );
-        })}
+          ))}
+        </>}
       </div>
 
       <div id="sidebar-spacer" />
@@ -85,8 +218,7 @@ export function LeftSidebar({ onNewSession, open, onClose }: Props) {
               <li key={item.key} className="custom-item" data-expandable="true" onClick={(e) => { e.stopPropagation(); setExpandedCustom(prev => prev === item.key ? null : item.key); }}>
                 <svg className="custom-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d={item.icon} /></svg>
                 <span className="custom-label">{item.label}</span>
-                {item.key === 'skills' && <span className="custom-badge">10</span>}
-                {item.key === 'mcp' && <span className="custom-badge">2</span>}
+                {badgeCount[item.key] > 0 && <span className="custom-badge">{badgeCount[item.key]}</span>}
                 <span className={`custom-expand${expandedCustom === item.key ? ' expanded' : ''}`}>{expandedCustom === item.key ? '▼' : '▶'}</span>
               </li>
             ))}
@@ -95,9 +227,34 @@ export function LeftSidebar({ onNewSession, open, onClose }: Props) {
 
         {expandedCustom && !customCollapsed && (
           <div className="custom-subitems">
-            {(subItemsMap[expandedCustom] || []).map(name => (
-              <div key={name} className="custom-subitem"><span className="custom-subicon">·</span>{name}</div>
-            ))}
+            {expandedCustom === 'instructions'
+              ? (subItemsMap[expandedCustom] || []).map(item => {
+                  const inst = (staticData?.instructions || []).find(i => i.name === item.name && i.kind === item.desc);
+                  const key = inst ? `${inst.kind}:${inst.file}` : item.name;
+                  const content = instructionContent[key];
+                  const loading = loadingInstruction === key;
+                  return (
+                    <div key={key}>
+                      <div className="custom-subitem" onClick={() => inst && toggleInstruction(inst.kind, inst.file)} title={inst ? '点击查看内容' : item.desc}>
+                        <span className="custom-subicon">{inst ? (content ? '▾' : '▸') : '·'}</span>
+                        <span className="custom-subname">{item.name}</span>
+                        <span className="custom-submeta">{item.desc}</span>
+                      </div>
+                      {content && (
+                        <div className="custom-instruction-preview">
+                          {loading ? '加载中…' : content.slice(0, 300) + (content.length > 300 ? '…' : '')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              : (subItemsMap[expandedCustom] || []).map(item => (
+                  <div key={item.name} className="custom-subitem" title={item.desc || ''}>
+                    <span className="custom-subicon">·</span>
+                    <span className="custom-subname">{item.name}</span>
+                    {item.desc && <span className="custom-submeta">{item.desc.slice(0, 40)}</span>}
+                  </div>
+                ))}
           </div>
         )}
       </div>

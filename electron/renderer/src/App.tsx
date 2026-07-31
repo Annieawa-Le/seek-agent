@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
 import { useAgentStatus } from '@/hooks/useAgentStatus.ts';
 import { useMessages } from '@/hooks/useMessages.ts';
@@ -9,11 +9,18 @@ import { InputBar } from '@/components/InputBar.tsx';
 import { RightPanel } from '@/components/RightPanel.tsx';
 import { StatusBar } from '@/components/StatusBar.tsx';
 import { FolderSelector } from '@/components/FolderSelector.tsx';
-import type { AgentMessage } from '@/types/index.ts';
+import type { AgentMessage, SidebarRuntimeData } from '@/types/index.ts';
 
 export function App() {
+  // 当前活动会话（与主进程 currentSessionId 保持一致）
   const api = useElectronAPI();
-  const status = useAgentStatus();
+  const [currentSessionId, setCurrentSessionId] = useState('default');
+  const currentSessionRef = useRef('default');
+  useEffect(() => { currentSessionRef.current = currentSessionId; }, [currentSessionId]);
+  // 当前会话的运行时数据（hooks/子agent/MCP 状态，由 sidebar:data 消息更新）
+  const [runtimeData, setRuntimeData] = useState<SidebarRuntimeData | null>(null);
+
+  const status = useAgentStatus(currentSessionId);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [kbEnabled, setKbEnabled] = useState(true);
   const [smartSearchEnabled, setSmartSearchEnabled] = useState(false);
@@ -64,7 +71,19 @@ export function App() {
   } = useMessages();
 
   const handleMessage = useCallback((msg: AgentMessage) => {
+    // 会话隔离：只处理当前活动会话的消息（其他会话在后台继续运行）
+    if (msg.sessionId && msg.sessionId !== currentSessionRef.current) return;
+
     switch (msg.type) {
+      case 'clear-messages':
+        // 会话切换/加载时，agent 进程通过 clear-messages 通知清空
+        clearMessages();
+        break;
+
+      case 'sidebar-data':
+        if (msg.data) setRuntimeData(msg.data);
+        break;
+
       case 'message':
         switch (msg.role) {
           case 'user':
@@ -138,12 +157,24 @@ export function App() {
     }
   }, [appendMessage, appendToStreaming, addToolToAgent, updateToolResult,
       setToolCallCount, endStreaming, removeLastAgent, startThinking,
-      appendThinkingDelta, endThinking, beginNewRound]);
+      appendThinkingDelta, endThinking, clearMessages]);
 
   useEffect(() => {
     const unsub = api.onMessage(handleMessage);
     return () => unsub();
   }, [api, handleMessage]);
+
+  // 挂载后同步主进程当前会话，并请求一次运行时数据
+  useEffect(() => {
+    api.getCurrentSession().then(({ sessionId }) => {
+      if (sessionId) {
+        currentSessionRef.current = sessionId;
+        setCurrentSessionId(sessionId);
+      }
+      api.sendCommand('sidebar:data');
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 欢迎消息
   useEffect(() => {
@@ -171,14 +202,32 @@ export function App() {
     endStreaming();
   }, [api, endStreaming]);
 
-  const handleNewSession = useCallback(() => {
-    if (status.processing) {
-      api.abort();
-      endStreaming();
-    }
+  /** 新建会话：不中断当前会话，拉起独立 Agent 进程 */
+  const handleNewSession = useCallback(async () => {
+    const res = await api.newSession();
+    if (!res?.success || !res.sessionId) return;
+    currentSessionRef.current = res.sessionId;
+    setCurrentSessionId(res.sessionId);
+    setRuntimeData(null);
     clearMessages();
-    api.sendCommand('new_session');
-  }, [api, clearMessages, endStreaming, status.processing]);
+    appendMessage({ role: 'banner', content: '', createdAt: Date.now() });
+    appendMessage({ role: 'system', content: `新会话已创建（${res.sessionId}）。`, createdAt: Date.now() });
+    appendMessage({ role: 'blank', content: '' });
+    // 请求新会话的运行时数据
+    api.sendCommand('sidebar:data');
+  }, [api, clearMessages, appendMessage]);
+
+  /** 切换到指定会话（其他会话的 Agent 进程继续运行） */
+  const handleSwitchSession = useCallback(async (sessionId: string, name?: string) => {
+    if (sessionId === currentSessionRef.current) return;
+    const res = await api.switchSession(sessionId, name);
+    if (!res?.success) return;
+    currentSessionRef.current = res.sessionId || sessionId;
+    setCurrentSessionId(res.sessionId || sessionId);
+    setRuntimeData(null);
+    // 会话内容由 agent 进程通过 clear-messages + 消息流重放；请求运行时数据
+    api.sendCommand('sidebar:data');
+  }, [api]);
 
   if (!api.isAvailable) {
     return (
@@ -193,7 +242,14 @@ export function App() {
       <Header status={status} ctxTokens={status.ctxTokens} theme={theme} onToggleTheme={toggleTheme} onToggleSidebar={toggleSidebar} sidebarOpen={sidebarOpen} />
       <div id="body-content">
         <div id="body-row">
-          <LeftSidebar open={sidebarOpen} onClose={closeSidebar} onNewSession={handleNewSession} />
+          <LeftSidebar
+            open={sidebarOpen}
+            onClose={closeSidebar}
+            currentSessionId={currentSessionId}
+            runtimeData={runtimeData}
+            onNewSession={handleNewSession}
+            onSwitchSession={handleSwitchSession}
+          />
           {sidebarOpen && <div className="sidebar-overlay" onClick={closeSidebar} />}
           <div id="main-content">
             <div id="main-toolbar">

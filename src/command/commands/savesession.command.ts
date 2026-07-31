@@ -33,9 +33,15 @@ export const SaveSessionCommand: Command = {
       // 用名字中的非法文件名字符替换为下划线
       fileName = nameMatch[1].trim().replace(/[\\/:*?"<>|]/g, '_') + '.json';
     } else {
-      const now = new Date();
-      const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      fileName = `session-${ts}.json`;
+      // 无显式名字：优先用轻量模型总结的会话标题命名
+      const title = ctx.agent.getSessionTitle();
+      if (title) {
+        fileName = `session-${title.replace(/[\\/:*?"<>|]/g, '_')}.json`;
+      } else {
+        const now = new Date();
+        const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        fileName = `session-${ts}.json`;
+      }
     }
 
     const filePath = path.join(getSessionDir(), fileName);
@@ -62,3 +68,5 @@ export const SaveSessionCommand: Command = {
     );
   },
 };
+
+

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useElectronAPI } from './useElectronAPI.ts';
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
@@ -18,8 +18,28 @@ export interface AgentStatusState {
   kbStatus: { phase: 'idle' | 'building' | 'done' | 'failed'; message: string };
 }
 
-export function useAgentStatus() {
+/**
+ * Agent 运行状态 hook。
+ * @param currentSessionId 当前活动会话：只接收该会话的消息/状态，切换会话时自动刷新
+ */
+export function useAgentStatus(currentSessionId: string = 'default') {
   const { onMessage, onStatus, getAgentStatus } = useElectronAPI();
+  const sessionRef = useRef(currentSessionId);
+  useEffect(() => {
+    sessionRef.current = currentSessionId;
+    // 切换会话后主动查询新会话的连接状态
+    getAgentStatus().then(result => {
+      setStatus(prev => {
+        const connected = !!result?.connected;
+        const connectionState: ConnectionState = connected ? 'connected' : 'connecting';
+        const next = { ...prev, connected, connectionState };
+        next.activity = updateActivity(next);
+        return next;
+      });
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSessionId]);
+
   const [status, setStatus] = useState<AgentStatusState>({
     connected: false,
     connectionState: 'connecting',
@@ -42,6 +62,8 @@ export function useAgentStatus() {
 
   useEffect(() => {
     const unsubMsg = onMessage((msg) => {
+      // 只处理当前活动会话的消息
+      if ((msg.sessionId || 'default') !== sessionRef.current) return;
       switch (msg.type) {
         case 'state':
           setStatus(prev => {
@@ -77,13 +99,15 @@ export function useAgentStatus() {
         case 'kb-build':
           setStatus(prev => ({
             ...prev,
-            kbStatus: { phase: msg.phase, message: msg.message },
+            kbStatus: { phase: msg.phase || 'idle', message: msg.message || '' },
           }));
           break;
       }
     });
 
     const unsubStatus = onStatus((s) => {
+      // 只处理当前活动会话的连接状态
+      if ((s.sessionId || 'default') !== sessionRef.current) return;
       setStatus(prev => {
         const connected = s.connected;
         const connectionState: ConnectionState = connected ? 'connected' : 'disconnected';

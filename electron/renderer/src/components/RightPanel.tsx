@@ -70,15 +70,34 @@ function TreeNodes({ nodes }: { nodes: FileTreeNode[] }) {
   </>;
 }
 
+/** 文件夹节点：懒加载子层（首次展开时按需请求该目录内容，避免同步遍历整个工作区） */
 function FolderNode({ node }: { node: FileTreeNode }) {
+  const { readFileTree } = useElectronAPI();
   const [expanded, setExpanded] = useState(false);
+  const [children, setChildren] = useState<FileTreeNode[] | null>(node.children ?? null);
+  const [loading, setLoading] = useState(false);
+
+  const toggle = async () => {
+    const willExpand = !expanded;
+    if (willExpand && children === null) {
+      setLoading(true);
+      try {
+        const data = await readFileTree(node.path);
+        if (Array.isArray(data)) setChildren(data);
+      } catch { /* 读取失败保持折叠 */ }
+      setLoading(false);
+    }
+    setExpanded(willExpand);
+  };
+
   return <>
-    <div className="tree-item folder" onClick={() => setExpanded(v => !v)}>
+    <div className="tree-item folder" onClick={toggle}>
       <span className="tree-toggle">{expanded ? '▼' : '▶'}</span>
       <span className="tree-folder-icon">📁</span>
       <span className="tree-name">{node.name}</span>
     </div>
-    {expanded && node.children && <div className="tree-children"><TreeNodes nodes={node.children} /></div>}
+    {expanded && children && <div className="tree-children"><TreeNodes nodes={children} /></div>}
+    {expanded && loading && <div className="file-tree-loading">加载中…</div>}
   </>;
 }
 
@@ -95,5 +114,4 @@ function GitChangesContent({ changes }: { changes: GitChange[] }) {
     ))}
   </div>;
 }
-
 

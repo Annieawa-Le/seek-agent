@@ -56,7 +56,49 @@ export function getModel(modelName?: string): ModelInstance {
 export function resetModel(): void {
   cachedProvider = null;
   cachedModel = null;
+  liteProvider = null;
+  liteModel = null;
 }
+
+/**
+ * 轻量模型实例（做梦沉淀等后台任务用）。
+ * 读取 LITE_MODEL / LITE_MODEL_BASE_URL / LITE_MODEL_API_KEY：
+ *   - LITE_MODEL 未配置 → 回退主模型（getModel）
+ *   - 配置了但 BASE_URL 未配置 → 复用 OPENAI_BASE_URL
+ * 独立缓存，与主模型互不干扰。
+ */
+let liteProvider: ReturnType<typeof createDeepSeek | typeof createOpenAICompatible> | null = null;
+let liteModel: ModelInstance | null = null;
+
+function buildLiteProvider() {
+  const baseUrl = process.env.LITE_MODEL_BASE_URL || process.env.OPENAI_BASE_URL || '';
+  const apiKey = process.env.LITE_MODEL_API_KEY || process.env.OPENAI_API_KEY;
+
+  if (baseUrl.includes('opencode')) {
+    return createOpenAICompatible({
+      apiKey,
+      baseURL: baseUrl,
+      name: 'opencode',
+    });
+  }
+
+  return createDeepSeek({
+    apiKey,
+    baseURL: baseUrl || undefined,
+  });
+}
+
+/** 获取轻量模型实例；未配置 LITE_MODEL 时回退主模型 */
+export function getLiteModel(): ModelInstance {
+  const liteName = process.env.LITE_MODEL;
+  if (!liteName) return getModel();
+
+  if (!liteProvider) liteProvider = buildLiteProvider();
+  if (!liteModel) liteModel = liteProvider(liteName);
+  return liteModel;
+}
+
+
 
 
 // ── 系统 prompt 共享（让子 AI 调用复用主模型前缀，命中缓存） ──
@@ -71,4 +113,7 @@ export function getSystemPrompt(): string {
 export function setSystemPrompt(prompt: string): void {
   _systemPrompt = prompt;
 }
+
+
+
 

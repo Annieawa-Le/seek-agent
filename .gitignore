@@ -27,8 +27,6 @@ pnpm-debug.log*
 # Test artifacts
 test-patch.txt
 
-# Sessions
-
 # GitHub 外部引入的技能（非项目原创代码）
 src/tools/inner_skills/github-*/
 sessions/
@@ -39,4 +37,6 @@ sessions/
 # Cloned skill repos
 repos/
 
+# VS Code 源码（本地参考，非项目代码）
+ai-ide/
 

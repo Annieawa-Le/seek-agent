@@ -26,6 +26,8 @@ export interface WorkingMemoryItem {
   content: string;
   weight: number;
   lastAccess: number;
+  /** 是否已沉淀到长期记忆（dreaming 标记） */
+  dreamed: boolean;
 }
 
 export interface LongTermMemoryItem {
@@ -104,6 +106,7 @@ export class WorkingMemoryStore {
               id: it.id,
               content: it.content,
               weight: safeWeight(it.weight ?? 1),
+              dreamed: it.dreamed === true,
               lastAccess: it.lastAccess ?? Date.now(),
             });
           }
@@ -130,6 +133,24 @@ export class WorkingMemoryStore {
     return [...this.items.values()].sort((a, b) => b.lastAccess - a.lastAccess);
   }
 
+  /** 列出尚未沉淀到长期记忆的工作记忆（dreaming 用） */
+  listUndreamed(): WorkingMemoryItem[] {
+    return [...this.items.values()].filter((it) => !it.dreamed);
+  }
+
+  /** 标记若干工作记忆已沉淀 */
+  markDreamed(ids: number[]): void {
+    let changed = false;
+    for (const id of ids) {
+      const it = this.items.get(id);
+      if (it && !it.dreamed) {
+        it.dreamed = true;
+        changed = true;
+      }
+    }
+    if (changed) this.save();
+  }
+
   get(id: number): WorkingMemoryItem | undefined {
     return this.items.get(id);
   }
@@ -139,6 +160,7 @@ export class WorkingMemoryStore {
       id: this.nextId++,
       content,
       weight: safeWeight(weight),
+      dreamed: false,
       lastAccess: Date.now(),
     };
     this.items.set(item.id, item);
@@ -328,3 +350,9 @@ export class LongTermMemoryStore {
 // ── 模块级单例 ──
 export const workingMemory = new WorkingMemoryStore();
 export const longTermMemory = new LongTermMemoryStore();
+
+
+
+
+
+

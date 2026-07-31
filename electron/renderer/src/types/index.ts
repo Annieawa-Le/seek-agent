@@ -1,6 +1,7 @@
 /** Electron API 桥接类型 */
 export interface ElectronAPI {
   onAgentMessage: (callback: (msg: AgentMessage) => void) => () => void;
+  getAgentStatus: () => Promise<{ connected: boolean }>;
   onAgentStatus: (callback: (status: AgentStatus) => void) => () => void;
   onAgentStderr: (callback: (text: string) => void) => () => void;
   onWorkdirChanged: (callback: (path: string) => void) => () => void;
@@ -18,6 +19,20 @@ export interface ElectronAPI {
   readGitStatus: () => Promise<GitChange[]>;
   listSessions: () => Promise<SessionInfo[]>;
   getSkillsList: () => Promise<Array<{ name: string; description: string }>>;
+  /** 切换到指定会话（已保存会话传 name，将自动拉起独立 Agent 进程） */
+  switchSession: (sessionId: string, name?: string) => Promise<{ success?: boolean; error?: string; sessionId?: string; name?: string | null; created?: boolean }>;
+  /** 新建会话（拉起全新 Agent 进程并切换过去） */
+  newSession: () => Promise<{ success?: boolean; error?: string; sessionId?: string }>;
+  /** 关闭会话（杀掉对应 Agent 进程，不影响其他会话） */
+  closeSession: (sessionId: string) => Promise<{ success?: boolean; error?: string }>;
+  /** 查询当前活动会话 */
+  getCurrentSession: () => Promise<{ sessionId: string }>;
+  /** 查询存活的会话进程列表 */
+  listActiveSessions: () => Promise<Array<{ sessionId: string; ready: boolean }>>;
+  /** 获取侧边栏静态数据（Skills/Instructions/Agents/MCP 配置） */
+  getSidebarStatic: () => Promise<SidebarStaticData>;
+  /** 读取 Instruction / Agent 描述文件内容 */
+  readInstruction: (kind: string, file: string) => Promise<{ content?: string; error?: string }>;
   minimizeWindow: () => void;
   maximizeWindow: () => void;
   closeWindow: () => void;
@@ -41,7 +56,9 @@ export interface ToolMeta {
 }
 
 export interface AgentMessage {
-  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'thinking-bubble' | 'thinking-delta' | 'listen' | 'subagent' | 'append' | 'kb-build';
+  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'thinking-bubble' | 'thinking-delta' | 'listen' | 'subagent' | 'append' | 'kb-build' | 'clear-messages' | 'sidebar-data';
+  /** 所属会话（主进程在转发时附加） */
+  sessionId?: string;
   role?: MessageRole;
   content?: string;
   toolMeta?: ToolMeta;
@@ -58,6 +75,27 @@ export interface AgentMessage {
   phase?: 'building' | 'done' | 'failed';
   message?: string;
   msgId?: string;
+  /** sidebar-data 消息的负载 */
+  data?: SidebarRuntimeData;
+}
+
+/* ─── 侧边栏数据 ─── */
+
+/** 主进程读取的静态数据（Skills/Instructions/Agents/MCP 配置） */
+export interface SidebarStaticData {
+  skills: Array<{ name: string; description: string; enabled: boolean }>;
+  instructions: Array<{ name: string; kind: 'core' | 'addon' | 'platform'; file: string }>;
+  addonAgents: Array<{ name: string; kind: string; file: string }>;
+  mcpConfig: Array<{ name: string; command: string }>;
+}
+
+/** Agent 进程返回的运行时数据（hooks / 子 agent / MCP 状态） */
+export interface SidebarRuntimeData {
+  sessionId: string;
+  hooks: Array<{ name: string; description?: string }>;
+  subAgents: Array<{ name: string; mode?: string; status?: string }>;
+  mcp: Array<{ name: string; initialized: boolean; error?: string }>;
+  context: { messageCount: number };
 }
 
 export interface FileTreeNode {
@@ -98,3 +136,12 @@ export interface ToolHistoryEntry {
   fullOutput: string | null;
 }
 
+
+
+
+/* ─── Agent 连接状态（来自主进程 agent:status 事件） ─── */
+export interface AgentStatus {
+  connected: boolean;
+  sessionId?: string;
+  code?: number;
+}

@@ -3,6 +3,7 @@ import type { UIMessage } from '../../ui';
 import path from 'node:path';
 import fs from 'node:fs';
 import { getWorkspaceRoot, setCwd } from '../../workdir';
+import { friendlyToolCallLabel, friendlyToolResultLabel } from '../../assets/tool-translations';
 
 /** 会话保存目录 */
 function getSessionDir(): string {
@@ -23,13 +24,19 @@ function listSessionFiles(): { name: string; filePath: string; mtime: Date }[] {
     .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 }
 
+
 /**
  * 从 session 的 agentMessages 重建 UI 消息列表。
- * 只还原 user 和 assistant 的文本内容，不还原 tool 调用/结果消息。
+ * 完整还原 user 文本、assistant 文本，以及 tool-call / tool-result 工具调用块，
+ * 使加载后的对话历史与保存时一致。
+ * （导出：供 electron-entry 的 session:activate 重放 UI 消息使用）
  */
-function reconstructUIMessages(data: any): UIMessage[] {
+export function reconstructUIMessages(data: any): UIMessage[] {
   const uiMessages: UIMessage[] = [];
   const agentMessages: any[] = data.agentMessages || [];
+
+  // toolCallId → { toolName, args }：供 tool-result 重建显示标签
+  const toolCallMap = new Map<string, { toolName: string; args: Record<string, unknown> }>();
 
   for (const msg of agentMessages) {
     if (msg.role === 'user') {
@@ -43,17 +50,49 @@ function reconstructUIMessages(data: any): UIMessage[] {
         uiMessages.push({ role: 'user', content: text });
       }
     } else if (msg.role === 'assistant') {
-      const texts = typeof msg.content === 'string'
-        ? (msg.content ? [msg.content] : [])
-        : (msg.content || [])
-            .filter((p: any) => p?.type === 'text')
-            .map((p: any) => p.text);
-      if (texts.length > 0) {
-        uiMessages.push({ role: 'agent', content: texts.join('\n') });
+      // assistant 消息可能为纯字符串（旧格式）或 parts 数组（含 text / tool-call / reasoning）
+      const parts = typeof msg.content === 'string'
+        ? (msg.content ? [{ type: 'text', text: msg.content }] : [])
+        : (msg.content || []);
+
+      let textBuffer: string[] = [];
+      for (const p of parts) {
+        if (p?.type === 'text' && p.text) {
+          textBuffer.push(p.text);
+        } else if (p?.type === 'tool-call') {
+          // 先收尾已积累的文本，保持与实时会话一致的顺序
+          if (textBuffer.length > 0) {
+            uiMessages.push({ role: 'agent', content: textBuffer.join('\n') });
+            textBuffer = [];
+          }
+          const args = (p.input ?? {}) as Record<string, unknown>;
+          toolCallMap.set(p.toolCallId, { toolName: p.toolName, args });
+          uiMessages.push({
+            role: 'tool',
+            content: friendlyToolCallLabel(p.toolName, args),
+            toolMeta: { toolName: p.toolName, args },
+          });
+        }
+        // reasoning part 不参与 UI 展示，跳过
       }
-      // tool-call 部分跳过，恢复后若继续对话 AI 可重新发起
+      if (textBuffer.length > 0) {
+        uiMessages.push({ role: 'agent', content: textBuffer.join('\n') });
+      }
+    } else if (msg.role === 'tool') {
+      // tool-result：与前面的 tool-call 配对，渲染成 RESULT 块
+      const parts = Array.isArray(msg.content) ? msg.content : [];
+      for (const p of parts) {
+        if (p?.type !== 'tool-result') continue;
+        const meta = toolCallMap.get(p.toolCallId);
+        const raw = p.output?.value;
+        const outText = typeof raw === 'string' ? raw : String(raw ?? '');
+        const label = meta
+          ? friendlyToolResultLabel(meta.toolName, meta.args, outText)
+          : outText;
+        uiMessages.push({ role: 'tool', content: label });
+      }
     }
-    // tool / system 消息跳过，system 在 agent 启动时已重新注入
+    // system 消息跳过：agent 启动时已重新注入
   }
 
   return uiMessages;
@@ -166,8 +205,10 @@ export const LoadSessionCommand: Command = {
       `✅ 已恢复会话「${path.basename(filePath, '.json')}」` +
       `（${restoredCount} 条消息）\n   \`${path.relative(getWorkspaceRoot(), filePath)}\``
     );
+    // ── 恢复会话标题（后续自动保存沿用原标题命名） ──
+    if (data.title) {
+      ctx.agent.setSessionTitle(data.title);
+    }
   },
 };
-
-
 
