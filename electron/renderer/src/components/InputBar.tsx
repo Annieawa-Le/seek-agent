@@ -1,9 +1,17 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { isElectron } from '@/hooks/useElectronAPI.ts';
+
+interface Attachment {
+  name: string;
+  path: string;
+}
 
 interface Props {
   processing: boolean;
   thinking: boolean;
   kbEnabled: boolean;
+  thinkingEnabled: boolean;
+  onToggleThinking: (enabled: boolean) => void;
   smartSearchEnabled: boolean;
   skillsList: Array<{ name: string; description: string }>;
   onSend: (text: string) => void;
@@ -12,18 +20,11 @@ interface Props {
   onToggleSmartSearch: (enabled: boolean) => void;
 }
 
-/**
- * 从技能名生成短标签
- * 如 "github-api-design" → "API 设计", "html-toolkit" → "HTML 工具", "kb-query" → "知识库"
- * 优先从 description 中提取，否则从 name 推断
- */
 function inferSkillLabel(name: string, description: string): string {
-  // 如果 description 有有意义的中文内容，取前半段
   const descMatch = description.match(/^[\u4e00-\u9fff\w\s]+/);
   const descLabel = descMatch ? descMatch[0].trim() : '';
   if (descLabel.length >= 4 && descLabel.length <= 20) return descLabel;
 
-  // 从 name 推断
   const parts = name.split('-').filter(Boolean);
   const label = parts
     .map(p => {
@@ -54,16 +55,16 @@ function inferSkillLabel(name: string, description: string): string {
   return label;
 }
 
-
 export function InputBar({
-  processing, thinking, kbEnabled, smartSearchEnabled, skillsList,
-  onSend, onAbort, onToggleKb, onToggleSmartSearch,
+  processing, thinking, kbEnabled, smartSearchEnabled, thinkingEnabled, skillsList,
+  onSend, onAbort, onToggleKb, onToggleSmartSearch, onToggleThinking,
 }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // 技能上拉列表状态
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
 
@@ -76,7 +77,6 @@ export function InputBar({
 
   useEffect(() => { adjustHeight(); }, [value, adjustHeight]);
 
-  // 点击外部关闭技能下拉
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -89,17 +89,18 @@ export function InputBar({
     }
   }, [skillsOpen]);
 
-  // 切换智能搜索
   const handleToggleSmartSearch = useCallback(() => {
     onToggleSmartSearch(!smartSearchEnabled);
   }, [smartSearchEnabled, onToggleSmartSearch]);
 
-  // 切换技能下拉
+  const handleToggleThinking = useCallback(() => {
+    onToggleThinking(!thinkingEnabled);
+  }, [thinkingEnabled, onToggleThinking]);
+
   const toggleSkillsDropdown = useCallback(() => {
     setSkillsOpen(prev => !prev);
   }, []);
 
-  // 切换技能选中
   const toggleSkill = useCallback((skillName: string) => {
     setSelectedSkills(prev => {
       const next = new Set(prev);
@@ -112,15 +113,43 @@ export function InputBar({
     });
   }, []);
 
-  // 是否有技能被选中
   const hasSelectedSkills = selectedSkills.size > 0;
+
+  // 打开文件选择对话框
+  const handleAttach = useCallback(async () => {
+    if (!isElectron()) return;
+    const api = window.electronAPI!;
+    const result = await api.openFileDialog();
+    if (result.canceled || !result.files.length) return;
+
+    const newAttachments: Attachment[] = result.files.map(f => ({
+      name: f.replace(/^.*[/\\]/, ''),
+      path: f,
+    }));
+    setAttachments(prev => {
+      const existingPaths = new Set(prev.map(a => a.path));
+      const unique = newAttachments.filter(a => !existingPaths.has(a.path));
+      return [...prev, ...unique];
+    });
+  }, []);
+
+  // 移除附件
+  const removeAttachment = useCallback((path: string) => {
+    setAttachments(prev => prev.filter(a => a.path !== path));
+  }, []);
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    if (!trimmed) return;
+    if (!trimmed && attachments.length === 0) return;
 
     let text = trimmed;
-    // 如果有选中的技能，追加技能提示
+
+    // 附件以 markdown 链接格式追加，AI 看到的是 [文件名](路径)
+    if (attachments.length > 0) {
+      if (text) text += '\n\n';
+      text += attachments.map(a => `[${a.name}](${a.path})`).join('\n');
+    }
+
     if (hasSelectedSkills) {
       const skillList = Array.from(selectedSkills).map(s => {
         const found = skillsList.find(sk => sk.name === s);
@@ -134,8 +163,9 @@ export function InputBar({
 
     onSend(text);
     setValue('');
+    setAttachments([]);
     setSkillsOpen(false);
-  }, [value, onSend, hasSelectedSkills, selectedSkills]);
+  }, [value, onSend, hasSelectedSkills, selectedSkills, attachments]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -146,9 +176,7 @@ export function InputBar({
   return (
     <div className="input-bar">
       <div className="input-bar-body">
-        {/* 统一框体 */}
         <div className="input-wrapper">
-          {/* —— 上排：左侧胶囊 + 右侧操作按钮 —— */}
           <div className="input-toolbar">
             <div className="capsule-group">
               <button
@@ -162,6 +190,16 @@ export function InputBar({
                   <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
                 </svg>
                 <span>智能搜索</span>
+              </button>
+              <button
+                className={`capsule-btn${thinkingEnabled ? ' capsule-active' : ''}`}
+                onClick={handleToggleThinking}
+                title={thinkingEnabled ? '思考模式（启用）：AI 先展示推理过程再作答' : '思考模式（禁用）：直接作答'}
+              >
+                <svg className="capsule-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/><path d="M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"/>
+                </svg>
+                <span>思考</span>
               </button>
               <button
                 className={`capsule-btn${hasSelectedSkills ? ' capsule-active' : ''}`}
@@ -189,7 +227,11 @@ export function InputBar({
             </div>
             <div className="input-toolbar-spacer" />
             <div className="input-actions">
-              <button className="action-btn" title="添加附件">
+              <button
+                className="action-btn"
+                title="添加附件"
+                onClick={handleAttach}
+              >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
                 </svg>
@@ -197,7 +239,7 @@ export function InputBar({
               <button
                 className={`send-btn${processing ? ' stop-mode' : ''}`}
                 onClick={processing ? onAbort : handleSend}
-                disabled={!processing && !value.trim()}
+                disabled={!processing && !value.trim() && attachments.length === 0}
                 title={processing ? '终止' : '发送'}
               >
                 {processing ? (
@@ -213,13 +255,35 @@ export function InputBar({
               </button>
             </div>
           </div>
-          {/* —— 下排：文本输入区 —— */}
+
+          {attachments.length > 0 && (
+            <div className="attachment-bar">
+              {attachments.map(a => (
+                <span key={a.path} className="attachment-chip">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="attachment-chip-icon">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                  </svg>
+                  <span className="attachment-chip-name" title={a.path}>{a.name}</span>
+                  <button
+                    className="attachment-chip-remove"
+                    onClick={() => removeAttachment(a.path)}
+                    title="移除附件"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="input-field-area">
             <textarea
               id="message-input"
               ref={textareaRef}
               rows={1}
-              placeholder="给 DeepSeek 发送消息"
+              placeholder={attachments.length > 0 ? '添加消息描述（可选）…' : '给 DeepSeek 发送消息'}
               value={value}
               onChange={e => setValue(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -229,7 +293,6 @@ export function InputBar({
         </div>
       </div>
 
-      {/* —— 技能上拉列表 —— */}
       {skillsOpen && (
         <div className="skill-dropdown-overlay" onClick={() => setSkillsOpen(false)} />
       )}
@@ -269,8 +332,6 @@ export function InputBar({
     </div>
   );
 }
-
-
 
 
 

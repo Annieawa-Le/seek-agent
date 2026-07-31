@@ -75,6 +75,11 @@ export function useElectronAPI() {
     if (!api) return [];
     return api.getSkillsList();
   }, [api]);
+  const openFileDialog = useCallback(async () => {
+    if (!api) return { canceled: true, files: [] };
+    return api.openFileDialog();
+  }, [api]);
+
   const selectFolder = useCallback(async () => {
     if (!api) return { canceled: true };
     return api.selectFolder();
@@ -85,6 +90,10 @@ export function useElectronAPI() {
     return api.getRecentDirs();
   }, [api]);
 
+  const getAgentStatus = useCallback(async () => {
+    if (!api) return { connected: false };
+    return api.getAgentStatus();
+  }, [api]);
   const readFileTree = useCallback(async (dirPath = '') => {
     if (!api) return [];
     return api.readFileTree(dirPath);
@@ -128,6 +137,7 @@ export function useElectronAPI() {
     isAvailable: !!api,
     onMessage,
     onStatus,
+    getAgentStatus,
     onStderr,
     onWorkdirChanged,
     sendInput,
@@ -137,6 +147,7 @@ export function useElectronAPI() {
     getWorkdir,
     setWorkdir,
     selectFolder,
+    openFileDialog,
     getRecentDirs,
     readFileTree,
     readGitStatus,
@@ -149,6 +160,12 @@ export function useElectronAPI() {
     onMaximizedChange,
   };
 }
+
+
+
+
+
+
 
 
 

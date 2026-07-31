@@ -137,6 +137,11 @@ export const LoadSessionCommand: Command = {
     // ── 恢复 agent 消息 ──
     ctx.agent.setMessages(data.agentMessages);
 
+    // ── 恢复会话 ID（后续自动保存会覆盖同一文件） ──
+    if (data.sessionId) {
+      ctx.agent.setSessionId(data.sessionId);
+    }
+
     // ── 恢复工作目录（如果保存的路径在当前工作区内） ──
     if (data.cwd) {
       try {
@@ -163,4 +168,6 @@ export const LoadSessionCommand: Command = {
     );
   },
 };
+
+
 

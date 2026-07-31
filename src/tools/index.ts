@@ -12,9 +12,13 @@ import {
 } from './ref-desk';
 import { readFileTool, readCertainLines, readNumline, scanFileTool } from './read-file';
 import { executeCommandTool } from './execute-command';
-import { memoryFocus, memoryShorten } from './memory';
+import {
+  memoryFocus, memoryShorten,
+  memoryAdd, memoryUpdate, memoryTouch, memoryRemove, memoryList,
+  memoryRemember, memoryRecall, memoryClear, memoryStats,
+} from './memory';
 import { searchAllFile, searchSubFile, searchDirectory, searchContent } from './search-files';
-import { createFile, addPatch, delPatch, modifyPatch, replaceFile, undoPatch, historyPatch } from './file-manipulation';
+import { createFile, addPatch, delPatch, replaceFile, undoPatch, historyPatch } from './file-manipulation';
 import { createTodo, finishStep, undoStep, rerollStep, delStep, readTodo, delTodo, activeTodo } from './todo';
 import { toolCache } from './tool-cache';
 
@@ -26,6 +30,27 @@ function wrapTool(name: string, t: any) {
   if (!t?.execute) return t;
   return { ...t, execute: toolCache.wrap(name, t.execute) };
 }
+
+/**
+ * 动态导入模块，自动处理 .ts（开发）/.js（打包）扩展名的差异
+ */
+async function tryImport(basePath: string): Promise<any> {
+  const ts = Date.now();
+  // 先试 .ts（开发模式）
+  try {
+    const tsUrl = pathToFileURL(basePath + '.ts').href + `?t=${ts}`;
+    return await import(tsUrl);
+  } catch {
+    // 再试 .js（打包模式）
+    try {
+      const jsUrl = pathToFileURL(basePath + '.js').href + `?t=${ts}`;
+      return await import(jsUrl);
+    } catch {
+      throw new Error(`无法加载模块: ${basePath}`);
+    }
+  }
+}
+
 
 // ── 核心工具表 ──
 const coreTools = {
@@ -42,7 +67,6 @@ const coreTools = {
   replace_file: wrapTool('replace_file', replaceFile),
   add_patch: wrapTool('add_patch', addPatch),
   del_patch: wrapTool('del_patch', delPatch),
-  modify_patch: wrapTool('modify_patch', modifyPatch),
   undo_patch: wrapTool('undo_patch', undoPatch),
   history_patch: wrapTool('history_patch', historyPatch),
   // 参考桌面管理
@@ -61,6 +85,16 @@ const coreTools = {
   active_todo: wrapTool('active_todo', activeTodo),
   // 上下文记忆管理
   memory_focus: wrapTool('memory_focus', memoryFocus),
+  // 对话记忆（双层记忆：工作记忆 + 长期记忆）
+  memory_add: wrapTool('memory_add', memoryAdd),
+  memory_update: wrapTool('memory_update', memoryUpdate),
+  memory_touch: wrapTool('memory_touch', memoryTouch),
+  memory_remove: wrapTool('memory_remove', memoryRemove),
+  memory_list: wrapTool('memory_list', memoryList),
+  memory_remember: wrapTool('memory_remember', memoryRemember),
+  memory_recall: wrapTool('memory_recall', memoryRecall),
+  memory_clear: wrapTool('memory_clear', memoryClear),
+  memory_stats: wrapTool('memory_stats', memoryStats),
   memory_shorten: wrapTool('memory_shorten', memoryShorten),
 };
 
@@ -98,10 +132,8 @@ async function loadInnerSkills(): Promise<Record<string, any>> {
 
     // 动态加载技能模块
     try {
-      // 动态加载技能模块（加 ?t= 时间戳以绕过 Node.js 模块缓存）
-      const ts = Date.now();
-      const indexUrl = pathToFileURL(path.join(skillPath, 'index.ts')).href + `?t=${ts}`;
-      const skillModule = await import(indexUrl);
+      // 动态加载技能模块（自动处理 .ts/.js 扩展名）
+      const skillModule = await tryImport(path.join(skillPath, 'index'));
       const skillTools: Record<string, any> = skillModule.default || skillModule;
 
       for (const [name, toolImpl] of Object.entries(skillTools)) {
@@ -114,9 +146,7 @@ async function loadInnerSkills(): Promise<Record<string, any>> {
       }
       // ── 加载技能的工具翻译（translation.ts） ──
       try {
-        const transPath = path.join(skillPath, 'translation.ts');
-        const transUrl = pathToFileURL(transPath).href + `?t=${ts}`;
-        const transModule = await import(transUrl);
+        const transModule = await tryImport(path.join(skillPath, 'translation'));
         const translations: Record<string, any> = transModule.default || transModule;
         if (translations && typeof translations === 'object' && !Array.isArray(translations)) {
           registerSkillTranslations(translations);
@@ -126,11 +156,8 @@ async function loadInnerSkills(): Promise<Record<string, any>> {
       }
 
       // ── 加载技能的自定义面板（panel.ts） ──
-      // ── 加载技能的自定义面板（panel.ts） ──
       try {
-        const panelPath = path.join(skillPath, 'panel.ts');
-        const panelUrl = pathToFileURL(panelPath).href;
-        const panelModule = await import(panelUrl);
+        const panelModule = await tryImport(path.join(skillPath, 'panel'));
         const panelExport = panelModule.default || panelModule;
         if (typeof panelExport === 'function') {
           registerPanelProvider({ id: dir.name, render: panelExport });
@@ -295,12 +322,9 @@ export async function loadSingleSkill(skillName: string): Promise<boolean> {
     return true;
   }
 
-  const ts = Date.now();
-
   // 加载工具
   try {
-    const indexUrl = pathToFileURL(path.join(skillsDir, 'index.ts')).href + `?t=${ts}`;
-    const skillModule = await import(indexUrl);
+    const skillModule = await tryImport(path.join(skillsDir, 'index'));
     const skillTools: Record<string, any> = skillModule.default || skillModule;
 
     const loadedNames: string[] = [];
@@ -316,8 +340,7 @@ export async function loadSingleSkill(skillName: string): Promise<boolean> {
 
     // 加载翻译
     try {
-      const transUrl = pathToFileURL(path.join(skillsDir, 'translation.ts')).href + `?t=${ts}`;
-      const transModule = await import(transUrl);
+      const transModule = await tryImport(path.join(skillsDir, 'translation'));
       const translations = transModule.default || transModule;
       if (translations && typeof translations === 'object' && !Array.isArray(translations)) {
         registerSkillTranslations(translations);
@@ -326,8 +349,7 @@ export async function loadSingleSkill(skillName: string): Promise<boolean> {
 
     // 加载面板
     try {
-      const panelUrl = pathToFileURL(path.join(skillsDir, 'panel.ts')).href + `?t=${ts}`;
-      await import(panelUrl);
+      await tryImport(path.join(skillsDir, 'panel'));
     } catch { /* 没有面板文件，跳过 */ }
 
     return true;
@@ -367,4 +389,21 @@ export async function loadSingleSkill(skillName: string): Promise<boolean> {
 
 // ── MCP 相关导出 ──
 export { getMcpManager, shutdownMCP, reloadMCP } from '../mcp';
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

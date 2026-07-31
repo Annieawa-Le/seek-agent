@@ -145,6 +145,16 @@ bridge.onCommand = async (cmd: string) => {
       bridge.addToolMessage('智能搜索已禁用');
       break;
     }
+    case 'thinking_enable': {
+      agent.setThinking(true);
+      bridge.addToolMessage('思考模式已启用');
+      break;
+    }
+    case 'thinking_disable': {
+      agent.setThinking(false);
+      bridge.addToolMessage('思考模式已禁用');
+      break;
+    }
     default: {
       // 尝试通过指令系统执行（如 workdir-global <path>）
       const handled = await commandRegistry.tryExecute(cmd, { ui: bridge as any, agent });
@@ -161,6 +171,11 @@ bridge.startListening();
 
 // ── 通知主进程已就绪 ──
 bridge.emitReady();
+
+
+
+
+
 
 
 

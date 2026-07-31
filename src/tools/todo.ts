@@ -8,6 +8,8 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { getTodos, setTodos, getActiveTodo, setActiveTodo } from './todo-state';
+import { ToolOutput } from './tool-output';
+import type { TodoBulk } from './raw-bulk-types';
 
 // ── 类型 ──
 
@@ -39,6 +41,28 @@ function formatSteps(todo: Todo): string {
   return `📋 "${todo.name}"（${done}/${todo.steps.length} 步完成）：\n${lines.join('\n')}`;
 }
 
+/** 构造 ToolOutput：保留工具原有 AI 文本，同时携带结构化 TodoBulk */
+function todoOutput(action: TodoBulk['action'], name: string, msg: string, todo?: Todo, stepInfo?: string, active?: string | null): ToolOutput {
+  const doneCount = todo ? todo.steps.filter(s => s.completed).length : 0;
+  const bulk: TodoBulk = {
+    type: 'todo',
+    action,
+    name,
+    doneCount,
+    totalCount: todo ? todo.steps.length : 0,
+    steps: todo?.steps.map(s => ({ content: s.content, completed: s.completed })),
+    stepInfo,
+    active,
+  };
+  return new ToolOutput(bulk, msg);
+}
+
+/** 错误返回：错误信息同时进 AI 文本和 bulk.error */
+function todoError(msg: string, name = ''): ToolOutput {
+  const bulk: TodoBulk = { type: 'todo', action: 'read', name, doneCount: 0, totalCount: 0, error: msg };
+  return new ToolOutput(bulk, msg);
+}
+
 // ── 工具定义 ──
 
 export const createTodo = tool({
@@ -50,7 +74,7 @@ export const createTodo = tool({
   execute: async ({ name, steps }) => {
     const todos = getTodos();
     if (todos.some(t => t.name === name)) {
-      return `❌ 已存在名为 "${name}" 的 todo。`;
+      return todoError(`❌ 已存在名为 "${name}" 的 todo。`, name);
     }
 
     const todo: Todo = {
@@ -62,7 +86,8 @@ export const createTodo = tool({
     setTodos(todos);
     setActiveTodo(name);
 
-    return `✅ 已创建 todo "${name}"（共 ${steps.length} 步）：\n${formatSteps(todo)}`;
+    const msg = `✅ 已创建 todo "${name}"（共 ${steps.length} 步）：\n${formatSteps(todo)}`;
+    return todoOutput('create', name, msg, todo);
   },
 });
 
@@ -74,12 +99,13 @@ export const finishStep = tool({
   execute: async ({ name }) => {
     const todos = getTodos();
     const found = findTodo(todos, name);
-    if (typeof found === 'string') return found;
+    if (typeof found === 'string') return todoError(found, name);
 
     const { todo, index } = found;
     const nextStep = todo.steps.find(s => !s.completed);
     if (!nextStep) {
-      return `■ "${name}" 的所有步骤已完成！\n${formatSteps(todo)}`;
+      const msg = `■ "${name}" 的所有步骤已完成！\n${formatSteps(todo)}`;
+      return todoOutput('finish', name, msg, todo);
     }
 
     nextStep.completed = true;
@@ -87,7 +113,8 @@ export const finishStep = tool({
     setTodos(todos);
 
     const stepNum = todo.steps.indexOf(nextStep) + 1;
-    return `✅ Step ${stepNum} 已完成：${nextStep.content}\n\n${formatSteps(todo)}`;
+    const msg = `✅ Step ${stepNum} 已完成：${nextStep.content}\n\n${formatSteps(todo)}`;
+    return todoOutput('finish', name, msg, todo, nextStep.content);
   },
 });
 
@@ -99,19 +126,21 @@ export const undoStep = tool({
   execute: async ({ name }) => {
     const todos = getTodos();
     const found = findTodo(todos, name);
-    if (typeof found === 'string') return found;
+    if (typeof found === 'string') return todoError(found, name);
 
     const { todo, index } = found;
     const lastDoneIdx = todo.steps.map((s, i) => ({ s, i })).reverse().find(item => item.s.completed);
     if (!lastDoneIdx) {
-      return `■ "${name}" 没有已完成的步骤需要回退。\n${formatSteps(todo)}`;
+      const msg = `■ "${name}" 没有已完成的步骤需要回退。\n${formatSteps(todo)}`;
+      return todoOutput('undo', name, msg, todo);
     }
 
     todo.steps[lastDoneIdx.i].completed = false;
     todos[index] = todo;
     setTodos(todos);
 
-    return `↩️ 已撤销 Step ${lastDoneIdx.i + 1}：${todo.steps[lastDoneIdx.i].content}\n\n${formatSteps(todo)}`;
+    const msg = `↩️ 已撤销 Step ${lastDoneIdx.i + 1}：${todo.steps[lastDoneIdx.i].content}\n\n${formatSteps(todo)}`;
+    return todoOutput('undo', name, msg, todo, todo.steps[lastDoneIdx.i].content);
   },
 });
 
@@ -123,14 +152,15 @@ export const rerollStep = tool({
   execute: async ({ name }) => {
     const todos = getTodos();
     const found = findTodo(todos, name);
-    if (typeof found === 'string') return found;
+    if (typeof found === 'string') return todoError(found, name);
 
     const { todo, index } = found;
     todo.steps.forEach(s => { s.completed = false; });
     todos[index] = todo;
     setTodos(todos);
 
-    return `🔄 已重置 "${name}" 的所有步骤为未完成。\n\n${formatSteps(todo)}`;
+    const msg = `🔄 已重置 "${name}" 的所有步骤为未完成。\n\n${formatSteps(todo)}`;
+    return todoOutput('reroll', name, msg, todo);
   },
 });
 
@@ -143,18 +173,19 @@ export const delStep = tool({
   execute: async ({ name, step }) => {
     const todos = getTodos();
     const found = findTodo(todos, name);
-    if (typeof found === 'string') return found;
+    if (typeof found === 'string') return todoError(found, name);
 
     const { todo, index } = found;
     if (step < 1 || step > todo.steps.length) {
-      return `❌ 序号无效：${step}，该 todo 共有 ${todo.steps.length} 步（序号 1-${todo.steps.length}）。`;
+      return todoError(`❌ 序号无效：${step}，该 todo 共有 ${todo.steps.length} 步（序号 1-${todo.steps.length}）。`, name);
     }
 
     const removed = todo.steps.splice(step - 1, 1)[0];
     todos[index] = todo;
     setTodos(todos);
 
-    return `■ 已删除 Step ${step}：${removed.content}\n\n${formatSteps(todo)}`;
+    const msg = `■ 已删除 Step ${step}：${removed.content}\n\n${formatSteps(todo)}`;
+    return todoOutput('del-step', name, msg, todo, removed.content);
   },
 });
 
@@ -166,9 +197,9 @@ export const readTodo = tool({
   execute: async ({ name }) => {
     const todos = getTodos();
     const found = findTodo(todos, name);
-    if (typeof found === 'string') return found;
+    if (typeof found === 'string') return todoError(found, name);
 
-    return formatSteps(found.todo);
+    return todoOutput('read', name, formatSteps(found.todo), found.todo);
   },
 });
 
@@ -180,12 +211,13 @@ export const delTodo = tool({
   execute: async ({ name }) => {
     const todos = getTodos();
     const found = findTodo(todos, name);
-    if (typeof found === 'string') return found;
+    if (typeof found === 'string') return todoError(found, name);
 
     todos.splice(found.index, 1);
     setTodos(todos);
 
-    return `■ 已删除 todo "${name}"。`;
+    const msg = `■ 已删除 todo "${name}"。`;
+    return todoOutput('del', name, msg);
   },
 });
 
@@ -197,16 +229,19 @@ export const activeTodo = tool({
   execute: async ({ name }) => {
     if (name === undefined) {
       const active = getActiveTodo();
-      return active
+      const msg = active
         ? `🎯 当前活跃 todo："${active}"（使用 read_todo 查看详情）`
         : '■ 当前没有设置活跃 todo。';
+      return todoOutput('active', active || '', msg, undefined, undefined, active || null);
     }
 
     const todos = getTodos();
     const found = findTodo(todos, name);
-    if (typeof found === 'string') return found;
+    if (typeof found === 'string') return todoError(found, name);
 
     setActiveTodo(name);
-    return `🎯 已切换活跃 todo 为 "${name}"。`;
+    const msg = `🎯 已切换活跃 todo 为 "${name}"。`;
+    return todoOutput('active', name, msg, found.todo, undefined, name);
   },
 });
+

@@ -11,6 +11,8 @@ export interface ElectronAPI {
   getWorkdir: () => Promise<string>;
   setWorkdir: (dirPath: string) => Promise<{ success?: boolean; error?: string; path?: string }>;
   selectFolder: () => Promise<{ canceled: boolean; path?: string; error?: string }>;
+  /** 打开系统对话框选择附件文件（支持多选） */
+  openFileDialog: () => Promise<{ canceled: boolean; files: string[]; error?: string }>;
   getRecentDirs: () => Promise<string[]>;
   readFileTree: (dirPath: string) => Promise<FileTreeNode[]>;
   readGitStatus: () => Promise<GitChange[]>;
@@ -39,7 +41,7 @@ export interface ToolMeta {
 }
 
 export interface AgentMessage {
-  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'listen' | 'subagent' | 'append' | 'kb-build';
+  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'thinking-bubble' | 'thinking-delta' | 'listen' | 'subagent' | 'append' | 'kb-build';
   role?: MessageRole;
   content?: string;
   toolMeta?: ToolMeta;
@@ -95,10 +97,4 @@ export interface ToolHistoryEntry {
   resultHtml: string | null;
   fullOutput: string | null;
 }
-
-
-
-
-
-
 

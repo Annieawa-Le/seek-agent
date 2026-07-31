@@ -17,8 +17,9 @@ export function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [kbEnabled, setKbEnabled] = useState(true);
   const [smartSearchEnabled, setSmartSearchEnabled] = useState(false);
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [skillsList, setSkillsList] = useState<Array<{ name: string; description: string }>>([]);
-
   // 同步主题到 data-theme 属性
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -27,6 +28,8 @@ export function App() {
   const toggleTheme = useCallback(() => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   }, []);
+  const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   const onToggleKb = useCallback(() => {
     setKbEnabled(prev => {
       const next = !prev;
@@ -37,6 +40,10 @@ export function App() {
   const onToggleSmartSearch = useCallback((enabled: boolean) => {
     setSmartSearchEnabled(enabled);
     api.sendCommand(enabled ? 'smart_search_enable' : 'smart_search_disable');
+  }, [api]);
+  const onToggleThinking = useCallback((enabled: boolean) => {
+    setThinkingEnabled(enabled);
+    api.sendCommand(enabled ? 'thinking_enable' : 'thinking_disable');
   }, [api]);
 
   const {
@@ -50,6 +57,10 @@ export function App() {
     clearMessages,
     endStreaming,
     removeLastAgent,
+    startThinking,
+    appendThinkingDelta,
+    endThinking,
+    beginNewRound,
   } = useMessages();
 
   const handleMessage = useCallback((msg: AgentMessage) => {
@@ -78,6 +89,21 @@ export function App() {
           case 'blank':
             appendMessage({ role: 'blank', content: '' });
             break;
+        }
+        break;
+
+      case 'thinking-bubble':
+        // 思考模式：开始/结束思考过程气泡
+        if (msg.active) {
+          startThinking();
+        } else {
+          endThinking();
+        }
+        break;
+
+      case 'thinking-delta':
+        if (msg.content) {
+          appendThinkingDelta(msg.content);
         }
         break;
 
@@ -111,7 +137,8 @@ export function App() {
         break;
     }
   }, [appendMessage, appendToStreaming, addToolToAgent, updateToolResult,
-      setToolCallCount, endStreaming, removeLastAgent]);
+      setToolCallCount, endStreaming, removeLastAgent, startThinking,
+      appendThinkingDelta, endThinking, beginNewRound]);
 
   useEffect(() => {
     const unsub = api.onMessage(handleMessage);
@@ -134,10 +161,10 @@ export function App() {
   }, [api]);
 
   const handleSend = useCallback((text: string) => {
-    // 本地立即显示用户消息（原版 renderer.js 的行为）
+    beginNewRound();
     appendMessage({ role: 'user', content: text, createdAt: Date.now() });
     api.sendInput(text);
-  }, [api, appendMessage]);
+  }, [api, appendMessage, beginNewRound]);
 
   const handleAbort = useCallback(() => {
     api.abort();
@@ -163,10 +190,11 @@ export function App() {
 
   return (
     <div id="app">
-      <Header status={status} ctxTokens={status.ctxTokens} theme={theme} onToggleTheme={toggleTheme} />
+      <Header status={status} ctxTokens={status.ctxTokens} theme={theme} onToggleTheme={toggleTheme} onToggleSidebar={toggleSidebar} sidebarOpen={sidebarOpen} />
       <div id="body-content">
         <div id="body-row">
-          <LeftSidebar onNewSession={handleNewSession} />
+          <LeftSidebar open={sidebarOpen} onClose={closeSidebar} onNewSession={handleNewSession} />
+          {sidebarOpen && <div className="sidebar-overlay" onClick={closeSidebar} />}
           <div id="main-content">
             <div id="main-toolbar">
               <span className="toolbar-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l2 7h7l-5.5 4 2 7L12 16l-5.5 4 2-7L3 9h7z"/></svg></span>
@@ -181,11 +209,13 @@ export function App() {
               thinking={status.thinking}
               kbEnabled={kbEnabled}
               smartSearchEnabled={smartSearchEnabled}
+              thinkingEnabled={thinkingEnabled}
               skillsList={skillsList}
               onSend={handleSend}
               onAbort={handleAbort}
               onToggleKb={onToggleKb}
               onToggleSmartSearch={onToggleSmartSearch}
+              onToggleThinking={onToggleThinking}
             />
           </div>
           <RightPanel />
@@ -199,24 +229,6 @@ export function App() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

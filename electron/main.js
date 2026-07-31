@@ -3,24 +3,78 @@
  *
  * 职责：
  *   1. 创建 BrowserWindow
- *   2. 以 child_process 启动 agent (tsx src/electron-entry.ts)
+ *   2. 以 child_process 启动 agent
  *   3. 通过 stdio JSON 协议与 agent 通信
  *   4. 通过 IPC 在 agent 与渲染进程之间中转消息
+ *
+ * 支持两种运行模式：
+ *   - 开发模式：用 tsx 直接运行 src/electron-entry.ts
+ *   - 打包模式：运行 dist/release/agent/electron-entry.js（编译后的版本）
  */
 
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
+import { watch } from 'fs';
 import { readdirSync, readFileSync, statSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const ROOT = resolve(__dirname, '..');
-const AGENT_ENTRY = join(ROOT, 'src', 'electron-entry.ts');
-const RENDERER_HTML = join(__dirname, 'renderer', 'dist', 'index.html');
-const RECENT_DIRS_FILE = join(ROOT, '.seek-agent', 'recent-dirs.json');
+// ═════════════════════════════════════════════════════
+// 路径解析（区分打包/开发模式）
+// ═════════════════════════════════════════════════════
+const isPackaged = app.isPackaged;
+const isDev = !isPackaged || process.env.NODE_ENV === 'development';
+
+// 热重载调试模式：从 Vite dev server 加载 UI
+const VITE_DEV_URL = process.env.VITE_DEV_URL || '';
+/** 项目根目录（打包后 electron 在 resources/app, agent 在 resources/agent） */
+const ROOT = isPackaged
+  ? resolve(__dirname, '..', '..')
+  : resolve(__dirname, '..');
+
+/** Agent 入口路径（打包模式 vs 开发模式） */
+const AGENT_ENTRY = isPackaged
+  ? join(ROOT, 'agent', 'electron-entry.js')
+  : join(ROOT, 'src', 'electron-entry.ts');
+
+/** 渲染器 HTML 路径 */
+const RENDERER_HTML = VITE_DEV_URL
+  ? VITE_DEV_URL
+  : join(__dirname, 'renderer', 'dist', 'index.html');
+/** 最近目录文件（打包模式下存在用户数据目录中） */
+const RECENT_DIRS_FILE = isPackaged
+  ? join(app.getPath('userData'), 'recent-dirs.json')
+  : join(ROOT, '.seek-agent', 'recent-dirs.json');
+
+/** agent 启动时额外环境变量 */
+const AGENT_ENV = isPackaged
+  ? {
+      ...process.env,
+      ELECTRON_MODE: '1',
+      AGENT_ROOT: join(ROOT, 'agent'),
+      NODE_ENV: 'production',
+    }
+  : {
+      ...process.env,
+      ELECTRON_MODE: '1',
+    };
+
+/** agent 启动命令（打包模式用 node 直接跑，开发模式用 tsx） */
+function getAgentSpawnArgs() {
+  if (isPackaged) {
+    // 打包模式：cwd 设为 exe 所在目录，用户把 .env 放 exe 旁边
+    const appDir = dirname(app.getPath('exe'));
+    return ['node', [AGENT_ENTRY], { cwd: appDir, stdio: ['pipe', 'pipe', 'pipe'], env: AGENT_ENV, shell: false, windowsHide: false }];
+  } else {
+    // 开发模式：用 tsx/esm loader
+    return [process.platform === 'win32' ? 'node.exe' : 'node', ['--import', 'tsx/esm', AGENT_ENTRY], { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'], env: AGENT_ENV, shell: false, windowsHide: false }];
+  }
+}
+
+// ═════════════════════════════════════════════════════
 
 let agentProcess = null;
 let mainWindow = null;
@@ -54,11 +108,8 @@ function saveRecentDirs(dirs) {
 
 function addRecentDir(dirPath) {
   let dirs = loadRecentDirs();
-  // 去重：移除已有同名项
   dirs = dirs.filter(d => d !== dirPath);
-  // 插入到最前面
   dirs.unshift(dirPath);
-  // 最多保留 10 个
   if (dirs.length > 10) dirs = dirs.slice(0, 10);
   saveRecentDirs(dirs);
 }
@@ -68,13 +119,10 @@ function addRecentDir(dirPath) {
 // ═════════════════════════════════════════════════════
 
 function startAgent() {
-  agentProcess = spawn(process.platform === 'win32' ? 'node.exe' : 'node', ['--import', 'tsx/esm', AGENT_ENTRY], {
-    cwd: currentWorkDir,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, ELECTRON_MODE: '1' },
-    shell: false,
-    windowsHide: false,
-  });
+  const [cmd, args, options] = getAgentSpawnArgs();
+  console.log(`[main] Starting agent: ${cmd} ${args.join(' ')}`);
+
+  agentProcess = spawn(cmd, args, options);
 
   let buffer = '';
   agentProcess.stdout.on('data', (data) => {
@@ -144,6 +192,8 @@ function handleAgentMessage(msg) {
 // ═════════════════════════════════════════════════════
 
 function createWindow() {
+  const isDev = !!VITE_DEV_URL;
+
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 750,
@@ -157,18 +207,26 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      // 开发模式下允许加载 HTTP 资源
+      webSecurity: !isDev,
     },
   });
 
-  mainWindow.loadFile(RENDERER_HTML);
+  if (VITE_DEV_URL) {
+    mainWindow.loadURL(RENDERER_HTML);
+  } else {
+    mainWindow.loadFile(RENDERER_HTML);
+  }
 
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
   }
 
+  // ── [debug] 转发渲染进程 console 消息到主进程 stdout ──
+  mainWindow.webContents.on('console-message', (event) => {
+    console.log(`[renderer:${event.level}] ${event.message}`);
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
-
-  // 最大化状态变化时通知渲染进程
   mainWindow.on('maximize', () => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send('window:maximized', true);
   });
@@ -178,6 +236,26 @@ function createWindow() {
 }
 
 // ═════════════════════════════════════════════════════
+
+// 开发模式：监听 renderer dist 变化自动刷新
+if (!isPackaged) {
+  const rendererDist = join(__dirname, 'renderer', 'dist');
+  if (existsSync(rendererDist)) {
+    let reloadTimer;
+    watch(rendererDist, { recursive: true }, (event, file) => {
+      if (!file || file.endsWith('.map')) return;
+      clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.reload();
+          console.log('[dev] Auto-reloaded after', file);
+        }
+      }, 300);
+    });
+    console.log('[dev] Watching renderer dist for auto-reload...');
+  }
+}
+
 // IPC 处理
 // ═════════════════════════════════════════════════════
 
@@ -200,8 +278,12 @@ ipcMain.on('renderer:restart', () => {
   startAgent();
 });
 
+// ─── 窗口控制 ───
 
-// ─── 窗口控制（自定义标题栏）───
+// 渲染进程查询当前 agent 连接状态（刷新后重连可用）
+ipcMain.handle('agent:status:request', () => {
+  return { connected: agentReady };
+});
 ipcMain.on('window:minimize', () => {
   if (mainWindow) mainWindow.minimize();
 });
@@ -220,15 +302,12 @@ ipcMain.handle('window:isMaximized', () => {
   return mainWindow ? mainWindow.isMaximized() : false;
 });
 
-
 // ─── 工作区目录管理 ───
 
-/** 获取当前工作目录 */
 ipcMain.handle('workdir:get', () => {
   return currentWorkDir;
 });
 
-/** 设置工作目录 */
 ipcMain.handle('workdir:set', async (_e, newDir) => {
   try {
     const resolved = resolve(newDir);
@@ -242,12 +321,10 @@ ipcMain.handle('workdir:set', async (_e, newDir) => {
     currentWorkDir = resolved;
     addRecentDir(resolved);
 
-    // 通知 agent 切换工作目录（通过 workdir-global 命令）
     if (agentReady) {
       sendToAgent({ type: 'command', cmd: `workdir-global ${resolved}`, id: 'workdir-change' });
     }
 
-    // 通知渲染进程工作目录已变更
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('workdir:changed', resolved);
     }
@@ -258,7 +335,6 @@ ipcMain.handle('workdir:set', async (_e, newDir) => {
   }
 });
 
-/** 打开系统对话框选择文件夹 */
 ipcMain.handle('workdir:select', async () => {
   if (!mainWindow) return { error: '窗口不可用' };
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -271,13 +347,24 @@ ipcMain.handle('workdir:select', async () => {
   return { canceled: false, path: result.filePaths[0] };
 });
 
-/** 获取最近目录列表 */
+ipcMain.handle('dialog:openFiles', async () => {
+  if (!mainWindow) return { error: '窗口不可用' };
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    title: '选择附件文件',
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return { canceled: true, files: [] };
+  }
+  return { canceled: false, files: result.filePaths };
+});
+
 ipcMain.handle('workdir:getRecent', () => {
   return loadRecentDirs();
 });
 
+// ─── 渲染进程请求 ───
 
-// ─── 渲染进程请求：读取目录文件树 ───
 ipcMain.handle('fs:readFileTree', async (_e, dirPath) => {
   const targetDir = dirPath ? resolve(currentWorkDir, dirPath) : currentWorkDir;
   try {
@@ -309,7 +396,6 @@ function buildFileTree(dir, relativePath) {
   });
 }
 
-// ─── 渲染进程请求：读取 git 变更 ───
 ipcMain.handle('fs:readGitStatus', async () => {
   try {
     const output = execSync('git status --porcelain', { cwd: currentWorkDir, encoding: 'utf8', timeout: 5000 });
@@ -323,7 +409,6 @@ ipcMain.handle('fs:readGitStatus', async () => {
   }
 });
 
-// ─── 渲染进程请求：读取 sessions 列表 ───
 ipcMain.handle('fs:listSessions', async () => {
   const sessionsDir = join(ROOT, 'sessions');
   try {
@@ -345,9 +430,7 @@ ipcMain.handle('fs:listSessions', async () => {
           messageCount: msgCount,
           preview,
         });
-      } catch {
-        // 跳过无法解析的 JSON
-      }
+      } catch { /* skip */ }
     }
     sessions.sort((a, b) => {
       if (a.timestamp && b.timestamp) return b.timestamp.localeCompare(a.timestamp);
@@ -359,9 +442,8 @@ ipcMain.handle('fs:listSessions', async () => {
   }
 });
 
-// ─── 渲染进程请求：读取可选技能列表 ───
 ipcMain.handle('skills:list', async () => {
-  const skillsDir = join(ROOT, 'src', 'tools', 'inner_skills');
+  const skillsDir = join(ROOT, isPackaged ? 'agent' : 'src', 'tools', 'inner_skills');
   try {
     const dirs = readdirSync(skillsDir, { withFileTypes: true }).filter(d => d.isDirectory());
     const skills = [];
@@ -373,15 +455,14 @@ ipcMain.handle('skills:list', async () => {
         if (config.enable) {
           skills.push({ name: dir.name, description: config.description || '' });
         }
-      } catch {
-        // 无 enable.json 或解析失败，跳过
-      }
+      } catch { /* skip */ }
     }
     return skills.sort((a, b) => a.name.localeCompare(b.name));
   } catch {
     return [];
   }
 });
+
 // ═════════════════════════════════════════════════════
 // 应用生命周期
 // ═════════════════════════════════════════════════════
@@ -405,5 +486,29 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (agentProcess) { agentProcess.kill(); agentProcess = null; }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

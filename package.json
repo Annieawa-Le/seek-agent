@@ -2,19 +2,74 @@
   "name": "seek-agent",
   "version": "1.0.0",
   "private": true,
-  "description": "AI Agent runtime with IDE integration",
+  "description": "Seek Agent - AI Programming Assistant",
   "type": "module",
   "main": "electron/main.js",
+  "author": "Seek Agent",
+  "license": "MIT",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "electron": "electron .",
-    "build:agent": "cd packages/agent-runtime && pnpm build",
+    "dev:webui": "node scripts/dev-electron.mjs",
+    "dev:electron": "electron .",
+    "build:agent": "node scripts/build-agent.mjs",
+    "build:renderer": "cd electron/renderer && npx vite build",
+    "build:pack": "node scripts/build-agent.mjs && electron-builder --win",
+    "build:pack:dir": "node scripts/build-agent.mjs && electron-builder --win --dir",
     "build:ext": "cd extension && pnpm build",
     "build": "pnpm build:agent && pnpm build:ext"
   },
+  "build": {
+    "appId": "com.seekagent.app",
+    "productName": "Seek Agent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/main.js",
+      "electron/preload.cjs",
+      "electron/renderer/dist/**/*",
+      "dist/release/agent/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/release/agent",
+        "to": "agent",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": null,
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "unicode": true,
+      "language": "2052",
+      "installerLanguages": ["zh_CN", "en_US"],
+      "shortcutName": "Seek Agent",
+      "displayLanguageSelector": true
+    },
+    "asar": false,
+    "electronDist": "./node_modules/.pnpm/electron@42.5.0/node_modules/electron/dist",
+    "compression": "maximum",
+    "removePackageScripts": true
+  },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "electron"
+      "electron",
+      "electron-builder",
+      "electron-winstaller",
+      "esbuild"
     ]
   },
   "packageManager": "pnpm@10.33.2",
@@ -39,6 +94,10 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
-    "electron": "^42.5.0"
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3"
   }
 }
+
+
+

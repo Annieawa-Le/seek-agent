@@ -7,6 +7,8 @@ interface Props {
   ctxTokens: number;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
+  onToggleSidebar: () => void;
+  sidebarOpen: boolean;
 }
 
 const dotClass: Record<string, string> = {
@@ -15,7 +17,7 @@ const dotClass: Record<string, string> = {
   connecting: 'status-dot disconnected',
 };
 
-export function Header({ status, ctxTokens, theme, onToggleTheme }: Props) {
+export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSidebar, sidebarOpen }: Props) {
   const api = useElectronAPI();
   const { minimizeWindow, maximizeWindow, closeWindow, onMaximizedChange, isWindowMaximized } = api;
   const [isMaximized, setIsMaximized] = useState(false);
@@ -32,6 +34,11 @@ export function Header({ status, ctxTokens, theme, onToggleTheme }: Props) {
   return (
     <header id="header">
       <div className="header-left">
+        <button className={`sidebar-toggle${sidebarOpen ? ' active' : ''}`} onClick={onToggleSidebar} title={sidebarOpen ? '收起侧边栏' : '展开侧边栏'}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
         <span className="header-icon" role="img" aria-label="Seek Agent" /><span className="header-title-img" role="img" aria-label="Seek Agent" />
       </div>
 
@@ -88,13 +95,4 @@ export function Header({ status, ctxTokens, theme, onToggleTheme }: Props) {
     </header>
   );
 }
-
-
-
-
-
-
-
-
-
 

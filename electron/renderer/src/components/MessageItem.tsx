@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { memo, useState, useEffect, useRef, useMemo } from 'react';
 import type { DisplayMessage } from '@/hooks/useMessages.ts';
 import { renderMarkdown, renderAnsi, escapeHtml } from '@/utils/markdown.ts';
 import type { ToolHistoryEntry } from '@/types/index.ts';
@@ -7,15 +7,31 @@ interface Props {
   msg: DisplayMessage;
 }
 
+/**
+ * 自定义比较器：仅在影响渲染的字段变化时才重渲染。
+ * useMessages 的流式更新会对所有消息做浅拷贝（endStreaming 等），
+ * 引用比较会失效，因此需要逐字段比较，避免整列表随单条消息刷新。
+ */
+function messagePropsEqual(prev: Props, next: Props): boolean {
+  const a = prev.msg;
+  const b = next.msg;
+  if (a === b) return true;
+  return (
+    a.id === b.id &&
+    a.role === b.role &&
+    a.streaming === b.streaming &&
+    a.content === b.content &&
+    a.subagentName === b.subagentName &&
+    a.toolMeta === b.toolMeta &&
+    a.toolHistory === b.toolHistory &&
+    a.toolHistoryIndex === b.toolHistoryIndex
+  );
+}
 
-export function MessageItem({ msg }: Props) {
+export const MessageItem = memo(function MessageItem({ msg }: Props) {
   switch (msg.role) {
     case 'user':
-      return (
-        <div className="message user">
-          <div className="content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
-        </div>
-      );
+      return <UserMessage content={msg.content} />;
 
     case 'agent':
       return (
@@ -55,6 +71,23 @@ export function MessageItem({ msg }: Props) {
     case 'system':
       return <div className="message system"><div className="content">{escapeHtml(msg.content)}</div></div>;
 
+    case 'thinking':
+      return (
+        <div className={`message thinking${msg.streaming ? ' streaming' : ''}`}>
+          <div className="thinking-header">
+            <svg className="thinking-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/><path d="M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"/>
+            </svg>
+            <span className="thinking-title">思考过程</span>
+            {msg.streaming && <span className="thinking-dots">⠋</span>}
+          </div>
+          {msg.content && <div className="thinking-body content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />}
+          {msg.toolHistory && msg.toolHistory.length > 0 && (
+            <ToolHistoryDisplay history={msg.toolHistory} />
+          )}
+        </div>
+      );
+
     case 'subagent':
       return (
         <div className="message subagent">
@@ -70,13 +103,16 @@ export function MessageItem({ msg }: Props) {
 
     default: return null;
   }
-}
-function ToolHistoryDisplay({ history: rawHistory }: {
+}, messagePropsEqual);
+
+const ToolHistoryDisplay = memo(function ToolHistoryDisplay({ history: rawHistory }: {
   history: ToolHistoryEntry[];
 }) {
-  // 过滤掉还没有结果返回的条目（正在执行中的）
-  const history = rawHistory.filter(e => e.fullOutput !== null || e.resultHtml !== null);
-  if (history.length === 0) return null;
+  // 过滤掉还没有结果返回的条目（正在执行中的）；rawHistory 引用不变时复用过滤结果
+  const history = useMemo(
+    () => rawHistory.filter(e => e.fullOutput !== null || e.resultHtml !== null),
+    [rawHistory]
+  );
 
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const lastIdxRef = useRef(history.length - 1);
@@ -92,6 +128,8 @@ function ToolHistoryDisplay({ history: rawHistory }: {
     }
     lastIdxRef.current = history.length;
   }, [history.length]);
+
+  if (history.length === 0) return null;
 
   return (
     <div className="tool-timeline">
@@ -129,9 +167,9 @@ function ToolHistoryDisplay({ history: rawHistory }: {
       </div>
     </div>
   );
-}
+});
 
-function ToolResultContent({ entry, lines }: { entry: { resultHtml?: string | null; fullOutput?: string | null }; lines: number }) {
+const ToolResultContent = memo(function ToolResultContent({ entry, lines }: { entry: { resultHtml?: string | null; fullOutput?: string | null }; lines: number }) {
   // 有 resultHtml（来自 rawBulk 的 toWebUI）→ 结构化 HTML 渲染
   // 无 resultHtml → 用 renderAnsi 增强纯文本（转义 + ANSI 颜色）
   const content = entry.resultHtml
@@ -158,9 +196,87 @@ function ToolResultContent({ entry, lines }: { entry: { resultHtml?: string | nu
       <div className="tool-result-scroll-container">{content}</div>
     </div>
   );
-}
+});
 
+/** 预处理附件链接并渲染为卡片 */
+const UserMessage = memo(function UserMessage({ content }: { content: string }) {
+  // 检测 markdown 格式的附件链接 [文件名](路径)
+  // 这些是由 InputBar 的 handleSend 生成的
+  const fileLinkRegex = /\[([^\]]+)\]\(([^)]+\.\w+)\)/g;
 
+  const parts: Array<{ type: 'text' | 'file'; value: string }> = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = fileLinkRegex.exec(content)) !== null) {
+    // 匹配前的纯文本
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', value: content.slice(lastIndex, match.index) });
+    }
+    parts.push({ type: 'file', value: match[0] });
+    lastIndex = match.index + match[0].length;
+  }
+  // 剩余文本
+  if (lastIndex < content.length) {
+    parts.push({ type: 'text', value: content.slice(lastIndex) });
+  }
+
+  // 如果没有附件链接，直接走普通 markdown 渲染
+  if (!parts.some(p => p.type === 'file')) {
+    return (
+      <div className="message user">
+        <div className="content" dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="message user">
+      <div className="content">
+        {parts.map((part, i) => {
+          if (part.type === 'file') {
+            // 解析文件名和路径
+            const fileMatch = part.value.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+            if (!fileMatch) return null;
+            const [, fileName, filePath] = fileMatch;
+            const ext = fileName.split('.').pop()?.toLowerCase() || '';
+
+            // 根据扩展名选择图标
+            const isImage = ['png','jpg','jpeg','gif','webp','svg','bmp','ico','avif','tiff'].includes(ext);
+            const isDoc = ['pdf','doc','docx','xls','xlsx','ppt','pptx','txt','md','json','xml','csv'].includes(ext);
+            const isCode = ['ts','tsx','js','jsx','py','java','c','cpp','h','hpp','rs','go','rb','php','vue','css','scss','less','html'].includes(ext);
+
+            let iconSvg = '';
+            if (isImage) {
+              iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+            } else if (isDoc) {
+              iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;
+            } else if (isCode) {
+              iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
+            } else {
+              iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
+            }
+
+            return (
+              <div key={i} className="file-attachment-card" title={filePath}>
+                <div className="file-attachment-icon" dangerouslySetInnerHTML={{ __html: iconSvg }} />
+                <div className="file-attachment-info">
+                  <span className="file-attachment-name">{escapeHtml(fileName)}</span>
+                  <span className="file-attachment-path">{escapeHtml(filePath)}</span>
+                </div>
+              </div>
+            );
+          }
+          // 纯文本段落走普通 markdown
+          if (!part.value.trim()) return null;
+          return (
+            <div key={i} className="content-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(part.value) }} />
+          );
+        })}
+      </div>
+    </div>
+  );
+});
 
 
 

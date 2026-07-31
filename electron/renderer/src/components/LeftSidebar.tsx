@@ -4,6 +4,8 @@ import type { SessionInfo } from '@/types/index.ts';
 
 interface Props {
   onNewSession: () => void;
+  open: boolean;
+  onClose: () => void;
 }
 
 const customItems = [
@@ -24,7 +26,7 @@ const subItemsMap: Record<string, string[]> = {
   plugins: ['plugin-a', 'plugin-b'],
 };
 
-export function LeftSidebar({ onNewSession }: Props) {
+export function LeftSidebar({ onNewSession, open, onClose }: Props) {
   const { listSessions, sendCommand } = useElectronAPI();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [expandedCustom, setExpandedCustom] = useState<string | null>(null);
@@ -41,7 +43,7 @@ export function LeftSidebar({ onNewSession }: Props) {
   const handleNewSession = () => { onNewSession(); loadSessions(); };
 
   return (
-    <aside id="left-sidebar">
+    <aside id="left-sidebar" className={open ? 'open' : ''}>
       <div className="sidebar-section-header">
         <span className="section-title">Sessions</span>
         <div className="section-actions">
@@ -102,3 +104,4 @@ export function LeftSidebar({ onNewSession }: Props) {
     </aside>
   );
 }
+

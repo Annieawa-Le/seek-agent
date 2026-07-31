@@ -13,15 +13,15 @@ import type { UIMessage } from './ui';
 // ═════════════════════════════════════════════════════
 
 export interface BridgeMessage {
- role: 'user' | 'agent' | 'system' | 'tool' | 'divider' | 'banner' | 'blank' | 'subagent';
- content: string;
- createdAt?: number;
- subagentName?: string;
- collapsed?: boolean;
- toolMeta?: { toolName: string; args: Record<string, unknown> };
- doNotRender?: boolean;
- /** 工具结果的完整原始输出（未截断的原始内容） */
- fullOutput?: string;
+  role: 'user' | 'agent' | 'system' | 'tool' | 'divider' | 'banner' | 'blank' | 'subagent';
+  content: string;
+  createdAt?: number;
+  subagentName?: string;
+  collapsed?: boolean;
+  toolMeta?: { toolName: string; args: Record<string, unknown> };
+  doNotRender?: boolean;
+  /** 工具结果的完整原始输出（未截断的原始内容） */
+  fullOutput?: string;
   /** 结构化功能数据（工具结果，供多端消费） */
   rawBulk?: Record<string, unknown>;
 }
@@ -37,6 +37,8 @@ export type ChildToParent =
   | { type: 'context'; chars: number; tokens: number }
   | { type: 'tool-call'; count: number }
   | { type: 'thinking'; active: boolean }
+  | { type: 'thinking-bubble'; active: boolean }
+  | { type: 'thinking-delta'; content: string }
   | { type: 'listen'; name: string | null }
   | { type: 'append'; content: string }
   | { type: 'remove-last-agent' }
@@ -61,54 +63,54 @@ export type ParentToChild =
 // ═════════════════════════════════════════════════════
 
 export class ElectronUIBridge {
- /** 用于与主进程通信的写流（stdout） */
- private send: (msg: ChildToParent) => void;
- /** abort 控制 */
- private abortController: AbortController | null = null;
+  /** 用于与主进程通信的写流（stdout） */
+  private send: (msg: ChildToParent) => void;
+  /** abort 控制 */
+  private abortController: AbortController | null = null;
 
- /** 消息列表（用于兼容 agent 对 ui.messages 的引用） */
- messages: BridgeMessage[] = [];
+  /** 消息列表（用于兼容 agent 对 ui.messages 的引用） */
+  messages: BridgeMessage[] = [];
 
- /** 处理中的 spinner 状态 */
- private thinkingActive = false;
- private listenActiveName: string | null = null;
+  /** 处理中的 spinner 状态 */
+  private thinkingActive = false;
+  private listenActiveName: string | null = null;
 
- /** 当前是否正在处理 AI 请求 */
- isProcessing = false;
+  /** 当前是否正在处理 AI 请求 */
+  isProcessing = false;
 
- // ─── 回调 ───
- onSubmit: ((input: string) => void) | null = null;
- onExit: (() => void) | null = null;
- onCommand: ((cmd: string) => void) | null = null;
+  // ─── 回调 ───
+  onSubmit: ((input: string) => void) | null = null;
+  onExit: (() => void) | null = null;
+  onCommand: ((cmd: string) => void) | null = null;
 
- constructor() {
- // 使用 stdout 发送 JSON 消息（每行一个 JSON）
- this.send = (msg: ChildToParent) => {
- try {
- process.stdout.write(JSON.stringify(msg) + '\n');
- } catch {
- // stdout 关闭时静默忽略
- }
- };
- }
+  constructor() {
+    // 使用 stdout 发送 JSON 消息（每行一个 JSON）
+    this.send = (msg: ChildToParent) => {
+      try {
+        process.stdout.write(JSON.stringify(msg) + '\n');
+      } catch {
+        // stdout 关闭时静默忽略
+      }
+    };
+  }
 
- /** 获取 AbortController 的 signal 是否已中断 */
- get isAborted(): boolean {
- return this.abortController?.signal.aborted ?? false;
- }
+  /** 获取 AbortController 的 signal 是否已中断 */
+  get isAborted(): boolean {
+    return this.abortController?.signal.aborted ?? false;
+  }
 
- /** 创建一个新的 AbortController（先取消旧的） */
- createAbortController(): AbortController {
- if (this.abortController) {
- this.abortController.abort();
- }
- this.abortController = new AbortController();
- return this.abortController;
- }
+  /** 创建一个新的 AbortController（先取消旧的） */
+  createAbortController(): AbortController {
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    this.abortController = new AbortController();
+    return this.abortController;
+  }
 
- // ═══════════════════════════════════════════════════
- // 消息发布
- // ═══════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════
+  // 消息发布
+  // ═══════════════════════════════════════════════════
 
   addUserMessage(content: string): void {
     this.messages.push({ role: 'user', content, createdAt: Date.now() });
@@ -116,8 +118,8 @@ export class ElectronUIBridge {
   }
 
   addAgentMessage(content: string): void {
-  this.messages.push({ role: 'agent', content, createdAt: Date.now() });
-  this.send({ type: 'message', role: 'agent', content });
+    this.messages.push({ role: 'agent', content, createdAt: Date.now() });
+    this.send({ type: 'message', role: 'agent', content });
   }
 
   addToolMessage(content: string, toolMeta?: { toolName: string; args: Record<string, unknown> }, fullOutput?: string, rawBulk?: Record<string, unknown>): void {
@@ -125,7 +127,7 @@ export class ElectronUIBridge {
     let toolResultHtml: string | undefined;
     if (toolMeta) {
       toolCallHtml = formatToolCallHtml(toolMeta.toolName, toolMeta.args);
-      console.error('[bridge] toolMETA:', toolMeta.toolName, toolCallHtml?.slice(0,100));
+      console.error('[bridge] toolMETA:', toolMeta.toolName, toolCallHtml?.slice(0, 100));
     } else if (rawBulk) {
       console.error('[bridge] RAWBULK type:', (rawBulk as any).type, 'keys:', Object.keys(rawBulk as any).join(','));
       const webUIResult = toWebUI(rawBulk as any);
@@ -141,75 +143,75 @@ export class ElectronUIBridge {
   }
 
   addSystemMessage(content: string): void {
-  this.messages.push({ role: 'system', content, createdAt: Date.now() });
-  this.send({ type: 'message', role: 'system', content });
+    this.messages.push({ role: 'system', content, createdAt: Date.now() });
+    this.send({ type: 'message', role: 'system', content });
   }
 
- addSubAgentMessage(name: string, content: string): void {
- const last = this.messages[this.messages.length - 1];
- if (last && last.role === 'subagent' && last.subagentName === name) {
- last.content += `\n\n---\n${content}`;
- } else {
- this.messages.push({ role: 'subagent', content, subagentName: name, createdAt: Date.now() });
- }
- this.send({ type: 'subagent', name, content });
- }
+  addSubAgentMessage(name: string, content: string): void {
+    const last = this.messages[this.messages.length - 1];
+    if (last && last.role === 'subagent' && last.subagentName === name) {
+      last.content += `\n\n---\n${content}`;
+    } else {
+      this.messages.push({ role: 'subagent', content, subagentName: name, createdAt: Date.now() });
+    }
+    this.send({ type: 'subagent', name, content });
+  }
 
- addDivider(): void {
- this.messages.push({ role: 'divider', content: '' });
- this.send({ type: 'divider' });
- }
+  addDivider(): void {
+    this.messages.push({ role: 'divider', content: '' });
+    this.send({ type: 'divider' });
+  }
 
- addBlankLine(): void {
- this.messages.push({ role: 'blank', content: '' });
- this.send({ type: 'blank' });
- }
+  addBlankLine(): void {
+    this.messages.push({ role: 'blank', content: '' });
+    this.send({ type: 'blank' });
+  }
 
- /** 流式追加（追加到当前空气泡，不新建气泡） */
- appendToLastAgent(text: string): void {
- for (let i = this.messages.length - 1; i >= 0; i--) {
- if (this.messages[i].role === 'agent') {
- this.messages[i].content += text;
- break;
- }
- }
- this.send({ type: 'append', content: text });
- }
+  /** 流式追加（追加到当前空气泡，不新建气泡） */
+  appendToLastAgent(text: string): void {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      if (this.messages[i].role === 'agent') {
+        this.messages[i].content += text;
+        break;
+      }
+    }
+    this.send({ type: 'append', content: text });
+  }
 
- /** 移除最后一条 agent 消息 */
- removeLastAgent(): void {
- for (let i = this.messages.length - 1; i >= 0; i--) {
- if (this.messages[i].role === 'agent') {
- this.messages.splice(i, 1);
- break;
- }
- }
- this.send({ type: 'remove-last-agent' });
- }
+  /** 移除最后一条 agent 消息 */
+  removeLastAgent(): void {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      if (this.messages[i].role === 'agent') {
+        this.messages.splice(i, 1);
+        break;
+      }
+    }
+    this.send({ type: 'remove-last-agent' });
+  }
 
- /** 批量折叠工具消息 */
- collapseToolMessages(entries: Array<{ msgIndex: number; toolName: string; args: Record<string, unknown> }>): void {
- for (const entry of entries) {
- const msg = this.messages[entry.msgIndex];
- if (msg && msg.role === 'tool') {
- msg.collapsed = true;
- msg.toolMeta = { toolName: entry.toolName, args: entry.args };
- }
- const callIdx = entry.msgIndex - 1;
- if (callIdx >= 0) {
- const callMsg = this.messages[callIdx];
- if (callMsg && callMsg.role === 'tool' && !callMsg.toolMeta) {
- callMsg.doNotRender = true;
- }
- }
- }
- this.send({ type: 'collapse-tools', entries });
- }
+  /** 批量折叠工具消息 */
+  collapseToolMessages(entries: Array<{ msgIndex: number; toolName: string; args: Record<string, unknown> }>): void {
+    for (const entry of entries) {
+      const msg = this.messages[entry.msgIndex];
+      if (msg && msg.role === 'tool') {
+        msg.collapsed = true;
+        msg.toolMeta = { toolName: entry.toolName, args: entry.args };
+      }
+      const callIdx = entry.msgIndex - 1;
+      if (callIdx >= 0) {
+        const callMsg = this.messages[callIdx];
+        if (callMsg && callMsg.role === 'tool' && !callMsg.toolMeta) {
+          callMsg.doNotRender = true;
+        }
+      }
+    }
+    this.send({ type: 'collapse-tools', entries });
+  }
 
- clearMessages(): void {
- this.messages = [];
- this.send({ type: 'clear-messages' });
- }
+  clearMessages(): void {
+    this.messages = [];
+    this.send({ type: 'clear-messages' });
+  }
 
   /** 批量替换消息列表（用于加载会话时恢复显示） */
   replaceMessages(msgs: UIMessage[]): void {
@@ -231,112 +233,129 @@ export class ElectronUIBridge {
     }
   }
 
- // ═══════════════════════════════════════════════════
- // 状态控制
- // ═══════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════
+  // 状态控制
+  // ═══════════════════════════════════════════════════
 
- setProcessing(processing: boolean): void {
- this.isProcessing = processing;
- if (!processing) {
- this.abortController = null;
- }
- this.send({ type: 'state', processing });
- }
+  setProcessing(processing: boolean): void {
+    this.isProcessing = processing;
+    if (!processing) {
+      this.abortController = null;
+    }
+    this.send({ type: 'state', processing });
+  }
 
- setContextLength(chars: number, tokens: number = 0): void {
- this.send({ type: 'context', chars, tokens });
- }
+  setContextLength(chars: number, tokens: number = 0): void {
+    this.send({ type: 'context', chars, tokens });
+  }
 
- setToolCallCount(n: number): void {
- this.send({ type: 'tool-call', count: n });
- }
+  setToolCallCount(n: number): void {
+    this.send({ type: 'tool-call', count: n });
+  }
 
- startThinkingSpinner(): void {
- this.thinkingActive = true;
- this.send({ type: 'thinking', active: true });
- }
+  startThinkingSpinner(): void {
+    this.thinkingActive = true;
+    this.send({ type: 'thinking', active: true });
+  }
 
- stopThinkingSpinner(): void {
- this.thinkingActive = false;
- this.send({ type: 'thinking', active: false });
- }
+  stopThinkingSpinner(): void {
+    this.thinkingActive = false;
+    this.send({ type: 'thinking', active: false });
+  }
 
- showListenStatus(name: string): void {
- this.listenActiveName = name;
- this.send({ type: 'listen', name });
- }
+  /** 思考模式：开始流式展示思考过程 */
+  startThinking(): void {
+    this.thinkingActive = true;
+    this.send({ type: 'thinking-bubble', active: true });
+  }
 
- hideListenStatus(): void {
- this.listenActiveName = null;
- this.send({ type: 'listen', name: null });
- }
+  /** 思考模式：追加一段思考文本 */
+  feedThinking(content: string): void {
+    this.send({ type: 'thinking-delta', content });
+  }
 
- // ═══════════════════════════════════════════════════
- // 通信设置：绑定 stdin 读取
- // ═══════════════════════════════════════════════════
+  /** 思考模式：结束流式展示思考过程 */
+  endThinking(): void {
+    this.thinkingActive = false;
+    this.send({ type: 'thinking-bubble', active: false });
+  }
 
- /**
- * 启动 stdin 监听，从主进程接收输入/命令
- */
- startListening(): void {
- const rl = (async () => {
- let buffer = '';
- for await (const chunk of process.stdin) {
- buffer += chunk.toString();
- const lines = buffer.split('\n');
- buffer = lines.pop() ?? '';
+  /** 思考模式：当前是否正在展示思考过程 */
+  isThinkingActive(): boolean {
+    return this.thinkingActive;
+  }
 
- for (const line of lines) {
- if (!line.trim()) continue;
- try {
- const msg: ParentToChild = JSON.parse(line);
- this.handleParentMessage(msg);
- } catch {
- // 解析失败，忽略
- }
- }
- }
- })();
+  showListenStatus(name: string): void {
+    this.listenActiveName = name;
+    this.send({ type: 'listen', name });
+  }
 
- // 防止未捕获的 rejection
- rl.catch(() => {});
- }
+  hideListenStatus(): void {
+    this.listenActiveName = null;
+    this.send({ type: 'listen', name: null });
+  }
 
- private handleParentMessage(msg: ParentToChild): void {
- switch (msg.type) {
- case 'input':
- if (this.onSubmit) {
- this.onSubmit(msg.content);
- }
- break;
- case 'command':
- if (this.onCommand) {
- this.onCommand(msg.cmd);
- }
- break;
- case 'abort':
- if (this.abortController) {
- this.abortController.abort();
- }
- break;
- case 'exit':
- if (this.onExit) {
- this.onExit();
- }
- break;
- }
- }
+  // ═══════════════════════════════════════════════════
+  // 通信设置：绑定 stdin 读取
+  // ═══════════════════════════════════════════════════
 
- /** 发送初始化完成信号 */
- emitReady(): void {
- this.send({ type: 'init-done' });
- }
+  /**
+   * 启动 stdin 监听，从主进程接收输入/命令
+   */
+  startListening(): void {
+    const rl = (async () => {
+      let buffer = '';
+      for await (const chunk of process.stdin) {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const msg: ParentToChild = JSON.parse(line);
+            this.handleParentMessage(msg);
+          } catch {
+            // 解析失败，忽略
+          }
+        }
+      }
+    })();
+
+    // 防止未捕获的 rejection
+    rl.catch(() => {});
+  }
+
+  private handleParentMessage(msg: ParentToChild): void {
+    switch (msg.type) {
+      case 'input':
+        if (this.onSubmit) {
+          this.onSubmit(msg.content);
+        }
+        break;
+      case 'command':
+        if (this.onCommand) {
+          this.onCommand(msg.cmd);
+        }
+        break;
+      case 'abort':
+        if (this.abortController) {
+          this.abortController.abort();
+        }
+        break;
+      case 'exit':
+        if (this.onExit) {
+          this.onExit();
+        }
+        break;
+    }
+  }
+
+  /** 发送初始化完成信号 */
+  emitReady(): void {
+    this.send({ type: 'init-done' });
+  }
 }
-
-
-
-
-
 
 /** 从 toolMeta 生成干净的 HTML 工具调用标签（不经过 ANSI 转义码） */
 function formatToolCallHtml(toolName: string, args: Record<string, unknown>): string {
@@ -350,24 +369,4 @@ function formatToolCallHtml(toolName: string, args: Record<string, unknown>): st
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

@@ -45,9 +45,6 @@ export default function renderPanel(pw: number): string[] {
     }
 
     // 模式标签
-    let modeLabel: string;
-    switch (agent.mode) {
-      case 'clone':   modeLabel = '克隆'; break;
     // 模式标签
     let modeLabel: string;
     switch (agent.mode) {
@@ -67,4 +64,9 @@ export default function renderPanel(pw: number): string[] {
 
   return lines;
 }
+
+
+
+
+
 

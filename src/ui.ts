@@ -616,6 +616,10 @@ export class TerminalUI {
   private thinkingInterval: ReturnType<typeof setInterval> | null = null;
   private listenInterval: ReturnType<typeof setInterval> | null = null;
   private listenActiveName: string | null = null;
+  /** 思考模式：当前是否在展示思考过程 */
+  private thinkingActive = false;
+  /** 思考模式：已积累的思考文本 */
+  private thinkingText = '';
 
   // ─── 分栏布局 ───
   private msgColWidth = 0;
@@ -1052,6 +1056,29 @@ export class TerminalUI {
     }, 120);
   }
 
+
+  /** 思考模式：开始流式展示思考过程 */
+  startThinking(): void {
+    this.thinkingActive = true;
+    this.refreshDisplay();
+  }
+
+  /** 思考模式：追加一段思考文本 */
+  feedThinking(content: string): void {
+    this.thinkingText += content;
+    this.refreshDisplay();
+  }
+
+  /** 思考模式：结束流式展示思考过程 */
+  endThinking(): void {
+    this.thinkingActive = false;
+    this.refreshDisplay();
+  }
+
+  /** 思考模式：当前是否正在展示思考过程 */
+  isThinkingActive(): boolean {
+    return this.thinkingActive;
+  }
   /** 停止思考中旋转指示器动画 */
   stopThinkingSpinner(): void {
     if (this.thinkingInterval) {
@@ -1754,6 +1781,14 @@ export class TerminalUI {
     out.write(cursorTo(row, 1) + BG.white + displayText + eraseLine(0));
   }
 }
+
+
+
+
+
+
+
+
 
 
 

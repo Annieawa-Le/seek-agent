@@ -19,7 +19,7 @@ export interface AgentStatusState {
 }
 
 export function useAgentStatus() {
-  const { onMessage, onStatus } = useElectronAPI();
+  const { onMessage, onStatus, getAgentStatus } = useElectronAPI();
   const [status, setStatus] = useState<AgentStatusState>({
     connected: false,
     connectionState: 'connecting',
@@ -95,6 +95,15 @@ export function useAgentStatus() {
 
     return () => { unsubMsg(); unsubStatus(); };
   }, [onMessage, onStatus, updateActivity]);
+
+  // 挂载后主动查询当前连接状态（刷新后重新连接）
+  useEffect(() => {
+    getAgentStatus().then(result => {
+      if (result?.connected) {
+        setStatus(prev => ({ ...prev, connected: true, connectionState: 'connected' }));
+      }
+    });
+  }, [getAgentStatus]);
 
   return status;
 }

@@ -95,6 +95,60 @@ export interface DeskBulk {
   error?: string;
 }
 
+/** 待办事项操作结果 */
+export interface TodoBulk {
+  type: 'todo';
+  action: 'create' | 'finish' | 'undo' | 'reroll' | 'del-step' | 'read' | 'del' | 'active';
+  name: string;
+  /** 已完成步数 */
+  doneCount: number;
+  /** 总步数 */
+  totalCount: number;
+  steps?: Array<{ content: string; completed: boolean }>;
+  /** 最近一次操作涉及的步骤说明 */
+  stepInfo?: string;
+  /** 当前活跃 todo 名称（active 查询时） */
+  active?: string | null;
+  error?: string;
+}
+
+/** 上下文记忆管理 + 对话记忆操作 */
+export type MemoryAction =
+  | 'focus' | 'shorten'
+  | 'add' | 'update' | 'touch' | 'remove' | 'list' | 'clear'
+  | 'remember' | 'recall' | 'stats';
+
+/** 上下文记忆管理结果 */
+export interface MemoryBulk {
+  type: 'memory';
+  action: MemoryAction;
+  /** 被压缩/精简的轮次数（focus/shorten） */
+  roundsCompressed?: number;
+  /** 移除的消息条数（focus） */
+  messagesRemoved?: number;
+  /** 插入的梗概消息条数（focus） */
+  messageInserted?: number;
+  /** 被精简为 success 的结果数（shorten） */
+  resultsShortened?: number;
+  /** 梗概内容（focus） */
+  summary?: string;
+  // ── 对话记忆字段 ──
+  /** 操作后的记忆条数 */
+  itemCount?: number;
+  /** 涉及的记忆 id（update/touch/remove） */
+  itemId?: number;
+  /** 记忆权重（add 时） */
+  weight?: number;
+  /** 记忆内容（add/remember 时） */
+  content?: string;
+  /** remember 去重跳过标记 */
+  skipped?: boolean;
+  skipReason?: string;
+  /** recall/list 的检索结果 */
+  results?: Array<{ id?: number; content: string; score?: number; weight?: number; createdAt?: string; source?: string }>;
+  error?: string;
+}
+
 // ============================================================
 // 统一 RawBulk 联合类型
 // ============================================================
@@ -106,7 +160,9 @@ export type RawBulk =
   | ExecBulk
   | FileWriteBulk
   | PatchBulk
-  | DeskBulk;
+  | DeskBulk
+  | TodoBulk
+  | MemoryBulk;
 // ============================================================
 // 格式化器接口
 // ============================================================

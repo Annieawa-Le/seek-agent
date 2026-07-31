@@ -6,8 +6,8 @@
  *   toTUIText → 终端显示（带 ANSI 颜色、摘要、省略）
  *   toWebUI   → Electron 结构化数据
  */
+import type { RawBulk, ReadFileBulk, SearchBulk, SearchContentBulk, ExecBulk, FileWriteBulk, PatchBulk, DeskBulk, TodoBulk, MemoryBulk } from './raw-bulk-types';
 
-import type { RawBulk, ReadFileBulk, SearchBulk, SearchContentBulk, ExecBulk, FileWriteBulk, PatchBulk, DeskBulk } from './raw-bulk-types';
 
 // ═════════════════════════════════════════════════════
 // AI Formatter — 保持现在对 AI 友好的格式，几乎不变
@@ -22,6 +22,8 @@ export function toAIText(bulk: RawBulk): string {
     case 'file-write': return formatFileWriteAIText(bulk);
     case 'patch': return formatPatchAIText(bulk);
     case 'desk': return formatDeskAIText(bulk);
+    case 'todo': return formatTodoAIText(bulk);
+    case 'memory': return formatMemoryAIText(bulk);
     default: return JSON.stringify(bulk);
   }
 }
@@ -87,6 +89,41 @@ function formatDeskAIText(bulk: DeskBulk): string {
   }
 }
 
+function formatTodoAIText(bulk: TodoBulk): string {
+  if (bulk.error) return `❌ 错误：${bulk.error}`;
+  const stepsText = (bulk.steps || []).map((s, i) => {
+    const status = s.completed ? '✅' : '⬜';
+    return `  ${status} Step ${i + 1}: ${s.content}`;
+  }).join('\n');
+  let head = '';
+  switch (bulk.action) {
+    case 'create': head = `✅ 已创建 todo "${bulk.name}"（共 ${bulk.totalCount} 步）：`; break;
+    case 'finish': head = `✅ Step 完成：${bulk.stepInfo || ''}`; break;
+    case 'undo': head = `↩️ 已撤销 Step：${bulk.stepInfo || ''}`; break;
+    case 'reroll': head = `🔄 已重置 "${bulk.name}" 的所有步骤为未完成。`; break;
+    case 'del-step': head = `■ 已删除 Step：${bulk.stepInfo || ''}`; break;
+    case 'read': head = `📋 "${bulk.name}"（${bulk.doneCount}/${bulk.totalCount} 步完成）：`; break;
+    case 'del': head = `■ 已删除 todo "${bulk.name}"。`; break;
+    case 'active': head = bulk.active ? `🎯 当前活跃 todo："${bulk.active}"` : '■ 当前没有设置活跃 todo。'; break;
+  }
+  return stepsText ? `${head}\n${stepsText}` : head;
+}
+
+function formatMemoryAIText(bulk: MemoryBulk): string {
+  if (bulk.error) return `❌ 错误：${bulk.error}`;
+  if (bulk.action === 'focus') {
+    return [`✅ 已将 ${bulk.roundsCompressed} 轮旧对话压缩为工作梗概。`, bulk.messagesRemoved !== undefined ? `移除了 ${bulk.messagesRemoved} 条消息，插入 ${bulk.messageInserted ?? 1} 条 [Work Log]。` : '', '', bulk.summary || ''].join('\n');
+  }
+  if (bulk.action === 'shorten') {
+    return [`✅ 已将 ${bulk.roundsCompressed} 轮旧对话中的 ${bulk.resultsShortened ?? 0} 个工具返回结果精简为 "success"。`].join('\n');
+  }
+  // 对话记忆操作：优先返回结果列表，否则返回内容/跳过原因
+  if (bulk.results?.length) {
+    return bulk.results.map((r, i) => `${i + 1}. ${r.content}${r.score != null ? `（相似度 ${(r.score * 100).toFixed(0)}%）` : ''}`).join('\n');
+  }
+  return bulk.content || bulk.skipReason || `操作完成（${bulk.action}）。`;
+}
+
 // ═════════════════════════════════════════════════════
 // TUI Renderer — 带 ANSI 颜色、摘要、截断
 // ═════════════════════════════════════════════════════
@@ -105,6 +142,8 @@ export function toTUIText(bulk: RawBulk): string {
       : `● ${bulk.action === 'create' ? '创建文件' : '覆写文件'}: ${bulk.filePath}`;
     case 'patch': return bulk.description;
     case 'desk': return `● ${bulk.action === 'add' ? '添加到桌面' : bulk.action === 'remove' ? '从桌面移除' : bulk.action === 'clear' ? '清空桌面' : '查看桌面'}: ${bulk.totalCount} 项`;
+    case 'todo': return formatTodoTUI(bulk);
+    case 'memory': return formatMemoryTUI(bulk);
     default: return JSON.stringify(bulk);
   }
 }
@@ -151,6 +190,40 @@ function formatExecTUI(bulk: ExecBulk): string {
   return `●  输出 ${PURPLE}${lines.length}\x1b[0m 行 / ${PURPLE}${text.length}\x1b[0m 字符\n${head}\n${BLUE_GRAY}  ... 剩余 ${lines.length - 8} 行省略 ...\x1b[0m`;
 }
 
+function formatTodoTUI(bulk: TodoBulk): string {
+  if (bulk.error) return `● 错误: ${bulk.error}`;
+  const done = bulk.doneCount;
+  const total = bulk.totalCount;
+  const actionLabel: Record<string, string> = {
+    create: '创建 todo', finish: '完成步骤', undo: '撤销步骤', reroll: '重置 todo',
+    'del-step': '删除步骤', read: '查看 todo', del: '删除 todo', active: '活跃 todo',
+  };
+  const label = actionLabel[bulk.action] || bulk.action;
+  return `● ${label}: ${PURPLE}${bulk.name}\x1b[0m（${done}/${total} 步）`;
+}
+
+function formatMemoryTUI(bulk: MemoryBulk): string {
+  if (bulk.error) return `● 错误: ${bulk.error}`;
+  if (bulk.action === 'focus') {
+    return `● 已压缩 ${PURPLE}${bulk.roundsCompressed}\x1b[0m 轮对话为工作梗概`;
+  }
+  if (bulk.action === 'shorten') {
+    return `● 已精简 ${PURPLE}${bulk.roundsCompressed}\x1b[0m 轮中的 ${bulk.resultsShortened ?? 0} 个工具结果`;
+  }
+  const label: Record<string, string> = {
+    add: '新增工作记忆', update: '更新工作记忆', touch: '续命工作记忆',
+    remove: '删除工作记忆', list: '查看工作记忆', clear: '清空记忆',
+    remember: '写入长期记忆', recall: '检索长期记忆', stats: '记忆概览',
+  };
+  const head = `● ${label[bulk.action] || bulk.action}`;
+  if (bulk.results?.length) {
+    const lines = bulk.results.slice(0, 5).map((r) => `  ${r.content}${r.score != null ? `（${(r.score * 100).toFixed(0)}%）` : ''}`).join('\n');
+    const more = bulk.results.length > 5 ? `\n${BLUE_GRAY}  ... 共 ${bulk.results.length} 条\x1b[0m` : '';
+    return `${head}\n${lines}${more}`;
+  }
+  return bulk.skipped ? `● ${bulk.skipReason || '重复，已跳过'}` : `${head}: ${bulk.itemCount ?? ''}`.trim();
+}
+
 // ═════════════════════════════════════════════════════
 // WebUI Renderer — 生成 HTML 供 Electron 前端渲染
 // ═════════════════════════════════════════════════════
@@ -159,10 +232,6 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function shortPath(fp: string): string {
-  const parts = fp.split(/[/\\]/);
-  return parts.length > 3 ? parts.slice(-3).join('/') : fp;
-}
 
 export function toWebUI(bulk: RawBulk): Record<string, unknown> {
   switch (bulk.type) {
@@ -173,6 +242,8 @@ export function toWebUI(bulk: RawBulk): Record<string, unknown> {
     case 'file-write': return formatFileWriteWebUI(bulk);
     case 'patch': return formatPatchWebUI(bulk);
     case 'desk': return formatDeskWebUI(bulk);
+    case 'todo': return formatTodoWebUI(bulk);
+    case 'memory': return formatMemoryWebUI(bulk);
     default: return { html: `<pre>${esc(JSON.stringify(bulk))}</pre>` };
   }
 }
@@ -273,6 +344,69 @@ function formatDeskWebUI(bulk: DeskBulk): Record<string, unknown> {
     default: return { html: `<pre>${esc(JSON.stringify(bulk))}</pre>` };
   }
 }
+
+// ── TodoBulk ──
+function formatTodoWebUI(bulk: TodoBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  const actionLabel: Record<string, string> = {
+    create: '创建 todo', finish: '完成步骤', undo: '撤销步骤', reroll: '重置 todo',
+    'del-step': '删除步骤', read: '查看 todo', del: '删除 todo', active: '活跃 todo',
+  };
+  const label = actionLabel[bulk.action] || bulk.action;
+  let head = `<span class="label">${label}</span><span class="meta">${bulk.doneCount}/${bulk.totalCount} 步完成</span>`;
+  if (bulk.active) head += `<code>当前活跃：${esc(bulk.active)}</code>`;
+  const steps = (bulk.steps || []).map(s =>
+    `<div class="todo-step ${s.completed ? 'done' : ''}"><span class="todo-status">${s.completed ? '✅' : '⬜'}</span>${esc(s.content)}</div>`
+  ).join('');
+  return { html: `<div class="todo-result"><div class="todo-head"><span class="todo-name">${esc(bulk.name)}</span>${head}</div>${steps}</div>` };
+}
+
+// ── MemoryBulk ──
+function formatMemoryWebUI(bulk: MemoryBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  if (bulk.action === 'focus') {
+    const summary = bulk.summary ? `<pre class="memory-summary">${esc(bulk.summary)}</pre>` : '';
+    return { html: `<div class="memory-result"><span class="label">记忆压缩</span><span class="meta">${bulk.roundsCompressed} 轮 → ${esc(String(bulk.messagesRemoved ?? ''))} 条移除 / ${esc(String(bulk.messageInserted ?? 1))} 条梗概</span>${summary}</div>` };
+  }
+  if (bulk.action === 'shorten') {
+    return { html: `<div class="memory-result"><span class="label">记忆精简</span><span class="meta">${bulk.roundsCompressed} 轮 / ${bulk.resultsShortened ?? 0} 个结果 → success</span></div>` };
+  }
+  const labelMap: Record<string, string> = {
+    add: '新增工作记忆', update: '更新工作记忆', touch: '续命工作记忆',
+    remove: '删除工作记忆', list: '查看工作记忆', clear: '清空记忆',
+    remember: '写入长期记忆', recall: '检索长期记忆', stats: '记忆概览',
+  };
+  const label = labelMap[bulk.action] || bulk.action;
+  let body = '';
+  if (bulk.results?.length) {
+    body = `<pre class="memory-results">${bulk.results.map((r) => esc(r.content)).join('\n')}</pre>`;
+  } else if (bulk.skipped) {
+    body = `<span class="meta">${esc(bulk.skipReason || '重复，已跳过')}</span>`;
+  } else if (bulk.content) {
+    body = `<pre class="memory-content">${esc(bulk.content)}</pre>`;
+  }
+  return { html: `<div class="memory-result"><span class="label">${label}</span><span class="meta">${bulk.itemCount != null ? `${bulk.itemCount} 条` : ''}</span>${body}</div>` };
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

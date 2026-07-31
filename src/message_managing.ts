@@ -11,6 +11,8 @@
  */
 
 import { ModelMessage, ToolCallPart, ToolResultPart } from 'ai';
+import { workingMemory } from './tools/memory-core';
+import { formatWorkingMemory } from './tools/memory';
 import { MessageHook } from './agent';
 
 // ═════════════════════════════════════════════════════
@@ -96,6 +98,27 @@ export function createMessageHook(options?: ContextManagerOptions): MessageHook 
 
   // ── 返回的 hook 函数，每次调用 AI 前都会执行 ──
   return (messages: ModelMessage[]): ModelMessage[] => {
+    // ──────── 第零步：注入工作记忆（双层记忆的短期层） ────────
+    // 工作记忆有内容时注入为一条 [工作记忆] 标记的 user 消息；
+    // 已注入过则原地更新内容，让模型在调用 memory_* 工具后能看到最新状态。
+    const wmItems = workingMemory.list();
+    if (wmItems.length > 0) {
+      const wmContent = [
+        '[工作记忆] 当前对话焦点与任务状态（可通过 memory_add / memory_update / memory_touch / memory_remove 维护，权重越高存活越久）：',
+        formatWorkingMemory(wmItems),
+      ].join('\n');
+      const wmIdx = messages.findIndex((m) =>
+        m.role === 'user' && typeof m.content === 'string' && m.content.startsWith('[工作记忆]'),
+      );
+      if (wmIdx !== -1) {
+        messages = messages.map((m, i) =>
+          (i === wmIdx ? ({ ...m, content: wmContent } as ModelMessage) : m),
+        );
+      } else {
+        messages = [{ role: 'user', content: wmContent } as ModelMessage, ...messages] as ModelMessage[];
+      }
+    }
+
     // ──────── 第一步：扫描所有 assistant 消息，收集读取类工具调用 ────────
     // key -> { toolCallId, msgIndex }[]
     const readCallsMap = new Map<string, { toolCallId: string; msgIndex: number }[]>();
@@ -170,5 +193,9 @@ export function createMessageHook(options?: ContextManagerOptions): MessageHook 
       .filter(Boolean) as ModelMessage[];
   };
 }
+
+
+
+
 
 

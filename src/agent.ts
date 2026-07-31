@@ -51,6 +51,9 @@ export class CLIAAgent {
   private tokenizer: TokenizerService;
   private systemPrompt: string;
 
+  /** 当前会话唯一标识，用于会话文件命名 */
+  private sessionId: string;
+
   /** 当前处理循环的 Promise（用作并发门控） */
   private processingPromise: Promise<void> | null = null;
   /** 用户输入队列 —— 可随时入队 */
@@ -62,9 +65,10 @@ export class CLIAAgent {
   /** 本轮实际（非缓存）工具调用计数 */
   private roundActualToolCalls = 0;
   private afterRoundCollapseQueue: Array<{ msgIndex: number; toolName: string; args: Record<string, unknown> }> = [];
-  /** 上一个 single 模式工具结果（下一个工具调用时折叠渲染） */
   /** 智能搜索模式开关 */
   private smartSearchEnabled = false;
+  /** 思考模式开关 */
+  private thinkingEnabled = false;
   private lastSingleCollapse: { msgIndex: number; toolName: string; args: Record<string, unknown> } | null = null;
 
   messageHook: MessageHook | null = null;
@@ -72,6 +76,7 @@ export class CLIAAgent {
   postRoundHook: PostRoundHook | null = null;
 
   constructor(ui: TerminalUI, systemPrompt?: string) {
+    this.sessionId = this.generateSessionId();
     this.ui = ui;
     this.modelName = process.env.OPENAI_MODEL || 'gpt-4o-mini';
     this.systemPrompt = systemPrompt ?? this.loadDefaultPrompts();
@@ -89,9 +94,6 @@ export class CLIAAgent {
   /**
    * 重新加载 system prompt（切换工作目录后调用，刷新 SEEK.md）
    */
-  /**
-   * 重新加载 system prompt（切换工作目录后调用，刷新 SEEK.md）
-   */
   reloadPrompt(): void {
     this.systemPrompt = this.loadDefaultPrompts(this.smartSearchEnabled);
     setSystemPrompt(this.systemPrompt);
@@ -101,6 +103,70 @@ export class CLIAAgent {
   setSmartSearch(enabled: boolean): void {
     this.smartSearchEnabled = enabled;
     this.reloadPrompt();
+  }
+
+  /** 启用/禁用思考模式 */
+  setThinking(enabled: boolean): void {
+    this.thinkingEnabled = enabled;
+    this.reloadPrompt();
+  }
+
+  /**
+   * 构建会话开场指令（随思考模式注入，仅每轮第一次 AI 调用时生效）。
+   * 包含：思考模式要求 + 工作流程要点 + 可用工具列表 + 记忆系统提醒。
+   */
+  private static buildSessionInstruction(): string {
+    // 核心工具分组（精确列出，随 tools 容器动态校验存在性）
+    const coreGroups: [string, string[]][] = [
+      ['文件', ['read_file', 'read_lines', 'read_num_line', 'scan_file', 'create_file', 'replace_file', 'add_patch', 'del_patch', 'undo_patch', 'history_patch']],
+      ['搜索/执行', ['search_all_file', 'search_sub_file', 'search_directory', 'search_content', 'execute_command']],
+      ['任务', ['create_todo', 'finish_step', 'undo_step', 'reroll_step', 'del_step', 'read_todo', 'del_todo', 'active_todo']],
+      ['记忆', ['memory_add', 'memory_update', 'memory_touch', 'memory_remove', 'memory_list', 'memory_remember', 'memory_recall', 'memory_stats', 'memory_clear']],
+      ['桌面/上下文', ['desk_add', 'desk_list', 'desk_remove', 'desk_clear', 'memory_focus', 'memory_shorten']],
+    ];
+    const known = new Set(coreGroups.flatMap(([, t]) => t));
+    const groupLines = coreGroups
+      .map(([label, t]) => `  ${label}: ${t.filter((n) => n in tools).join(', ')}`)
+      .filter((l) => l.trim().length > 0);
+
+    // 技能工具按前缀聚合（数量统计）
+    const skillGroups: [RegExp, string][] = [
+      [/^gh_/, 'GitHub'],
+      [/^docx_|^pdf_|^pptx_|^xlsx_|^run_page/, 'Office/文档'],
+      [/^ui_|^generate_|^analyze_/, 'UI/前端'],
+      [/^image_|^extract_|^download_|^vision_/, '图片'],
+      [/^kb_/, '知识库'],
+      [/^spawn_agent|^agent_|^a_submission/, '子模型'],
+      [/^tavily_|^search_web|^fetch_page|^crawl_|^extract_links/, '联网'],
+      [/^explorer-|^list_directory|^enter_subfolder|^go_up/, '目录浏览'],
+      [/^scanning_|^read_function|^read_class|^read_package|^jump_to_definition|^get_function_range|^find_matching_brace|^wrap_by/, '代码分析'],
+      [/^create_skill|^list_skills|^reload_skills|^remove_skill|^remove_tool/, '技能管理'],
+      [/^todo_save|^todo_load|^todo_list_saved|^todo_delete_saved/, '任务持久化'],
+      [/^search_icons|^get_icon_detail|^list_all_icons/, '图标'],
+    ];
+    const counts = new Map<string, number>();
+    for (const name of Object.keys(tools)) {
+      if (known.has(name)) continue;
+      const hit = skillGroups.find(([re]) => re.test(name));
+      const label = hit ? hit[1] : '其他';
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    const skillLine = [...counts.entries()]
+      .filter(([, c]) => c > 0)
+      .map(([label, c]) => `${label}${c > 1 ? `(${c})` : ''}`)
+      .join('、');
+
+    return [
+      '当前处于【思考模式】。在回答任何问题之前，你必须先在 <thinking> 标签内完整展开推理过程（选择合适的工具，分步分析问题、评估可能的方案、检查潜在错误），然后再给出最终答案。思考内容写在 <thinking>...</thinking> 中，最终答案在标签外输出。禁止在最终答案中重复思考过程。',
+      '',
+      '工作流程：先理解后修改，先计划后执行，每步可回溯。接到任务先阅读相关代码，多步任务用 create_todo 跟踪进度，每轮修改后编译验证。',
+      '',
+      `可用工具（核心）：`,
+      ...groupLines,
+      skillLine ? `  技能工具：${skillLine}（完整定义见各工具 schema）` : '',
+      '',
+      '记忆系统：每轮自动注入 [工作记忆]（当前焦点），可用 memory_add/update/touch/remove 维护；跨会话规则与约定用 memory_remember 沉淀，新任务开始前先用 memory_recall 检索相关历史约定。',
+    ].join('\n');
   }
 
   // ────────────────────────────────────────────────
@@ -358,6 +424,8 @@ export class CLIAAgent {
     roundToolCallIds: string[],
     roundAssistantTexts: string[],
   ): Promise<void> {
+    // 思考模式：仅本轮第一次模型调用（处理用户输入后）主动触发思考，工具循环中间的调用不思考
+    let isFirstModelCall = true;
 
     while (!this.aborted && !this.ui.isAborted) {
       // ── 排空子模型待注入的提交（安全网，确保 AI 总能及时看到） ──
@@ -395,30 +463,119 @@ export class CLIAAgent {
       this.updateContextDisplay(messagesForModel);
 
       // ── 调用 AI ──
+      // 思考模式：仅第一次调用主动触发（注入思考参数与指令），中间轮次不提交思考
+      const thinkingThisCall = isFirstModelCall && this.thinkingEnabled;
       let fullText = '';
       const collectedToolCalls: any[] = [];
       let reasoningOutputs: {type: 'reasoning'; text: string}[] = [];
+      // 思考模式：流式思考内容 + <thinking> 标签剥离缓冲
+      let thinkingDeltaBuf = '';
+      let thinkingText = '';
+      let inThinkingTag = false;
 
+      /** 将模型输出文本喂入正文/思考流，自动识别 <thinking> 标签 */
+      const feedText = (text: string) => {
+        if (!thinkingThisCall) {
+          fullText += text;
+          this.ui.appendToLastAgent(text);
+          return;
+        }
+        for (const ch of text) {
+          thinkingDeltaBuf += ch;
+          if (thinkingDeltaBuf.endsWith('<thinking>')) {
+            if (fullText) {
+              this.ui.appendToLastAgent(fullText);
+              fullText = '';
+            }
+            inThinkingTag = true;
+            this.ui.startThinking();
+            thinkingDeltaBuf = '';
+            continue;
+          }
+          if (thinkingDeltaBuf.endsWith('</thinking>')) {
+            const thought = thinkingDeltaBuf.slice(0, -'</thinking>'.length);
+            thinkingText += thought;
+            this.ui.feedThinking(thought);
+            this.ui.endThinking();
+            inThinkingTag = false;
+            thinkingDeltaBuf = '';
+            continue;
+          }
+          if (thinkingDeltaBuf.length > '<thinking>'.length) {
+            if (inThinkingTag) {
+              thinkingText += thinkingDeltaBuf;
+              this.ui.feedThinking(thinkingDeltaBuf);
+            } else {
+              fullText += thinkingDeltaBuf;
+              this.ui.appendToLastAgent(thinkingDeltaBuf);
+            }
+            thinkingDeltaBuf = '';
+          }
+        }
+      };
       try {
         const abortController = this.ui.createAbortController();
         const result = await streamText({
           model: getModel(this.modelName),
-          system: this.systemPrompt,
+          // 思考指令仅在本轮第一次调用时注入，工具循环中间使用纯净 system prompt
+          system: thinkingThisCall
+            ? `${this.systemPrompt}\n\n${CLIAAgent.buildSessionInstruction()}`
+            : this.systemPrompt,
           messages: messagesForModel,
           tools: tools,
           abortSignal: abortController.signal,
           experimental_context: { __messages: this.messages },
+          // 思考模式：向模型透传思考相关参数（按 provider 生效）
+          ...(thinkingThisCall ? {
+            providerOptions: {
+              deepseek: { thinking: { type: 'enabled' } },
+              opencode: { reasoningEffort: 'high' },
+            },
+          } : {}),
+          // 原生思考流（如 deepseek-reasoner 类模型）：实时收集 reasoning 展示
+          onChunk: ({ chunk }) => {
+            if (chunk.type === 'reasoning-delta') {
+              thinkingText += chunk.text;
+              // 仅在思考模式开启时向 UI 展示思考流（文本始终收集进上下文）
+              if (thinkingThisCall) {
+                if (!this.ui.isThinkingActive()) this.ui.startThinking();
+                this.ui.feedThinking(chunk.text);
+              }
+            }
+            if (chunk.type === 'text-delta') {
+              // 正文流开始：原生思考流必然已结束，复位思考区与标签状态
+              if (this.ui.isThinkingActive()) {
+                this.ui.endThinking();
+              }
+              inThinkingTag = false;
+              thinkingDeltaBuf = '';
+            }
+          },
         });
+        // 首次模型调用已发生，后续工具循环中的调用不再主动触发思考
+        isFirstModelCall = false;
         // ── 流式文本 ──
+        // 原生 reasoning 流必然先于文本流结束：先复位思考区，
+        // 确保正文进入独立的普通文本气泡，而不是被并进思考气泡
+        if (this.ui.isThinkingActive()) {
+          this.ui.endThinking();
+        }
+        thinkingDeltaBuf = '';
         this.ui.startThinkingSpinner();
         this.ui.addAgentMessage('');
-
         for await (const chunk of result.textStream) {
           if (this.aborted || this.ui.isAborted) break;
-          fullText += chunk;
-          this.ui.appendToLastAgent(chunk);
+          feedText(chunk);
         }
         this.ui.stopThinkingSpinner();
+
+        // 思考流收尾：<thinking> 标签未闭合时强制复位，避免后续文本被吞并
+        if (inThinkingTag) {
+          inThinkingTag = false;
+          if (this.ui.isThinkingActive()) {
+            this.ui.endThinking();
+          }
+        }
 
         // 被中断，丢弃不完整回复
         if (this.aborted || this.ui.isAborted) {
@@ -456,8 +613,11 @@ export class CLIAAgent {
         const assistantContent: (TextPart | ToolCallPart | { type: 'reasoning'; text: string })[] = [];
         if (reasoningOutputs.length > 0) {
           for (const r of reasoningOutputs) {
-            assistantContent.push({ type: 'reasoning', text: r.text.slice(-200) });
+            assistantContent.push({ type: 'reasoning', text: r.text });
           }
+        } else if (thinkingText) {
+          // <thinking> 标签剥离的思考内容，作为 reasoning part 进入上下文（完整保留，供会话记录）
+          assistantContent.push({ type: 'reasoning', text: thinkingText });
         }
         if (fullText) {
           assistantContent.push({ type: 'text', text: fullText });
@@ -503,8 +663,10 @@ export class CLIAAgent {
             const assistantContent: (TextPart | ToolCallPart | { type: 'reasoning'; text: string })[] = [];
             if (reasoningOutputs.length > 0) {
               for (const r of reasoningOutputs) {
-                assistantContent.push({ type: 'reasoning', text: r.text.slice(-200) });
+                assistantContent.push({ type: 'reasoning', text: r.text });
               }
+            } else if (thinkingText) {
+              assistantContent.push({ type: 'reasoning', text: thinkingText });
             }
             assistantContent.push({ type: 'text', text: fullText });
             this.messages.push({ role: 'assistant', content: assistantContent });
@@ -846,6 +1008,7 @@ export class CLIAAgent {
   clear(): void {
     this.messages = [];
     this.inputQueue = [];
+    this.sessionId = this.generateSessionId();
     this.ui.clearMessages();
   }
 
@@ -869,7 +1032,7 @@ export class CLIAAgent {
 
   /**
    * 每轮结束后自动保存当前会话到 sessions/ 目录
-   * 使用时间戳文件名，不覆盖已有会话
+   * 使用 session-{sessionId}.json，同一会话周期内覆盖更新
    */
   private autoSaveSession(): void {
     const messages = this.messages;
@@ -880,14 +1043,13 @@ export class CLIAAgent {
       fs.mkdirSync(sessionDir, { recursive: true });
     }
 
-    const now = new Date();
-    const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const fileName = `session-${ts}.json`;
+    const fileName = `session-${this.sessionId}.json`;
     const filePath = path.join(sessionDir, fileName);
 
     const data = {
       version: 1,
-      timestamp: now.toISOString(),
+      timestamp: new Date().toISOString(),
+      sessionId: this.sessionId,
       cwd: process.cwd(),
       agentMessages: messages,
     };
@@ -898,39 +1060,18 @@ export class CLIAAgent {
       // 自动保存失败不影响主流程
     }
   }
+
+  /** 生成新的会话 ID */
+  private generateSessionId(): string {
+    const rand = () => Math.random().toString(36).substring(2, 6);
+    return `${rand()}-${rand()}-${rand()}`;
+  }
+
+  /** 设置会话 ID（用于从文件恢复会话时指定） */
+  setSessionId(id: string): void {
+    this.sessionId = id;
+  }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

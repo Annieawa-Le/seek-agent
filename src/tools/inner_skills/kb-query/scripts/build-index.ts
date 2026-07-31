@@ -15,12 +15,15 @@
 
 import { tool } from 'ai';
 import { z } from 'zod';
-import { getStore, resetStore, getStoreType } from './store/factory';
+import { getStore, resetStore } from './store/factory';
 import { type RawChunk } from './chunker';
 import { embedder } from './embedder';
 import { FileTracker } from './file-tracker';
 import { getWorkspaceRoot } from '../../../../../src/workdir';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'util';
+import { fileURLToPath } from 'node:url';
 
 export const kbBuildIndex = tool({
   description: `构建/重建项目知识库索引。扫描整个项目的源码和文档文件，进行向量化处理并存入存储后端。`,
@@ -30,7 +33,6 @@ export const kbBuildIndex = tool({
   execute: async ({ force }): Promise<string> => {
     const startTime = Date.now();
     const projectRoot = getWorkspaceRoot();
-    const storeType = getStoreType();
 
     // ── 0. 探测维度 ──
     process.stdout.write('📐 探测嵌入模型维度...\n');
@@ -164,7 +166,7 @@ export const kbBuildIndex = tool({
 
 /** 递归扫描项目文件（与 chunker.scanFiles 逻辑一致） */
 const SOURCE_EXTS = new Set(['.ts', '.js', '.tsx', '.jsx', '.mjs', '.cjs', '.css', '.html', '.json']);
-const DOC_EXTS = new Set(['.md', '.mdx', '.txt']);
+const DOC_EXTS = new Set(['.md', '.mdx', '.txt', '.pdf', '.docx', '.pptx']);
 const IGNORE_DIRS = new Set([
   'node_modules', '.git', '.seek-agent', '.todo-data',
   'dist', 'build', 'out', 'coverage', 'repos',
@@ -196,13 +198,57 @@ async function collectFiles(dir: string): Promise<string[]> {
   return result;
 }
 
-/** 对单个文件分块（复用 chunker 的逻辑但只处理一个文件） */
+/** 对单个文件分块（复用 chunker 的逻辑但只处理一个文件）
+    支持 PDF、纯文本等多种格式。UTF-16/GBK 文件自动检测编码。 */
 async function chunkFileByPath(filePath: string, projectRoot: string): Promise<RawChunk[]> {
-  const { readFile } = await import('node:fs/promises');
-  const content = await readFile(filePath, 'utf-8');
+  const ext = path.extname(filePath).toLowerCase();
+  let content: string;
+
+  if (ext === '.pdf') {
+    // PDF：用 pdf-parse 提取文本
+    try {
+      const { readFile } = await import('node:fs/promises');
+      const pdfBuffer = await readFile(filePath);
+      const { PDFParse, VerbosityLevel } = await import('pdf-parse');
+      const parser = new PDFParse({ data: pdfBuffer, verbosity: VerbosityLevel.ERRORS });
+      const textResult = await parser.getText();
+      content = textResult.text || '';
+      await parser.destroy();
+    } catch (e: any) {
+      throw new Error('PDF 解析失败: ' + e.message);
+    }
+  } else if (ext === '.docx' || ext === '.pptx') {
+    // Office 文档：用 Python stdlib (zipfile + XML) 提取文本
+    try {
+      content = await extractOfficeText(filePath);
+    } catch (e: any) {
+      throw new Error('Office 解析失败: ' + e.message);
+    }
+  } else {
+    // 常规文本文件：尝试 utf-8，失败后尝试其他编码
+    try {
+      const { readFile } = await import('node:fs/promises');
+      content = await readFile(filePath, 'utf-8');
+    } catch (e: any) {
+      // 如果 utf-8 失败，尝试作为二进制读取后用 iconv-lite 解码
+      try {
+        const { readFile } = await import('node:fs/promises');
+        const buf = await readFile(filePath);
+        const iconv = await import('iconv-lite');
+        content = iconv.decode(buf, 'utf-8');
+        // 如果解码后仍然包含大量非文本字符，标记为不可索引
+        const printableRatio = content.split('').filter(c => c >= ' ' || c === '\n' || c === '\r' || c === '\t').length / content.length;
+        if (printableRatio < 0.7) {
+          throw new Error('二进制文件，跳过');
+        }
+      } catch {
+        throw new Error('无法读取文件内容（可能为二进制文件）');
+      }
+    }
+  }
+
   const relPath = path.relative(projectRoot, filePath).replace(/\\/g, '/');
   const lines = content.split('\n');
-  const ext = path.extname(filePath).toLowerCase();
 
   const chunks: RawChunk[] = [];
 
@@ -275,5 +321,29 @@ function extractBlock(lines: string[]): string {
   }
   return result.join('\n');
 }
+
+
+
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const execFilePromise = promisify(execFile);
+
+/**
+ * 使用 Python stdlib 提取 Office 文档（.docx/.pptx）中的纯文本。
+ * 零额外依赖，仅用 zipfile + xml.etree.ElementTree。
+ */
+async function extractOfficeText(filePath: string): Promise<string> {
+  const scriptPath = path.join(__dirname, 'extract_office_text.py');
+  const { stdout } = await execFilePromise('python', [scriptPath, filePath], {
+    timeout: 30_000,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  const result = JSON.parse(stdout);
+  if (result.error) throw new Error(result.error);
+  return result.text || '';
+}
+
+
 
 

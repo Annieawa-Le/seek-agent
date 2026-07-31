@@ -4,8 +4,11 @@
  * 策略：按文件粒度 + 函数/类粒度分层分块，同时扫描文档文件（.md）
  */
 
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'util';
+import { fileURLToPath } from 'node:url';
 
 export interface RawChunk {
   id: string;
@@ -23,7 +26,7 @@ export interface RawChunk {
 /** 需要索引的源码扩展名 */
 const SOURCE_EXTS = new Set(['.ts', '.js', '.tsx', '.jsx', '.mjs', '.cjs', '.css', '.html', '.json']);
 /** 需要索引的文档扩展名 */
-const DOC_EXTS = new Set(['.md', '.mdx', '.txt']);
+const DOC_EXTS = new Set(['.md', '.mdx', '.txt', '.pdf', '.docx', '.pptx']);
 /** 忽略的目录/文件 */
 const IGNORE_DIRS = new Set([
   'node_modules', '.git', '.seek-agent', '.todo-data',
@@ -84,13 +87,52 @@ async function scanFiles(dir: string, root: string = dir): Promise<string[]> {
 }
 
 /**
- * 对单个文件进行分块
+ * 对单个文件进行分块。支持 PDF 自动提取文本，非 UTF-8 文件自动编码检测。
  */
 async function chunkFile(filePath: string, projectRoot: string): Promise<RawChunk[]> {
-  const content = await readFile(filePath, 'utf-8');
+  const ext = path.extname(filePath).toLowerCase();
+  let content: string;
+
+  if (ext === '.pdf') {
+    // PDF：用 pdf-parse 提取文本
+    try {
+      const pdfBuffer = await readFile(filePath);
+      const { PDFParse, VerbosityLevel } = await import('pdf-parse');
+      const parser = new PDFParse({ data: pdfBuffer, verbosity: VerbosityLevel.ERRORS });
+      const textResult = await parser.getText();
+      content = textResult.text || '';
+      await parser.destroy();
+    } catch (e: any) {
+      throw new Error('PDF 解析失败: ' + e.message);
+    }
+  } else if (ext === '.docx' || ext === '.pptx') {
+    // Office 文档：用 Python stdlib 提取文本
+    try {
+      content = await extractOfficeText(filePath);
+    } catch (e: any) {
+      throw new Error('Office 解析失败: ' + e.message);
+    }
+  } else {
+    // 常规文本文件：尝试 utf-8，失败后尝试 iconv-lite 解码
+    try {
+      content = await readFile(filePath, 'utf-8');
+    } catch {
+      try {
+        const buf = await readFile(filePath);
+        const iconv = await import('iconv-lite');
+        content = iconv.decode(buf, 'utf-8');
+        const printableRatio = content.split('').filter(c => c >= ' ' || c === '\n' || c === '\r' || c === '\t').length / content.length;
+        if (printableRatio < 0.7) {
+          throw new Error('二进制文件，跳过');
+        }
+      } catch {
+        throw new Error('无法读取文件内容（可能为二进制文件）');
+      }
+    }
+  }
+
   const relPath = path.relative(projectRoot, filePath).replace(/\\/g, '/');
   const lines = content.split('\n');
-  const ext = path.extname(filePath).toLowerCase();
 
   const chunks: RawChunk[] = [];
 
@@ -223,4 +265,24 @@ function summarizeFile(content: string, ext: string): string {
 
   return lines.slice(0, 3).join('; ').slice(0, 200);
 }
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const execFilePromise = promisify(execFile);
+
+/**
+ * 使用 Python stdlib 提取 Office 文档（.docx/.pptx）中的纯文本。
+ * 零额外依赖，仅用 zipfile + xml.etree.ElementTree。
+ */
+async function extractOfficeText(filePath: string): Promise<string> {
+  const scriptPath = path.join(__dirname, 'extract_office_text.py');
+  const { stdout } = await execFilePromise('python', [scriptPath, filePath], {
+    timeout: 30_000,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  const result = JSON.parse(stdout);
+  if (result.error) throw new Error(result.error);
+  return result.text || '';
+}
+
 

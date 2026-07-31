@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import type { DisplayMessage } from '@/hooks/useMessages.ts';
 import { MessageItem } from './MessageItem.tsx';
 
@@ -6,16 +6,18 @@ interface Props {
   messages: DisplayMessage[];
 }
 
-
-export function MessageList({ messages }: Props) {
+export const MessageList = memo(function MessageList({ messages }: Props) {
   const areaRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
 
+  // 只跟踪"末尾消息"，中间消息更新（如工具结果回填）不触发滚动
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+  const messageCount = messages.length;
+
   useEffect(() => {
-    if (!userScrolledUpRef.current) {
-      areaRef.current?.scrollTo({ top: areaRef.current.scrollHeight, behavior: 'smooth' });
-    }
-  }, [messages]);
+    if (userScrolledUpRef.current) return;
+    areaRef.current?.scrollTo({ top: areaRef.current.scrollHeight, behavior: 'smooth' });
+  }, [lastMsg, messageCount]);
 
   const handleScroll = () => {
     const el = areaRef.current;
@@ -34,7 +36,5 @@ export function MessageList({ messages }: Props) {
       </div>
     </div>
   );
-}
-
-
+});
 

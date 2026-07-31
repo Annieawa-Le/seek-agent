@@ -74,6 +74,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('renderer:restart');
   },
 
+  // ─── 查询 ───
+
+  /** 查询当前 agent 连接状态 */
+  getAgentStatus: async () => {
+    return ipcRenderer.invoke('agent:status:request');
+  },
+
   // ─── 工作区目录管理 ───
 
   /** 获取当前工作目录 */
@@ -107,13 +114,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readGitStatus: async () => {
     return ipcRenderer.invoke('fs:readGitStatus');
   },
-
-  /** 读取 sessions 列表 */
+  /** 打开系统对话框选择附件文件（支持多选） */
+  openFileDialog: async () => {
+    return ipcRenderer.invoke('dialog:openFiles');
+  },
 
   /** 读取可用技能列表 */
   getSkillsList: async () => {
     return ipcRenderer.invoke('skills:list');
   },
+
+  /** 读取 sessions 列表 */
   listSessions: async () => {
     return ipcRenderer.invoke('fs:listSessions');
   },
@@ -147,5 +158,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('window:isMaximized');
   },
 });
-
 

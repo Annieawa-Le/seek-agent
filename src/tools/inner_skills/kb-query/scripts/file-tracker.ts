@@ -7,7 +7,7 @@
  * 状态文件存储在 .seek-agent/kb-file-state.json
  */
 
-import { readFile, writeFile, stat, readdir } from 'node:fs/promises';
+import { readFile, writeFile, stat, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { getWorkspaceRoot } from '../../../../workdir';
 
@@ -33,20 +33,30 @@ export class FileTracker {
     this.stateFile = path.join(root, '.seek-agent', 'kb-file-state.json');
   }
 
-  /** 从磁盘加载状态 */
+  /** 从磁盘加载状态
+      状态文件不存在时静默返回空状态（首次构建场景）。
+      其他 IO 错误则抛出，避免静默吞掉异常。 */
   async load(): Promise<void> {
     if (this.loaded) return;
     try {
       const raw = await readFile(this.stateFile, 'utf-8');
       this.state = JSON.parse(raw);
-    } catch {
-      this.state = {};
+    } catch (e: any) {
+      if (e?.code === 'ENOENT') {
+        // 首次构建：状态文件还不存在，属正常情况
+        this.state = {};
+      } else {
+        // 其他 IO 错误（权限、磁盘损坏等），不应静默
+        console.warn(`[FileTracker] 读取状态文件失败: ${e.message}`);
+        this.state = {};
+      }
     }
     this.loaded = true;
   }
 
-  /** 保存状态到磁盘 */
+  /** 保存状态到磁盘，自动创建父目录 */
   async save(): Promise<void> {
+    await mkdir(path.dirname(this.stateFile), { recursive: true });
     await writeFile(this.stateFile, JSON.stringify(this.state, null, 2), 'utf-8');
   }
 
@@ -105,3 +115,5 @@ export class FileTracker {
     }
   }
 }
+
+
