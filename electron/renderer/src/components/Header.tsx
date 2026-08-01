@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
 import type { AgentStatusState } from '@/hooks/useAgentStatus.ts';
 import { FolderSelector } from './FolderSelector.tsx';
+import { Tabs, type TabItem } from './Tabs.tsx';
 
 interface Props {
   status: AgentStatusState;
@@ -10,6 +11,12 @@ interface Props {
   onToggleTheme: () => void;
   onToggleSidebar: () => void;
   sidebarOpen: boolean;
+  /** 标签页数据（对应已打开会话） */
+  tabs: TabItem[];
+  activeTabId: string;
+  onTabSelect: (id: string) => void;
+  onTabClose: (id: string) => void;
+  onTabNew: () => void;
 }
 
 const dotClass: Record<string, string> = {
@@ -18,7 +25,7 @@ const dotClass: Record<string, string> = {
   connecting: 'status-dot disconnected',
 };
 
-export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSidebar, sidebarOpen }: Props) {
+export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSidebar, sidebarOpen, tabs, activeTabId, onTabSelect, onTabClose, onTabNew }: Props) {
   const api = useElectronAPI();
   const { minimizeWindow, maximizeWindow, closeWindow, onMaximizedChange, isWindowMaximized } = api;
   const [isMaximized, setIsMaximized] = useState(false);
@@ -44,7 +51,13 @@ export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSideba
       </div>
 
       <div className="header-center">
-        <span className="header-session-name">New Session · seek-agent</span>
+        <Tabs
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onSelect={onTabSelect}
+          onClose={onTabClose}
+          onNew={onTabNew}
+        />
       </div>
 
       <div className="header-right">
@@ -97,6 +110,11 @@ export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSideba
     </header>
   );
 }
+
+
+
+
+
 
 
 

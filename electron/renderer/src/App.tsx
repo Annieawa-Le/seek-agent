@@ -10,6 +10,7 @@ import { InputBar } from '@/components/InputBar.tsx';
 import { RightPanel } from '@/components/RightPanel.tsx';
 import { StatusBar } from '@/components/StatusBar.tsx';
 import type { AgentMessage, SidebarRuntimeData } from '@/types/index.ts';
+import type { TabItem } from '@/components/Tabs.tsx';
 
 export function App() {
   // 当前活动会话（与主进程 currentSessionId 保持一致）
@@ -23,6 +24,9 @@ export function App() {
   useEffect(() => { currentSessionRef.current = currentSessionId; }, [currentSessionId]);
   // 当前会话的运行时数据（hooks/子agent/MCP 状态，由 sidebar:data 消息更新）
   const [runtimeData, setRuntimeData] = useState<SidebarRuntimeData | null>(null);
+  /** 标题栏标签页：本次会话期间打开过的会话（浏览器式多标签管理的基础） */
+  const [tabs, setTabs] = useState<TabItem[]>([]);
+
 
   const status = useAgentStatus(currentSessionId);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -202,6 +206,7 @@ export function App() {
       if (sessionId) {
         currentSessionRef.current = sessionId;
         setCurrentSessionId(sessionId);
+        ensureTab(sessionId);
       }
       api.sendCommand('sidebar:data');
     }).catch(() => {});
@@ -234,12 +239,22 @@ export function App() {
     endStreaming();
   }, [api, endStreaming]);
 
+  /** 把会话登记到标签栏（去重；已存在则移到末尾 = 最近使用） */
+  const ensureTab = useCallback((id: string, title?: string) => {
+    setTabs(prev => {
+      const item: TabItem = { id, title: title || id };
+      return [...prev.filter(t => t.id !== id), item];
+    });
+  }, []);
+
+
   /** 新建会话：不中断当前会话，拉起独立 Agent 进程 */
   const handleNewSession = useCallback(async () => {
     const res = await api.newSession();
     if (!res?.success || !res.sessionId) return;
     currentSessionRef.current = res.sessionId;
     setCurrentSessionId(res.sessionId);
+    ensureTab(res.sessionId);
     setRuntimeData(null);
     clearMessages();
     setSessionReady(true); // 新会话：显示模式选择启动页
@@ -249,7 +264,7 @@ export function App() {
     appendMessage({ role: 'blank', content: '' });
     // 请求新会话的运行时数据
     api.sendCommand('sidebar:data');
-  }, [api, clearMessages, appendMessage]);
+  }, [api, clearMessages, appendMessage, ensureTab]);
 
   /** 切换到指定会话（其他会话的 Agent 进程继续运行） */
   const handleSwitchSession = useCallback(async (sessionId: string, name?: string) => {
@@ -257,6 +272,7 @@ export function App() {
     const res = await api.switchSession(sessionId, name);
     if (!res?.success) return;
     currentSessionRef.current = res.sessionId || sessionId;
+    ensureTab(res.sessionId || sessionId, name);
     setCurrentSessionId(res.sessionId || sessionId);
     setRuntimeData(null);
     // 立即清空当前消息与重放状态：防止新数据到达前旧会话窗口触发误加载
@@ -264,7 +280,30 @@ export function App() {
     setSessionReady(false); // 防 ModePicker 在重放到达前闪现
     setIsFreshSession(false); // 切回旧会话不显示启动页（模式随会话持久化，由 agent 进程恢复）
     api.sendCommand('sidebar:data');
-  }, [api, clearMessages]);
+  }, [api, clearMessages, ensureTab]);
+
+  /** 标签页点击：切换到对应会话 */
+  const handleTabSelect = useCallback((id: string) => {
+    if (id === currentSessionRef.current) return;
+    handleSwitchSession(id);
+  }, [handleSwitchSession]);
+
+  /** 关闭标签页：关闭对应会话进程并移除标签；若关闭的是当前标签，切到相邻标签 */
+  const handleTabClose = useCallback(async (id: string) => {
+    const res = await api.closeSession(id);
+    if (!res?.success) return;
+    const idx = tabs.findIndex(t => t.id === id);
+    setTabs(prev => prev.filter(t => t.id !== id));
+    if (id === currentSessionRef.current) {
+      const rest = tabs.filter(t => t.id !== id);
+      const next = rest[Math.min(idx, rest.length - 1)];
+      if (next) {
+        await handleSwitchSession(next.id);
+      } else {
+        await handleNewSession(); // 最后一个标签被关：新建一个，避免停在已关闭的会话
+      }
+    }
+  }, [api, tabs, handleSwitchSession, handleNewSession]);
 
   // 是否已有真实对话消息（banner/system/blank 不算）——用于新会话模式选择启动页的显示
   const hasRealMessage = messages.some((m) =>
@@ -282,7 +321,7 @@ export function App() {
 
   return (
     <div id="app">
-      <Header status={status} ctxTokens={status.ctxTokens} theme={theme} onToggleTheme={toggleTheme} onToggleSidebar={toggleSidebar} sidebarOpen={sidebarOpen} />
+      <Header status={status} ctxTokens={status.ctxTokens} theme={theme} onToggleTheme={toggleTheme} onToggleSidebar={toggleSidebar} sidebarOpen={sidebarOpen} tabs={tabs} activeTabId={currentSessionId} onTabSelect={handleTabSelect} onTabClose={handleTabClose} onTabNew={handleNewSession} />
       <div id="body-content">
         <div id="body-row">
           <LeftSidebar
@@ -330,6 +369,18 @@ export function App() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
