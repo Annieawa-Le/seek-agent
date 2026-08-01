@@ -422,7 +422,7 @@ html, body {
   color: var(--text-muted);
   cursor: pointer;
   -webkit-app-region: no-drag; /* 标签本体可点击，不拖窗口 */
-  flex-shrink: 0;
+  flex: 1 1 0; /* 等宽弹性：basis 0 + 均等 grow/shrink，占满后按数量平分容器宽度 */
   max-width: 200px;
   min-width: 60px;
   position: relative;
@@ -3615,6 +3615,7 @@ html, body {
   font-weight: 600;
 }
 .chat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 
 
 
