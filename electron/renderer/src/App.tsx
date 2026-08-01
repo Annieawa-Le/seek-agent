@@ -5,23 +5,31 @@ import { useMessages } from '@/hooks/useMessages.ts';
 import { Header } from '@/components/Header.tsx';
 import { LeftSidebar } from '@/components/LeftSidebar.tsx';
 import { MessageList } from '@/components/MessageList.tsx';
+import { ModePicker } from '@/components/ModePicker.tsx';
 import { InputBar } from '@/components/InputBar.tsx';
 import { RightPanel } from '@/components/RightPanel.tsx';
 import { StatusBar } from '@/components/StatusBar.tsx';
-import { FolderSelector } from '@/components/FolderSelector.tsx';
 import type { AgentMessage, SidebarRuntimeData } from '@/types/index.ts';
 
 export function App() {
   // 当前活动会话（与主进程 currentSessionId 保持一致）
   const api = useElectronAPI();
   const [currentSessionId, setCurrentSessionId] = useState('default');
+  /** 会话是否已就绪（切换会话时防 ModePicker 闪现；replace-messages 到达后置 true） */
+  const [sessionReady, setSessionReady] = useState(true);
+  /** 是否为新会话（仅新建会话显示模式选择启动页；切回旧会话不显示，与 DeepSeek 一致） */
+  const [isFreshSession, setIsFreshSession] = useState(true);
   const currentSessionRef = useRef('default');
   useEffect(() => { currentSessionRef.current = currentSessionId; }, [currentSessionId]);
   // 当前会话的运行时数据（hooks/子agent/MCP 状态，由 sidebar:data 消息更新）
   const [runtimeData, setRuntimeData] = useState<SidebarRuntimeData | null>(null);
 
   const status = useAgentStatus(currentSessionId);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    // 默认浅色模式；若用户之前手动切换过，则记住其选择
+    const saved = localStorage.getItem('seek-agent-theme');
+    return saved === 'dark' ? 'dark' : 'light';
+  });
   const [kbEnabled, setKbEnabled] = useState(true);
   const [smartSearchEnabled, setSmartSearchEnabled] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
@@ -33,7 +41,11 @@ export function App() {
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+    setTheme(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('seek-agent-theme', next);
+      return next;
+    });
   }, []);
   const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -61,8 +73,11 @@ export function App() {
     addToolToAgent,
     updateToolResult,
     setToolCallCount,
-    clearMessages,
+    replaceMessages,
+    loadEarlier,
+    hasEarlier,
     endStreaming,
+    clearMessages,
     removeLastAgent,
     startThinking,
     appendThinkingDelta,
@@ -78,6 +93,12 @@ export function App() {
       case 'clear-messages':
         // 会话切换/加载时，agent 进程通过 clear-messages 通知清空
         clearMessages();
+        break;
+
+      case 'replace-messages':
+        // 加载/切换会话：agent 进程一次性发送完整重建列表，整体替换
+        if (msg.messages) replaceMessages(msg.messages);
+        setSessionReady(true);
         break;
 
       case 'sidebar-data':
@@ -157,12 +178,23 @@ export function App() {
     }
   }, [appendMessage, appendToStreaming, addToolToAgent, updateToolResult,
       setToolCallCount, endStreaming, removeLastAgent, startThinking,
-      appendThinkingDelta, endThinking, clearMessages]);
+      appendThinkingDelta, endThinking, clearMessages, replaceMessages]);
 
   useEffect(() => {
     const unsub = api.onMessage(handleMessage);
     return () => unsub();
   }, [api, handleMessage]);
+
+  // 后台拉起 Agent 失败兜底：目标会话进程未就绪/超时时提示并解除加载态
+  useEffect(() => {
+    const unsub = api.onSessionError(({ sessionId, error }) => {
+      if (sessionId !== currentSessionRef.current) return;
+      appendMessage({ role: 'system', content: `⚠ ${error}（${sessionId}）`, createdAt: Date.now() });
+      setSessionReady(true);
+    });
+    return () => unsub();
+  }, [api, appendMessage]);
+
 
   // 挂载后同步主进程当前会话，并请求一次运行时数据
   useEffect(() => {
@@ -210,8 +242,10 @@ export function App() {
     setCurrentSessionId(res.sessionId);
     setRuntimeData(null);
     clearMessages();
+    setSessionReady(true); // 新会话：显示模式选择启动页
+    setIsFreshSession(true); // 仅新建会话显示启动页
+    api.sendCommand('mode:set default'); // 新会话进程从 default 开始（静默，不产生消息）
     appendMessage({ role: 'banner', content: '', createdAt: Date.now() });
-    appendMessage({ role: 'system', content: `新会话已创建（${res.sessionId}）。`, createdAt: Date.now() });
     appendMessage({ role: 'blank', content: '' });
     // 请求新会话的运行时数据
     api.sendCommand('sidebar:data');
@@ -225,9 +259,18 @@ export function App() {
     currentSessionRef.current = res.sessionId || sessionId;
     setCurrentSessionId(res.sessionId || sessionId);
     setRuntimeData(null);
-    // 会话内容由 agent 进程通过 clear-messages + 消息流重放；请求运行时数据
+    // 立即清空当前消息与重放状态：防止新数据到达前旧会话窗口触发误加载
+    clearMessages();
+    setSessionReady(false); // 防 ModePicker 在重放到达前闪现
+    setIsFreshSession(false); // 切回旧会话不显示启动页（模式随会话持久化，由 agent 进程恢复）
     api.sendCommand('sidebar:data');
-  }, [api]);
+  }, [api, clearMessages]);
+
+  // 是否已有真实对话消息（banner/system/blank 不算）——用于新会话模式选择启动页的显示
+  const hasRealMessage = messages.some((m) =>
+    m.role === 'user' || m.role === 'agent' || m.role === 'tool' || m.role === 'subagent' || m.role === 'thinking',
+  );
+
 
   if (!api.isAvailable) {
     return (
@@ -252,18 +295,20 @@ export function App() {
           />
           {sidebarOpen && <div className="sidebar-overlay" onClick={closeSidebar} />}
           <div id="main-content">
-            <div id="main-toolbar">
-              <span className="toolbar-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l2 7h7l-5.5 4 2 7L12 16l-5.5 4 2-7L3 9h7z"/></svg></span>
-              <span className="toolbar-context">
-                New session in <FolderSelector />
-                with <span className="ctx-tool"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{verticalAlign: 'middle', marginRight: 3}}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Copilot CLI ▼</span>
-              </span>
-            </div>
-            <MessageList messages={messages} />
+            {/* 切换会话（!sessionReady）时 Agent 在后台拉起/重放，先显示加载占位避免空白“卡住”观感 */}
+            {sessionReady && isFreshSession && !hasRealMessage ? (
+              <ModePicker api={api} sessionKey={currentSessionId} />
+            ) : !sessionReady ? (
+              <div id="session-loading-area">
+                <div className="session-loading">正在加载会话…</div>
+              </div>
+            ) : (
+              <MessageList key={currentSessionId} messages={messages} hasEarlier={hasEarlier} onLoadEarlier={loadEarlier} />
+            )}
             <InputBar
               processing={status.processing}
-              thinking={status.thinking}
               kbEnabled={kbEnabled}
+              thinking={status.thinking}
               smartSearchEnabled={smartSearchEnabled}
               thinkingEnabled={thinkingEnabled}
               skillsList={skillsList}
@@ -274,7 +319,7 @@ export function App() {
               onToggleThinking={onToggleThinking}
             />
           </div>
-          <RightPanel />
+          <RightPanel runtimeData={runtimeData} />
         </div>
         <StatusBar
           status={status}
@@ -285,6 +330,41 @@ export function App() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

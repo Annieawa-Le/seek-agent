@@ -35,14 +35,18 @@
       {
         "from": "dist/release/agent",
         "to": "agent",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": null,
@@ -55,7 +59,10 @@
       "createStartMenuShortcut": true,
       "unicode": true,
       "language": "2052",
-      "installerLanguages": ["zh_CN", "en_US"],
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
       "shortcutName": "Seek Agent",
       "displayLanguageSelector": true
     },
@@ -86,6 +93,7 @@
     "image-size": "^2.0.2",
     "parse5": "^8.0.1",
     "pdf-parse": "^2.4.5",
+    "playwright-core": "^1.62.1",
     "pngjs": "^7.0.0",
     "tesseract.js": "^7.0.0",
     "tsx": "^4.22.3",
@@ -98,6 +106,3 @@
     "electron-builder": "^26.15.3"
   }
 }
-
-
-

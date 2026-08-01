@@ -33,8 +33,10 @@ export interface SearchBulk {
   type: 'search';
   filePath: string;
   pattern: string;
-  results: Array<{ name: string; path: string }>;
+  results: Array<{ name: string; path: string; isDir?: boolean }>;
+  /** 匹配总数（未截断时与 results.length 一致） */
   totalCount: number;
+  /** 结果是否因超过 maxResults 被截断 */
   truncated: boolean;
   error?: string;
 }
@@ -44,8 +46,11 @@ export interface SearchContentBulk {
   type: 'search-content';
   filePath: string;
   pattern: string;
+  /** 返回的匹配行数 */
   totalCount: number;
-  matches: Array<{ lineNum: number; line: string }>;
+  matches: Array<{ lineNum: number; line: string; filePath?: string }>;
+  /** 结果是否被截断（目录搜索时每文件 50 行 / 全局 maxResults 上限） */
+  truncated?: boolean;
   error?: string;
 }
 
@@ -177,6 +182,7 @@ export interface RawBulkFormatters {
   toTUIText(rawBulk: RawBulk): string;
   toWebUI(rawBulk: RawBulk): Record<string, unknown>;
 }
+
 
 
 

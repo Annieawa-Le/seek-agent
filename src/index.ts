@@ -37,12 +37,20 @@ import { composeHooks } from './memory_agent';
 import { registerRoundHooks } from './register-round-hooks';
 import { buildEditModePinningHook } from './tools/desk-edit';
 import { createCommandRegistry } from './command';
+import { modePreProcessHook } from './modes/preprocess';
+import { registerBuiltinModes } from './modes';
+import { registerModeStatusPanel, registerManagerDashboard } from './modes/panel';
 
 const ui = new TerminalUI();
 const agent = new CLIAAgent(ui);
 
+// ── 注册内置模式（kb / manager / worker）与模式状态面板 ──
+registerBuiltinModes();
+registerModeStatusPanel();
+registerManagerDashboard();
 agent.messageHook = composeHooks(
   createMessageHook(),
+  modePreProcessHook,
   buildEditModePinningHook(),
 );
 
@@ -124,6 +132,12 @@ ui.onCommand = async (cmd: string) => {
 
 // ── 启动 UI ──
 ui.start();
+
+
+
+
+
+
 
 
 

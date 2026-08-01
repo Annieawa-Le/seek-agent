@@ -50,6 +50,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('workdir:changed', handler);
   },
 
+  /** 监听会话身份卡生成完成（agent:identity-card 事件） */
+  onIdentityCard: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('agent:identity-card', handler);
+    return () => ipcRenderer.removeListener('agent:identity-card', handler);
+  },
+
+  /** 监听跨会话协作事件（collab:event） */
+  /** 监听会话 Agent 后台拉起失败（session:new / session:switch 异步化后的兜底） */
+  onSessionError: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('agent:session-error', handler);
+    return () => ipcRenderer.removeListener('agent:session-error', handler);
+  },
+
+  onCollabEvent: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('collab:event', handler);
+    return () => ipcRenderer.removeListener('collab:event', handler);
+  },
+
   // ─── 发送 ───
 
   /** 发送用户输入到 agent（主进程路由到当前活动会话） */
@@ -131,6 +152,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('fs:listSessions');
   },
 
+  /** 生成/更新会话身份卡（轻量模型总结当前对话） */
+  generateIdentityCard: async (sessionId) => {
+    return ipcRenderer.invoke('session:generateIdentityCard', sessionId);
+  },
+
+  /** 跨会话协作：会话列表（活跃 + 历史，含身份卡） */
+  getCollabSessions: async () => {
+    return ipcRenderer.invoke('collab:sessions');
+  },
+
+  /** 跨会话协作：通信记录（最新在前） */
+  getCollabLog: async () => {
+    return ipcRenderer.invoke('collab:log');
+  },
+
   // ─── 多会话控制 ───
 
   /** 切换到指定会话（已保存会话传 name，将自动拉起独立 Agent 进程） */
@@ -199,4 +235,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('window:isMaximized');
   },
 });
+
+
+
+
 

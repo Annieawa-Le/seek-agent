@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { subAgentManager, queueSubmissionInjection } from './manager';
 import { executeChildAgent, queryChildAgent } from './runner';
 import { getSystemPrompt } from '../../../model-provider';
+import { appendChatMessage } from '../../../modes/chat-thread';
 import type { ModelMessage } from 'ai';
 
 const tools: Record<string, any> = {};
@@ -83,19 +84,25 @@ tools['agent_task'] = tool({
       return `⚠ 子模型 "${name}" 正在运行中，请等待完成或先销毁。`;
     }
 
-    // clone / mission 模式：完整 LLM 执行
+    // manager 派活写入协作聊天 thread（manager 角色）
+    appendChatMessage(name, 'subagent', 'manager', `【派活】${task}`);
+
+    // 异步派活：后台执行子模型，立即返回（主模型可继续派别的活或做其他事）
     const mainMsgs = messages as ModelMessage[];
     const mainSysPrompt = getSystemPrompt();
-    const result = await executeChildAgent(agent, mainMsgs, mainSysPrompt, task, context);
-
-    // 解析提交结果并排队注入
-    try {
-      const parsed = JSON.parse(result);
-      queueSubmissionInjection(name, parsed);
-      return result;
-    } catch {
-      return result;
-    }
+    (async () => {
+      try {
+        const result = await executeChildAgent(agent, mainMsgs, mainSysPrompt, task, context);
+        // 解析提交结果并排队注入主对话
+        try {
+          const parsed = JSON.parse(result);
+          queueSubmissionInjection(name, parsed);
+        } catch { /* 非 JSON 结果不注入 */ }
+      } catch (e: any) {
+        appendChatMessage(name, 'subagent', 'peer', `执行出错: ${e?.message || e}`);
+      }
+    })();
+    return `✅ 已派活给子模型 "${name}"（后台执行中，完成后结果会自动回到对话）`;
   },
 });
 
@@ -193,6 +200,13 @@ tools['a_submission'] = tool({
     return JSON.stringify({ type: 'submission', summary, details });
   },
 });
-
 export default tools;
+
+
+
+
+
+
+
+
 

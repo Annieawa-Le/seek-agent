@@ -1,0 +1,4 @@
+{
+  "enable": true,
+  "description": "真实浏览器驱动（playwright-core + 系统 Edge/Chrome），指纹真实抗反爬；浏览器实例单例常驻，AI 可多轮持续操作页面（点击/输入/滚动/截图/执行JS），截图可配合视觉模型理解页面。"
+}

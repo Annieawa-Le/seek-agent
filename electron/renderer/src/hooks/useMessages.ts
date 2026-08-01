@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import type { AgentMessage, ToolHistoryEntry, PanelState } from '@/types/index.ts';
+import type { AgentMessage, ToolHistoryEntry, PanelState, ReplayMessage } from '@/types/index.ts';
 
 export interface DisplayMessage {
   id: number;
@@ -18,6 +18,10 @@ export interface DisplayMessage {
   roundId?: number;
 }
 
+
+/** 会话重放懒加载：初始组装的最近气泡数 / 向上翻阅每批加载的气泡数 */
+const INITIAL_BUBBLES = 30;
+const BATCH_BUBBLES = 30;
 export function useMessages() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [streamingAgentId, setStreamingAgentId] = useState<number | null>(null);
@@ -26,6 +30,11 @@ export function useMessages() {
   const panelRef = useRef<PanelState>({
     totalMessages: 0, userMessages: 0, agentMessages: 0, toolCallCount: 0,
   });
+  // ── 会话重放（懒加载）：保留完整原始列表，只组装可见窗口 ──
+  const rawRef = useRef<ReplayMessage[]>([]);
+  /** 当前已组装窗口的起始索引（指向 rawRef）；>0 表示还有更早的消息可加载 */
+  const [replayStart, setReplayStart] = useState(0);
+  const replayStartRef = useRef(0);
 
   const nextId = useCallback(() => ++msgIdRef.current, []);
 
@@ -86,16 +95,19 @@ export function useMessages() {
     const id = nextId();
     setMessages(prev => {
       panelRef.current.totalMessages++;
-      return [...prev, { id, role: 'thinking' as const, content: '', createdAt: Date.now(), streaming: true, roundId: roundRef.current }];
+      // 先清理所有旧思考气泡的流式标记，确保新气泡独立（防止残留 streaming 被下一轮命中）
+      const cleaned = prev.map(m => (m.role === 'thinking' ? { ...m, streaming: false } : m));
+      return [...cleaned, { id, role: 'thinking' as const, content: '', createdAt: Date.now(), streaming: true, roundId: roundRef.current }];
     });
   }, [nextId]);
 
   /** 思考模式：追加一段思考文本到当前思考气泡 */
   const appendThinkingDelta = useCallback((text: string) => {
     setMessages(prev => {
+      // 只找属于当前轮次的流式思考气泡，避免把新一轮思考合并进上一轮残留气泡
       for (let i = prev.length - 1; i >= 0; i--) {
         const m = prev[i];
-        if (m.role === 'thinking' && m.streaming) {
+        if (m.role === 'thinking' && m.streaming && m.roundId === roundRef.current) {
           const updated = [...prev];
           updated[i] = { ...m, content: m.content + text };
           return updated;
@@ -211,7 +223,112 @@ export function useMessages() {
     setMessages([]);
     setStreamingAgentId(null);
     panelRef.current = { totalMessages: 0, userMessages: 0, agentMessages: 0, toolCallCount: 0 };
+    // 同时清空重放状态，防止残留旧会话原始列表导致误加载
+    rawRef.current = [];
+    replayStartRef.current = 0;
+    setReplayStart(0);
   }, []);
+
+  /** 工具消息是否并入前一个气泡（非独立气泡） */
+  const isToolRole = (role: string) => role === 'tool';
+
+  /** 计算组装起点：从 endIndex 向前收集 maxBubbles 个气泡，并归一化到气泡边界（非 tool 消息） */
+  const computeStart = useCallback((raw: ReplayMessage[], endIndex: number, maxBubbles: number): number => {
+    let bubbles = 0;
+    let i = endIndex;
+    while (i > 0 && bubbles < maxBubbles) {
+      i--;
+      if (!isToolRole(raw[i].role)) bubbles++;
+    }
+    // 起点落在 tool 消息上（需要并入前一个气泡）→ 继续向前到气泡边界
+    while (i > 0 && isToolRole(raw[i].role)) i--;
+    return i;
+  }, []);
+
+  /** 顺序组装 [start, end) 的原始消息为气泡列表（tool 并入前一个 agent/thinking 气泡） */
+  const buildBubbles = useCallback((raw: ReplayMessage[], start: number, end: number): DisplayMessage[] => {
+    const rebuilt: DisplayMessage[] = [];
+    for (let idx = start; idx < end; idx++) {
+      const m = raw[idx];
+      const id = nextId();
+
+      if (m.role === 'tool') {
+        const lastBubble = rebuilt[rebuilt.length - 1];
+        if (lastBubble && (lastBubble.role === 'agent' || lastBubble.role === 'thinking')) {
+          if (m.toolMeta) {
+            const history = lastBubble.toolHistory ? [...lastBubble.toolHistory] : [];
+            history.push({
+              paramsHtml: m.toolCallHtml || m.content || '',
+              toolName: m.toolMeta.toolName || '',
+              resultHtml: null,
+              fullOutput: null,
+            });
+            rebuilt[rebuilt.length - 1] = { ...lastBubble, toolHistory: history, toolHistoryIndex: history.length - 1 };
+          } else {
+            const history = lastBubble.toolHistory ? [...lastBubble.toolHistory] : [];
+            if (history.length > 0) {
+              const lastEntry = { ...history[history.length - 1] };
+              lastEntry.resultHtml = m.toolResultHtml || null;
+              lastEntry.fullOutput = m.fullOutput || null;
+              history[history.length - 1] = lastEntry;
+              rebuilt[rebuilt.length - 1] = { ...lastBubble, toolHistory: history };
+            }
+          }
+          continue;
+        }
+        // 无气泡可并入：作为独立 tool 气泡
+        rebuilt.push({ id, role: 'tool', content: m.content, createdAt: m.createdAt || Date.now(), toolMeta: m.toolMeta, roundId: 0 });
+        continue;
+      }
+
+      rebuilt.push({
+        id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.createdAt || Date.now(),
+        subagentName: m.subagentName,
+        toolMeta: m.toolMeta,
+        streaming: m.role === 'agent' ? false : undefined,
+        roundId: 0,
+      });
+    }
+    return rebuilt;
+  }, [nextId]);
+
+  /** 整体替换消息列表（加载/切换会话）：保留完整原始列表，只组装最近 INITIAL 条气泡 */
+  const replaceMessages = useCallback((msgs: ReplayMessage[]) => {
+    rawRef.current = msgs;
+    // 全量统计（不随窗口变化）
+    let total = 0, user = 0, agent = 0;
+    for (const m of msgs) {
+      total++;
+      if (m.role === 'user') user++;
+      else if (m.role === 'agent') agent++;
+    }
+    panelRef.current = { totalMessages: total, userMessages: user, agentMessages: agent, toolCallCount: 0 };
+    roundRef.current += 1;
+
+    const end = msgs.length;
+    const start = computeStart(msgs, end, INITIAL_BUBBLES);
+    replayStartRef.current = start;
+    setReplayStart(start);
+    setMessages(buildBubbles(msgs, start, end));
+    setStreamingAgentId(null);
+  }, [computeStart, buildBubbles]);
+
+  /** 向上翻阅：向前再组装一批气泡并插入列表头部 */
+  const loadEarlier = useCallback(() => {
+    const start = replayStartRef.current;
+    if (start <= 0) return;
+    const raw = rawRef.current;
+    const newStart = computeStart(raw, start, BATCH_BUBBLES);
+    if (newStart >= start) return;
+    const batch = buildBubbles(raw, newStart, start);
+    replayStartRef.current = newStart;
+    setReplayStart(newStart);
+    setMessages(prev => [...batch, ...prev]);
+  }, [computeStart, buildBubbles]);
+
 
   const removeLastAgent = useCallback((onlyIfStreaming?: boolean) => {
     setMessages(prev => {
@@ -236,8 +353,14 @@ export function useMessages() {
   return {
     messages, streamingAgentId, panelState: panelRef,
     appendMessage, appendToStreaming, addToolToAgent, updateToolResult,
-    setToolCallCount, navigateToolHistory, clearMessages, removeLastAgent, endStreaming,
+    setToolCallCount, navigateToolHistory, clearMessages, replaceMessages, loadEarlier,
+    /** 是否还有更早的消息可加载（replayStart > 0） */
+    hasEarlier: replayStart > 0,
+    removeLastAgent, endStreaming,
     startThinking, appendThinkingDelta, endThinking, beginNewRound,
   };
 }
+
+
+
 

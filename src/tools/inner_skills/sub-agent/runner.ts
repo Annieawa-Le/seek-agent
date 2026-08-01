@@ -14,6 +14,7 @@ import { streamText, tool, type ModelMessage } from 'ai';
 import { z } from 'zod';
 import { getModel } from '../../../model-provider';
 import { subAgentManager } from './manager';
+import { appendChatMessage } from '../../../modes/chat-thread';
 import type { SubAgentState, SubmissionPayload } from './types';
 
 // ── 子模型系统提示词（注入工具调用说明） ──
@@ -31,21 +32,52 @@ const SUB_AGENT_SYSTEM_SUFFIX = `
 - \`details\`: 详细的工作过程和结果
 - 调用 a_submission 后，您的工作结果将被发送回主模型`;
 
-/** 生成身份转换 + 可用工具描述 */
-function buildToolIdentityDesc(tools: string[]): string {
-  const toolList = tools.length > 0 ? tools.join('、') : '无';
-  return `你现在的身份已经转变成了一位助手，你现在可用的工具有：${toolList}。`;
+/** 生成身份转换 + 可用工具描述（工具名 + 一句话用途 + 相关技能使用说明） */
+async function buildToolIdentityDesc(tools: string[]): Promise<string> {
+  if (tools.length === 0) {
+    return '你现在的身份已经转变成了一位助手，你现在可用的工具有：无。';
+  }
+  const registry = await getGlobalTools();
+  const toolLines = tools.map((name) => {
+    const impl = registry[name];
+    const rawDesc = typeof impl?.description === 'string' ? impl.description.trim() : '';
+    const firstLine = rawDesc.split('\n')[0]?.trim() ?? '';
+    const desc = firstLine.length > 64 ? firstLine.slice(0, 61) + '…' : firstLine;
+    return desc ? `- ${name}：${desc}` : `- ${name}`;
+  });
+  const parts = [
+    '你现在的身份已经转变成了一位助手，你现在可用的工具及用途：',
+    ...toolLines,
+  ];
+  // 工具所属 skill 的 SYSTEM_INJECTION.md（去重注入，如 browser-control 的使用说明）
+  const mod = await getIndexModule();
+  const getSkillInjection = (mod as any)?.getSkillInjectionForTool;
+  const seen = new Set<string>();
+  const injections: string[] = [];
+  for (const name of tools) {
+    try {
+      const inj = getSkillInjection ? await getSkillInjection(name) : '';
+      if (inj && !seen.has(inj)) {
+        seen.add(inj);
+        injections.push(inj);
+      }
+    } catch { /* 单个注入失败跳过 */ }
+  }
+  if (injections.length > 0) {
+    parts.push('', '## 相关技能使用说明', injections.join('\n\n'));
+  }
+  return parts.join('\n');
 }
 
 // ── 公共工具函数 ──
 
 /** 组装子模型可用的工具列表（含 a_submission 终端工具） */
-function buildChildTools(
+async function buildChildTools(
   assignedToolNames: string[],
   onSubmission: (payload: SubmissionPayload) => void,
-): Record<string, any> {
+): Promise<Record<string, any>> {
   const childTools: Record<string, any> = {};
-  const registry = getGlobalTools();
+  const registry = await getGlobalTools();
 
   // a_submission —— 终端工具，调用即提交结果
   childTools['a_submission'] = tool({
@@ -59,7 +91,6 @@ function buildChildTools(
       return `[已提交] ${summary}`;
     },
   });
-
   // 加载被分配的工具 —— 直接从全局注册表获取
   for (const toolName of assignedToolNames) {
     if (toolName === 'a_submission') continue;
@@ -72,16 +103,30 @@ function buildChildTools(
   return childTools;
 }
 
-// ── 全局工具注册表（懒惰获取，避免循环依赖） ──
-function getGlobalTools(): Record<string, any> {
-  // 动态引入主系统的工具容器
+// ── 全局工具注册表（懒惰获取 + 缓存，避免循环依赖；ESM 下用动态 import） ──
+let indexModuleCache: any = null;
+async function getIndexModule(): Promise<any> {
+  if (indexModuleCache) return indexModuleCache;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { tools } = require('../../index') as { tools: Record<string, any> };
-    return tools;
+    indexModuleCache = await import('../../index');
+    return indexModuleCache;
   } catch {
     return {};
   }
+}
+
+async function getGlobalTools(): Promise<Record<string, any>> {
+  const mod = await getIndexModule();
+  return (mod as any).tools ?? {};
+}
+
+// 剥离 execute 的工具定义（供 streamText，避免 AI SDK 内部自动执行工具导致双重执行）
+let stripToolExecutesCache: ((t: Record<string, any>) => Record<string, any>) | null = null;
+async function getStripToolExecutes(): Promise<(t: Record<string, any>) => Record<string, any>> {
+  if (stripToolExecutesCache) return stripToolExecutesCache;
+  const mod = await import('../../index');
+  stripToolExecutesCache = (mod as any).stripToolExecutes;
+  return stripToolExecutesCache!;
 }
 
 // ── 执行引擎 ──
@@ -109,7 +154,7 @@ export async function executeChildAgent(
     // ── 构建子模型消息列表 ──
     const childMessages: ModelMessage[] = [];
 
-    const toolDesc = buildToolIdentityDesc(agent.tools ?? []);
+    const toolDesc = await buildToolIdentityDesc(agent.tools ?? []);
 
     if (agent.mode === 'clone') {
       // clone：继承主模型完整上下文 + 身份注入 + 任务
@@ -137,10 +182,13 @@ export async function executeChildAgent(
     // ── 捕获提交 ──
     let submission: SubmissionPayload | null = null;
 
-    const childTools = buildChildTools(agent.tools ?? [], (payload) => {
+    const childTools = await buildChildTools(agent.tools ?? [], (payload) => {
       submission = payload;
+      // 子模型提交写入协作聊天 thread（peer 角色）
+      appendChatMessage(agent.name, 'subagent', 'peer', `【提交】概要: ${payload.summary}\n详情: ${payload.details}`);
     });
-
+    // 供 streamText 的只读 schema 版本（剥离 execute，避免 AI SDK 内部自动执行工具）
+    const modelChildTools = (await getStripToolExecutes())(childTools);
     // ── LLM 循环 ──
     let loopCount = 0;
     const MAX_LOOPS = 20; // 防止无限循环
@@ -152,7 +200,7 @@ export async function executeChildAgent(
         model: getModel(),
         system: childSystemPrompt,
         messages: childMessages,
-        tools: childTools,
+        tools: modelChildTools, // 剥离 execute，避免 AI SDK 内部自动执行工具导致双重执行
       });
 
       // 收集文本
@@ -364,7 +412,7 @@ export async function queryChildAgent(
   mainSystemPrompt: string,
   question: string,
 ): Promise<string> {
-  const toolDesc = buildToolIdentityDesc(agent.tools ?? []);
+  const toolDesc = await buildToolIdentityDesc(agent.tools ?? []);
 
   // 构建上下文
   const childMessages: ModelMessage[] = [];
@@ -398,4 +446,22 @@ export async function queryChildAgent(
     return `查询出错: ${err.message}`;
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

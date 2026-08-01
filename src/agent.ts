@@ -1,6 +1,8 @@
 import { getMcpManager } from './mcp';
 import { streamText, type TextPart, type ToolCallPart, type ModelMessage, NoOutputGeneratedError } from 'ai';
-import { tools } from './tools';
+import { tools, stripToolExecutes } from './tools';
+import { checkToolGate, getActiveModes, getActiveModeNames } from './modes/registry';
+import { drainPendingInjections, hasPendingInjections, subAgentManager, setSubmissionListener } from './tools/inner_skills/sub-agent/manager';
 import { TerminalUI } from './ui';
 import { TokenizerService } from './tokenizer-service';
 import * as fs from 'node:fs';
@@ -16,20 +18,21 @@ import {
   getToolCollapse,
 } from './assets/tool-translations';
 import { toolCache } from './tools/tool-cache';
-import { drainPendingInjections, subAgentManager } from './tools/inner_skills/sub-agent/manager';
 import { summarizeSessionTitle, fallbackTitle, sanitizeTitle } from './tools/session-title';
 import { extractBulk } from './tools/tool-output';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// ═════════════════════════════════════════════════════
+/** 内部触发标记：子模型提交后空闲时触发新一轮（不显示为 user 消息） */
+const INTERNAL_SUBMISSION_TRIGGER = '__internal_submission__';
+
 // 类型定义
 // ═════════════════════════════════════════════════════
 
 /**
  * MessageHook: 在消息传递给 AI 模型之前，可以通过这个 hook 修改消息内容。
  */
-export type MessageHook = (messages: ModelMessage[]) => ModelMessage[];
+export type MessageHook = (messages: ModelMessage[]) => ModelMessage[] | Promise<ModelMessage[]>;
 
 /**
  * PostRoundHook: 在每轮 AI 完整处理（含工具调用）结束后调用。
@@ -88,10 +91,14 @@ export class CLIAAgent {
     this.sessionId = this.generateSessionId();
     this.ui = ui;
     this.modelName = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-    this.systemPrompt = systemPrompt ?? this.loadDefaultPrompts();
+    this.systemPrompt = this.withModePrompts(systemPrompt ?? this.loadDefaultPrompts());
     setSystemPrompt(this.systemPrompt);
     this.tokenizer = new TokenizerService();
     this.tokenizer.start().catch(() => {});
+
+    // 子模型提交监听：入队后注入 tool 消息对（空闲时触发新一轮）
+    setSubmissionListener(() => { this.onSubAgentSubmission().catch(() => {}); });
+
 
     // 注册进程退出时的 MCP 清理
     const cleanup = () => {
@@ -104,8 +111,14 @@ export class CLIAAgent {
    * 重新加载 system prompt（切换工作目录后调用，刷新 SEEK.md）
    */
   reloadPrompt(): void {
-    this.systemPrompt = this.loadDefaultPrompts(this.smartSearchEnabled);
+    this.systemPrompt = this.withModePrompts(this.loadDefaultPrompts(this.smartSearchEnabled));
     setSystemPrompt(this.systemPrompt);
+  }
+
+  /** 拼接激活模式的 promptAddon（多模式按激活顺序追加） */
+  private withModePrompts(base: string): string {
+    const parts = getActiveModes().map((m) => m.promptAddon).filter(Boolean) as string[];
+    return parts.length > 0 ? `${base}\n\n${parts.join('\n\n')}` : base;
   }
 
   /** 启用/禁用智能搜索模式 */
@@ -186,9 +199,15 @@ export class CLIAAgent {
     const promptsDir = path.join(__dirname, 'prompts');
     const parts: string[] = [];
 
-    const mainPath = path.join(promptsDir, 'MAIN.md');
-    if (fs.existsSync(mainPath)) {
-      parts.push(fs.readFileSync(mainPath, 'utf-8'));
+    // 主提示词：角色模式（manager/worker 等）用 mainReplacement 替换 MAIN.md，其余模式用默认 MAIN.md
+    const mainReplacement = getActiveModes().map((m) => m.mainReplacement).find(Boolean);
+    if (mainReplacement) {
+      parts.push(mainReplacement);
+    } else {
+      const mainPath = path.join(promptsDir, 'MAIN.md');
+      if (fs.existsSync(mainPath)) {
+        parts.push(fs.readFileSync(mainPath, 'utf-8'));
+      }
     }
 
     const platform = process.platform;
@@ -325,6 +344,12 @@ export class CLIAAgent {
 
       // ── 触发 instructor（主模型每轮工作完成后） ──
       await this.triggerInstructorAfterRound();
+
+      // ── 兜底：若本轮收尾期间有子模型提交入队（onSubAgentSubmission 因
+      // processingPromise 非空未触发 run），继续下一轮让主模型看到 ──
+      if (hasPendingInjections() && !this.aborted && !this.ui.isAborted) {
+        this.inputQueue.push(INTERNAL_SUBMISSION_TRIGGER);
+      }
     }
   }
 
@@ -357,21 +382,17 @@ export class CLIAAgent {
       }
     }
 
-    // ── 阶段1：登记用户输入 ──
+    // ── 阶段1：登记用户输入（内部触发标记不添加 user 气泡，仅驱动新一轮） ──
     for (const input of userInputs) {
+      if (input === INTERNAL_SUBMISSION_TRIGGER) continue;
       this.ui.addUserMessage(input);
       this.messages.push({ role: 'user', content: input });
     }
     this.ui.addBlankLine();
 
-    // ── 排空子模型待注入的提交（在主模型空闲时积累的） ──
+    // ── 排空子模型待注入的提交（以 tool 消息对注入，不插入 user 气泡） ──
     try {
-      const pending = drainPendingInjections();
-      for (const p of pending) {
-        this.ui.addSubAgentMessage(p.name, p.submission);
-        this.messages.push({ role: 'user', content: p.submission });
-      }
-      if (pending.length > 0) this.ui.addBlankLine();
+      this.injectSubmissionsToMessages();
     } catch {
       // 排空失败不影响主流程
     }
@@ -419,6 +440,11 @@ export class CLIAAgent {
     if (!this.aborted && !this.ui.isAborted) {
       this.autoSaveSession();
     }
+
+    // ── 若还有待注入的子模型提交，驱动新一轮让主模型看到（安全点统一注入） ──
+    if (hasPendingInjections() && !this.aborted && !this.ui.isAborted) {
+      this.inputQueue.push(INTERNAL_SUBMISSION_TRIGGER);
+    }
   }
 
   // ────────────────────────────────────────────────
@@ -437,15 +463,11 @@ export class CLIAAgent {
     let isFirstModelCall = true;
 
     while (!this.aborted && !this.ui.isAborted) {
-      // ── 排空子模型待注入的提交（安全网，确保 AI 总能及时看到） ──
-      const safeSubmissions = drainPendingInjections();
-      if (safeSubmissions.length > 0) {
-        for (const p of safeSubmissions) {
-          this.ui.addSubAgentMessage(p.name, p.submission);
-          this.messages.push({ role: 'user', content: p.submission });
-        }
-        this.ui.addBlankLine();
-      }
+      // ── 排空子模型待注入的提交（安全网，以 tool 消息对注入） ──
+      try {
+        this.injectSubmissionsToMessages();
+      } catch { /* 排空失败不影响 */ }
+
       // ── 消费 AI 处理期间积累的用户输入 ──
       if (this.inputQueue.length > 0) {
         const pendingInputs = this.drainInputQueue();
@@ -454,13 +476,12 @@ export class CLIAAgent {
           this.messages.push({ role: 'user', content: input });
         }
       }
-        this.ui.addBlankLine();
 
       // ── 应用 messageHook ──
       let messagesForModel = this.messages;
       if (this.messageHook) {
         try {
-          messagesForModel = this.messageHook(this.messages);
+          messagesForModel = await this.messageHook(this.messages);
           this.messages = messagesForModel;
         } catch (hookError: any) {
           this.ui.addToolMessage(`■ messageHook 执行出错: ${hookError.message}，使用原消息列表继续`);
@@ -470,7 +491,6 @@ export class CLIAAgent {
 
       // ── 更新上下文长度显示 ──
       this.updateContextDisplay(messagesForModel);
-
       // ── 调用 AI ──
       // 思考模式：仅第一次调用主动触发（注入思考参数与指令），中间轮次不提交思考
       const thinkingThisCall = isFirstModelCall && this.thinkingEnabled;
@@ -481,6 +501,8 @@ export class CLIAAgent {
       let thinkingDeltaBuf = '';
       let thinkingText = '';
       let inThinkingTag = false;
+      // 本轮是否走原生 reasoning 流（区分标签式思考：<thinking> 文本也走 text-delta）
+      let nativeReasoning = false;
 
       /** 将模型输出文本喂入正文/思考流，自动识别 <thinking> 标签 */
       const feedText = (text: string) => {
@@ -492,9 +514,12 @@ export class CLIAAgent {
         for (const ch of text) {
           thinkingDeltaBuf += ch;
           if (thinkingDeltaBuf.endsWith('<thinking>')) {
-            if (fullText) {
-              this.ui.appendToLastAgent(fullText);
-              fullText = '';
+            // 标签前的正文残留（未达 flush 阈值）先补进正文流，避免丢失；
+            // 注意 fullText 已在批量 flush 时同步展示过，不能整体再追加（会重复显示）
+            const pre = thinkingDeltaBuf.slice(0, -'<thinking>'.length);
+            if (pre) {
+              fullText += pre;
+              this.ui.appendToLastAgent(pre);
             }
             inThinkingTag = true;
             this.ui.startThinking();
@@ -531,7 +556,7 @@ export class CLIAAgent {
             ? `${this.systemPrompt}\n\n${CLIAAgent.buildSessionInstruction()}`
             : this.systemPrompt,
           messages: messagesForModel,
-          tools: tools,
+          tools: stripToolExecutes(tools), // 剥离 execute，避免 AI SDK 内部自动执行工具导致双重执行
           abortSignal: abortController.signal,
           experimental_context: { __messages: this.messages },
           // 思考模式：向模型透传思考相关参数（按 provider 生效）
@@ -544,20 +569,25 @@ export class CLIAAgent {
           // 原生思考流（如 deepseek-reasoner 类模型）：实时收集 reasoning 展示
           onChunk: ({ chunk }) => {
             if (chunk.type === 'reasoning-delta') {
+              nativeReasoning = true;
               thinkingText += chunk.text;
-              // 仅在思考模式开启时向 UI 展示思考流（文本始终收集进上下文）
-              if (thinkingThisCall) {
+              // 思考模式开启时展示思考流（无论第几次调用）。
+              // 工具循环中模型返回的 reasoning 同样渲染为独立思考气泡，
+              // 文本始终收集进上下文（assistantContent 的 reasoning part）。
+              if (this.thinkingEnabled) {
                 if (!this.ui.isThinkingActive()) this.ui.startThinking();
                 this.ui.feedThinking(chunk.text);
               }
             }
             if (chunk.type === 'text-delta') {
-              // 正文流开始：原生思考流必然已结束，复位思考区与标签状态
-              if (this.ui.isThinkingActive()) {
+              // 原生 reasoning 流必然先于正文流结束：正文 delta 到达即结束思考气泡，
+              // 否则气泡残留 streaming 会把下一轮的思考合并进上一轮。
+              // 标签式思考（<thinking> 文本）同样走 text-delta，但思考气泡由 feedText
+              // 的 </thinking> 分支负责结束，因此这里仅处理原生路径（nativeReasoning），
+              // 且不复位 thinkingDeltaBuf / inThinkingTag（会破坏跨 chunk 标签匹配）。
+              if (nativeReasoning && this.ui.isThinkingActive()) {
                 this.ui.endThinking();
               }
-              inThinkingTag = false;
-              thinkingDeltaBuf = '';
             }
           },
         });
@@ -577,14 +607,27 @@ export class CLIAAgent {
           feedText(chunk);
         }
         this.ui.stopThinkingSpinner();
-
-        // 思考流收尾：<thinking> 标签未闭合时强制复位，避免后续文本被吞并
-        if (inThinkingTag) {
-          inThinkingTag = false;
-          if (this.ui.isThinkingActive()) {
-            this.ui.endThinking();
+        // ── 思考流收尾：flush 残留缓冲 ──
+        // feedText 以 '<thinking>'.length 为阈值批量 flush，textStream 结束后
+        // 缓冲里可能残留不足一个阈值的正文（短回复 / 末块尾巴），必须在此收口，
+        // 否则短正文会整体丢失、长正文结尾被截断。
+        if (thinkingDeltaBuf) {
+          if (inThinkingTag) {
+            // <thinking> 未闭合：残留内容属于思考流
+            thinkingText += thinkingDeltaBuf;
+            this.ui.feedThinking(thinkingDeltaBuf);
+          } else {
+            // 正常正文残留：补进正文流（UI + 上下文）
+            fullText += thinkingDeltaBuf;
+            this.ui.appendToLastAgent(thinkingDeltaBuf);
           }
+          thinkingDeltaBuf = '';
         }
+        inThinkingTag = false;
+        if (this.ui.isThinkingActive()) {
+          this.ui.endThinking();
+        }
+
 
         // 被中断，丢弃不完整回复
         if (this.aborted || this.ui.isAborted) {
@@ -763,6 +806,23 @@ export class CLIAAgent {
         }
       }
 
+      // ── 模式工具门（白名单/黑名单拦截） ──
+      const gate = checkToolGate(toolName);
+      if (!gate.allowed) {
+        const errMsg = gate.reason ?? `⛔ 当前模式禁止调用工具 ${toolName}`;
+        this.ui.addToolMessage(errMsg);
+        this.messages.push({
+          role: 'tool',
+          content: [{
+            type: 'tool-result',
+            toolCallId: toolCall.toolCallId,
+            toolName: toolCall.toolName,
+            output: { type: 'text', value: errMsg },
+          }],
+        });
+        continue;
+      }
+
 
       // ── 执行 ──
       let execResult: unknown;
@@ -770,6 +830,7 @@ export class CLIAAgent {
         execResult = await toolImpl.execute(args as any, {
           toolCallId: toolCall.toolCallId,
           messages: this.messages,
+          ui: this.ui,
         });
       } catch (execError: any) {
         execResult = `执行错误: ${execError.message}`;
@@ -832,16 +893,10 @@ export class CLIAAgent {
       return false;
     }
 
-    // ── 排空子模型待注入的提交（仅在正常退出时，避免被 rollback 误删） ──
-    const pendingSubmissions = drainPendingInjections();
-    if (pendingSubmissions.length > 0) {
-      this.ui.addBlankLine();
-      for (const p of pendingSubmissions) {
-        this.ui.addSubAgentMessage(p.name, p.submission);
-        this.messages.push({ role: 'user', content: p.submission });
-      }
-      this.ui.addBlankLine();
-    }
+    // ── 排空子模型待注入的提交（仅在正常退出时，避免被 rollback 误删；以 tool 消息对注入） ──
+    try {
+      this.injectSubmissionsToMessages();
+    } catch { /* 排空失败不影响 */ }
 
     return false;
   }
@@ -873,6 +928,45 @@ export class CLIAAgent {
     while (i >= newLen) {
       this.messages.pop();
       i--;
+    }
+  }
+
+  // ────────────────────────────────────────────────
+  // 子模型提交注入（以工具调用形式，不插入 user 气泡）
+  // ────────────────────────────────────────────────
+
+  /**
+   * 排空子模型待注入的提交，构造 assistant tool-call + tool tool-result 消息对
+   * 插入主对话，并在 UI 中以工具调用/结果块显示（替代原 addSubAgentMessage 的 user 气泡）。
+   * @returns 注入的提交数
+   */
+  private injectSubmissionsToMessages(): number {
+    const pending = drainPendingInjections();
+    if (pending.length === 0) return 0;
+    for (const p of pending) {
+      const args = { name: p.name, summary: p.payload.summary, details: p.payload.details };
+      // UI：工具调用 + 结果块（保持视觉一致）
+      this.ui.addToolMessage(friendlyToolCallLabel('subagent_submission', args), { toolName: 'subagent_submission', args });
+      const resultText = `【${p.name} 提交工作结果】\n概要: ${p.payload.summary}\n详情: ${p.payload.details}`;
+      this.ui.addToolMessage(friendlyToolResultLabel('subagent_submission', args, resultText), void 0, resultText);
+      // messages：以 user 消息注入（不能构造 tool-call/tool-result 对——
+      // 上游 Console Go 校验 tool_call_id 必须为自己生成，伪造 id 会被 400 拒绝）
+      this.messages.push({ role: 'user', content: resultText });
+    }
+    return pending.length;
+  }
+
+  /**
+  /**
+   * 子模型提交监听（subAgentManager 入队后调用）。
+   * 只负责在空闲时触发新一轮处理；消息对由安全点统一注入
+   * （processRound 开头 / aiInteractionLoop 顶部 / executeToolCalls 末尾），
+   * 避免插入时机落在工具结果落盘之前导致 tool-result 与 assistant tool-call 乱序
+   * （上游会以 400 invalid_request_error 拒绝）。
+   */
+  async onSubAgentSubmission(): Promise<void> {
+    if (!this.processingPromise) {
+      await this.run(INTERNAL_SUBMISSION_TRIGGER);
     }
   }
 
@@ -1074,6 +1168,7 @@ export class CLIAAgent {
       sessionId: this.sessionId,
       title: this.sessionTitle,
       cwd: process.cwd(),
+      mode: getActiveModeNames(), // 模式随会话持久化（切回时恢复）
       agentMessages: messages,
     };
 
@@ -1117,7 +1212,8 @@ export class CLIAAgent {
         m.role === 'user' &&
         typeof m.content === 'string' &&
         !m.content.startsWith('[工作记忆]') &&
-        !m.content.startsWith('【'),
+        !m.content.startsWith('【') &&
+        !m.content.startsWith('[知识库检索]'),
     ).length;
   }
 
@@ -1142,6 +1238,62 @@ export class CLIAAgent {
     this.sessionId = id;
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

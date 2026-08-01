@@ -4,6 +4,8 @@ import { isElectron } from '@/hooks/useElectronAPI.ts';
 interface Attachment {
   name: string;
   path: string;
+  /** 来源类型：拖拽时区分文件/文件夹，仅影响 chip 图标 */
+  type?: 'file' | 'folder';
 }
 
 interface Props {
@@ -125,6 +127,7 @@ export function InputBar({
     const newAttachments: Attachment[] = result.files.map(f => ({
       name: f.replace(/^.*[/\\]/, ''),
       path: f,
+      type: 'file',
     }));
     setAttachments(prev => {
       const existingPaths = new Set(prev.map(a => a.path));
@@ -136,6 +139,64 @@ export function InputBar({
   // 移除附件
   const removeAttachment = useCallback((path: string) => {
     setAttachments(prev => prev.filter(a => a.path !== path));
+  }, []);
+
+  // ── 拖拽附件（从右侧文件树或系统文件管理器拖入）──
+  const [dragOver, setDragOver] = useState(false);
+  const dragDepthRef = useRef(0);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    // 阻止默认行为，允许放置
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleDragEnter = useCallback(() => {
+    dragDepthRef.current += 1;
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    dragDepthRef.current -= 1;
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0;
+      setDragOver(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setDragOver(false);
+
+    const items: Attachment[] = [];
+    // 应用内拖拽（右侧文件树）：自定义 MIME 携带 { path, name, type }
+    const custom = e.dataTransfer.getData('application/x-seek-attach');
+    if (custom) {
+      try {
+        const parsed = JSON.parse(custom);
+        if (parsed?.path) {
+          items.push({
+            name: parsed.name || parsed.path.replace(/^.*[/\\]/, ''),
+            path: parsed.path,
+            type: parsed.type === 'folder' ? 'folder' : 'file',
+          });
+        }
+      } catch { /* 非 JSON 忽略 */ }
+    }
+    // 外部拖入（系统文件管理器）：Electron 为 File 挂载 path，文件夹同样适用
+    if (items.length === 0) {
+      for (const f of Array.from(e.dataTransfer.files || [])) {
+        const p = (f as File & { path?: string }).path;
+        if (p) items.push({ name: f.name, path: p, type: 'file' });
+      }
+    }
+    if (items.length === 0) return;
+    setAttachments(prev => {
+      const existingPaths = new Set(prev.map(a => a.path));
+      const unique = items.filter(a => !existingPaths.has(a.path));
+      return [...prev, ...unique];
+    });
   }, []);
 
   const handleSend = useCallback(() => {
@@ -176,7 +237,13 @@ export function InputBar({
   return (
     <div className="input-bar">
       <div className="input-bar-body">
-        <div className="input-wrapper">
+        <div
+          className={`input-wrapper${dragOver ? ' drag-over' : ''}`}
+          onDragOver={handleDragOver}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
           <div className="input-toolbar">
             <div className="capsule-group">
               <button
@@ -260,9 +327,13 @@ export function InputBar({
             <div className="attachment-bar">
               {attachments.map(a => (
                 <span key={a.path} className="attachment-chip">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="attachment-chip-icon">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-                  </svg>
+                  {a.type === 'folder' ? (
+                    <span className="attachment-chip-icon attachment-chip-folder">📁</span>
+                  ) : (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="attachment-chip-icon">
+                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                    </svg>
+                  )}
                   <span className="attachment-chip-name" title={a.path}>{a.name}</span>
                   <button
                     className="attachment-chip-remove"
@@ -332,6 +403,14 @@ export function InputBar({
     </div>
   );
 }
+
+
+
+
+
+
+
+
 
 
 

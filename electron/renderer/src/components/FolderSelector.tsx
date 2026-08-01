@@ -45,7 +45,8 @@ export function FolderSelector() {
     setMenuStyle({
       position: 'fixed',
       top: `${rect.bottom + 4}px`,
-      left: `${rect.left}px`,
+      // 菜单右边缘与按钮右边缘对齐，避免从标题栏右侧弹出时超出窗口
+      right: `${window.innerWidth - rect.right}px`,
       zIndex: 99999,
     });
   }, [open]);
@@ -80,7 +81,7 @@ export function FolderSelector() {
         className="ctx-folder"
         onClick={() => setOpen(v => !v)}
       >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', marginRight: 3 }}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
         </svg>
         {folderName}
@@ -142,4 +143,7 @@ export function FolderSelector() {
     </span>
   );
 }
+
+
+
 

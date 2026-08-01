@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { getWorkspaceRoot, setCwd } from '../../workdir';
 import { friendlyToolCallLabel, friendlyToolResultLabel } from '../../assets/tool-translations';
+import { setActiveModes } from '../../modes/registry';
 
 /** 会话保存目录 */
 function getSessionDir(): string {
@@ -46,7 +47,8 @@ export function reconstructUIMessages(data: any): UIMessage[] {
             .filter((p: any) => p?.type === 'text')
             .map((p: any) => p.text)
             .join('\n');
-      if (text) {
+      // 排除系统注入的 [工作记忆] 与【子模型提交】（每轮重新注入/实时展示，加载时不重复展示）
+      if (text && !text.startsWith('[工作记忆]') && !text.startsWith('【')) {
         uiMessages.push({ role: 'user', content: text });
       }
     } else if (msg.role === 'assistant') {
@@ -72,8 +74,14 @@ export function reconstructUIMessages(data: any): UIMessage[] {
             content: friendlyToolCallLabel(p.toolName, args),
             toolMeta: { toolName: p.toolName, args },
           });
+        } else if (p?.type === 'reasoning' && p.text) {
+          // 思考过程：先收尾文本，再输出 thinking 气泡，保持与实时会话一致的顺序
+          if (textBuffer.length > 0) {
+            uiMessages.push({ role: 'agent', content: textBuffer.join('\n') });
+            textBuffer = [];
+          }
+          uiMessages.push({ role: 'thinking', content: p.text });
         }
-        // reasoning part 不参与 UI 展示，跳过
       }
       if (textBuffer.length > 0) {
         uiMessages.push({ role: 'agent', content: textBuffer.join('\n') });
@@ -89,7 +97,7 @@ export function reconstructUIMessages(data: any): UIMessage[] {
         const label = meta
           ? friendlyToolResultLabel(meta.toolName, meta.args, outText)
           : outText;
-        uiMessages.push({ role: 'tool', content: label });
+        uiMessages.push({ role: 'tool', content: label, fullOutput: outText });
       }
     }
     // system 消息跳过：agent 启动时已重新注入
@@ -195,20 +203,34 @@ export const LoadSessionCommand: Command = {
       }
     }
 
-    // ── 重建 UI 显示 ──
+    // ── 重建 UI 显示（WebUI 下 replaceMessages 整体替换，无需恢复提示气泡） ──
     const uiMessages = reconstructUIMessages(data);
     ctx.ui.replaceMessages(uiMessages);
 
     ctx.ui.addUserMessage(input);
-    const restoredCount = data.agentMessages.length;
-    ctx.ui.addAgentMessage(
-      `✅ 已恢复会话「${path.basename(filePath, '.json')}」` +
-      `（${restoredCount} 条消息）\n   \`${path.relative(getWorkspaceRoot(), filePath)}\``
-    );
     // ── 恢复会话标题（后续自动保存沿用原标题命名） ──
     if (data.title) {
       ctx.agent.setSessionTitle(data.title);
     }
+
+    // ── 恢复模式（模式随会话持久化） ──
+    if (Array.isArray(data.mode) && data.mode.length > 0) {
+      setActiveModes(data.mode);
+      ctx.agent.reloadPrompt();
+    }
+
   },
 };
+
+
+
+
+
+
+
+
+
+
+
+
 

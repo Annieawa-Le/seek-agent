@@ -13,13 +13,17 @@ import type { UIMessage } from './ui';
 // ═════════════════════════════════════════════════════
 
 export interface BridgeMessage {
-  role: 'user' | 'agent' | 'system' | 'tool' | 'divider' | 'banner' | 'blank' | 'subagent';
+  role: 'user' | 'agent' | 'system' | 'tool' | 'divider' | 'banner' | 'blank' | 'subagent' | 'thinking';
   content: string;
   createdAt?: number;
   subagentName?: string;
   collapsed?: boolean;
   toolMeta?: { toolName: string; args: Record<string, unknown> };
   doNotRender?: boolean;
+  /** 工具调用参数 HTML（重建会话时透传） */
+  toolCallHtml?: string;
+  /** 工具结果 HTML（重建会话时透传） */
+  toolResultHtml?: string;
   /** 工具结果的完整原始输出（未截断的原始内容） */
   fullOutput?: string;
   /** 结构化功能数据（工具结果，供多端消费） */
@@ -30,6 +34,7 @@ export interface BridgeMessage {
 // stdio JSON 协议类型
 // ═════════════════════════════════════════════════════
 
+/** 子进程 → 主进程 */
 /** 子进程 → 主进程 */
 export type ChildToParent =
   | { type: 'message'; role: BridgeMessage['role']; content: string; subagentName?: string; toolMeta?: BridgeMessage['toolMeta']; toolCallHtml?: string; toolResultHtml?: string; fullOutput?: string; rawBulk?: Record<string, unknown> }
@@ -43,6 +48,7 @@ export type ChildToParent =
   | { type: 'append'; content: string }
   | { type: 'remove-last-agent' }
   | { type: 'collapse-tools'; entries: Array<{ msgIndex: number; toolName: string; args: Record<string, unknown> }> }
+  | { type: 'replace-messages'; messages: BridgeMessage[] }
   | { type: 'clear-messages' }
   | { type: 'divider' }
   | { type: 'blank' }
@@ -50,6 +56,8 @@ export type ChildToParent =
   | { type: 'subagent'; name: string; content: string }
   | { type: 'kb-build'; phase: 'building' | 'done' | 'failed'; message: string }
   | { type: 'sidebar-data'; data: Record<string, unknown> }
+  | { type: 'collab-request'; requestId: string; kind: 'sessions' | 'send'; to?: string; content?: string }
+  | { type: 'identity-card'; card: Record<string, unknown>; error?: string }
   | { type: 'exit' };
 
 /** 主进程 → 子进程 */
@@ -57,7 +65,9 @@ export type ParentToChild =
   | { type: 'input'; content: string; id: string }
   | { type: 'command'; cmd: string; id: string }
   | { type: 'exit' }
-  | { type: 'abort' };
+  | { type: 'abort' }
+  | { type: 'collab-result'; requestId: string; ok: boolean; data?: any; error?: string }
+  | { type: 'collab-message'; from: string; content: string };
 
 // ═════════════════════════════════════════════════════
 // ElectronUIBridge
@@ -83,6 +93,11 @@ export class ElectronUIBridge {
   onSubmit: ((input: string) => void) | null = null;
   onExit: (() => void) | null = null;
   onCommand: ((cmd: string) => void) | null = null;
+  /** 收到其他会话的协作消息（主进程转发） */
+  onCollabMessage: ((from: string, content: string) => void) | null = null;
+
+  /** 跨会话协作请求等待表：requestId → resolve */
+  private collabWaiters = new Map<string, (res: any) => void>();
 
   constructor() {
     // 使用 stdout 发送 JSON 消息（每行一个 JSON）
@@ -146,6 +161,38 @@ export class ElectronUIBridge {
   /** 发送侧边栏运行时数据（hooks/子agent/MCP 状态） */
   sendSidebarData(data: Record<string, unknown>): void {
     this.send({ type: 'sidebar-data', data });
+  }
+
+  // ─── 跨会话协作 ───
+
+  /**
+   * 向主进程发起跨会话协作请求（sessions=列出会话身份卡 / send=发送协作消息）。
+   * 工具在 agent 进程中调用，等待主进程通过 collab-result 返回。
+   */
+  requestCollab(kind: 'sessions' | 'send', payload: { to?: string; content?: string } = {}): Promise<any> {
+    const requestId = `collab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise((resolve) => {
+      this.collabWaiters.set(requestId, resolve);
+      this.send({ type: 'collab-request', requestId, kind, ...payload } as any);
+      // 超时保护：主进程未响应时避免工具永久挂起
+      setTimeout(() => {
+        if (this.collabWaiters.delete(requestId)) {
+          resolve({ ok: false, error: '协作请求超时（主进程未响应）' });
+        }
+      }, 30000);
+    });
+  }
+
+  /** 在目标会话中展示一条来自其他会话的协作消息（system 气泡，来源清晰） */
+  addCollabMessage(from: string, content: string): void {
+    const text = `📨 协作消息（来自 ${from}）：\n${content}`;
+    this.messages.push({ role: 'system', content: text, createdAt: Date.now() });
+    this.send({ type: 'message', role: 'system', content: text });
+  }
+
+  /** 把生成的会话身份卡发送给主进程（由主进程写入附属文件） */
+  sendIdentityCard(card: Record<string, unknown>, error?: string): void {
+    this.send({ type: 'identity-card', card, error });
   }
 
   addSystemMessage(content: string): void {
@@ -228,15 +275,14 @@ export class ElectronUIBridge {
       subagentName: m.subagentName,
       collapsed: m.collapsed,
       toolMeta: m.toolMeta,
+      doNotRender: m.doNotRender,
+      toolCallHtml: m.toolCallHtml,
+      toolResultHtml: m.toolResultHtml,
+      fullOutput: m.fullOutput,
+      rawBulk: m.rawBulk as Record<string, unknown> | undefined,
     }));
-    // 通知渲染进程清空并逐个重建
-    this.send({ type: 'clear-messages' });
-    for (const msg of this.messages) {
-      this.send({ type: 'message', role: msg.role, content: msg.content });
-      if (msg.role === 'subagent') {
-        this.send({ type: 'subagent', name: msg.subagentName || '', content: msg.content });
-      }
-    }
+    // 一次性发送完整重建列表，渲染进程据此整体替换（保留 toolMeta/fullOutput/thinking 等字段）
+    this.send({ type: 'replace-messages', messages: this.messages });
   }
 
   // ═══════════════════════════════════════════════════
@@ -354,6 +400,20 @@ export class ElectronUIBridge {
           this.onExit();
         }
         break;
+      case 'collab-result':
+        {
+          const waiter = this.collabWaiters.get(msg.requestId);
+          if (waiter) {
+            this.collabWaiters.delete(msg.requestId);
+            waiter({ ok: msg.ok, data: msg.data, error: msg.error });
+          }
+        }
+        break;
+      case 'collab-message':
+        if (this.onCollabMessage) {
+          this.onCollabMessage(msg.from, msg.content);
+        }
+        break;
     }
   }
 
@@ -375,4 +435,10 @@ function formatToolCallHtml(toolName: string, args: Record<string, unknown>): st
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+
+
+
+
+
 

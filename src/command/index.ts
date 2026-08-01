@@ -19,6 +19,7 @@ import { WorkdirGlobalCommand } from './commands/workdir-global.command';
 import { createHelpCommand } from './commands/help.command';
 import { SaveSessionCommand } from './commands/savesession.command';
 import { LoadSessionCommand } from './commands/loadsession.command';
+import { ModeCommand } from './commands/mode.command';
 
 /**
  * 创建并注册所有内置指令。
@@ -36,10 +37,13 @@ export function createCommandRegistry(): CommandRegistry {
     // help 依赖 registry，放在最后注册
     .register(createHelpCommand(registry))
     .register(SaveSessionCommand)
-    .register(LoadSessionCommand);
+    .register(LoadSessionCommand)
+    .register(ModeCommand);
 
   return registry;
 }
+
+
 
 
 

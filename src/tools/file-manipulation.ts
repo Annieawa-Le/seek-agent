@@ -163,7 +163,7 @@ export const addPatch = tool({
   description: '在文件中插入内容。以 diff 为核心载体。支持 lineIndex 行号模式或 pretext/endtext 上下文匹配模式。',
   inputSchema: z.object({
     filePath: z.string().describe('文件的绝对路径或相对当前工作目录的路径'),
-    lineIndex: z.number().int().describe('插入的行号（-1 表示追加到末尾，行号从 1 开始）'),
+    lineIndex: z.number().int().describe('在第 N 行之后插入（0=文件开头，N=第 N 行后，-1=末尾追加；行号从 1 开始）'),
     Lines: z.array(z.string()).describe('要插入的内容行列表'),
     pretext: z.array(z.string()).optional().describe('上下文前导行列表。匹配后在其后插入 Lines，与 lineIndex 锚定配合使用'),
     endtext: z.array(z.string()).optional().describe('上下文后续行列表。匹配后在其前插入 Lines，与 lineIndex 锚定配合使用'),
@@ -176,7 +176,7 @@ export const addPatch = tool({
     const resolvedPath = resolvePath(filePath);
     const { lines: fileLines, hasTrailingNewline, lineEnding } = await readFileLines(resolvedPath);
 
-    let insertIndex = lineIndex === -1 ? fileLines.length : lineIndex - 1;
+    let insertIndex = lineIndex === -1 ? fileLines.length : lineIndex;
     let locateMsg = '';
 
     // 上下文定位模式
@@ -192,18 +192,21 @@ export const addPatch = tool({
         }
         locateMsg = locateResult.message;
       } else {
-        locateMsg = locateResult.message + '，使用原始行号';
+        return new ToolOutput({ type: 'patch', action: 'add', description: '', error: '上下文匹配失败：' + locateResult.message },
+          '❌ 错误：上下文匹配失败：' + locateResult.message + '。请修正 pretext/endtext 后重试，或改用 lineIndex 行号模式。');
       }
     } else {
-      if (lineIndex !== -1 && (lineIndex < 1 || lineIndex > fileLines.length + 1)) {
+      if (lineIndex !== -1 && (lineIndex < 0 || lineIndex > fileLines.length)) {
         return new ToolOutput({ type: 'patch', action: 'add', description: '', error: `行号 ${lineIndex} 超出范围` },
-          `❌ 错误：行号 ${lineIndex} 超出范围`);
+          `❌ 错误：行号 ${lineIndex} 超出范围（允许 0=开头，1-${fileLines.length}=第 N 行后，-1=末尾追加）`);
       }
     }
 
     let newLines = [...fileLines.slice(0, insertIndex), ...Lines, ...fileLines.slice(insertIndex)];
-    const descLines = lineIndex === -1 ? '末尾' : '第 ' + lineIndex + ' 行';
-    const description = '在 ' + (locateMsg || descLines) + ' 前插入 ' + Lines.length + ' 行';
+    const descLines = lineIndex === -1 ? '文件末尾' : lineIndex === 0 ? '文件开头' : `第 ${lineIndex} 行后`;
+    const description = locateMsg
+      ? `在${locateMsg}处插入 ${Lines.length} 行`
+      : `在${descLines}插入 ${Lines.length} 行`;
 
     if (!force) {
       const newContent = newLines.join(lineEnding) + (hasTrailingNewline ? lineEnding : '');
@@ -251,8 +254,8 @@ export const delPatch = tool({
 
     // 上下文匹配模式：删除 pretext 和 endtext 之间的内容
     if ((pretext && pretext.length > 0) || (endtext && endtext.length > 0)) {
-      const anchorMiddle = Math.ceil(fileLines.length / 2);
-      const locateResult = contextLocate(fileLines, pretext, endtext, anchorMiddle, anchorMiddle, 20);
+      // 无可靠行号锚点：全局搜索，不依赖文件中间窗口
+      const locateResult = contextLocate(fileLines, pretext, endtext, 1, fileLines.length, 0);
       if (!locateResult.matched) {
         return new ToolOutput({ type: 'patch', action: 'del', description: '', error: '上下文匹配失败：' + locateResult.message },
           '❌ 错误：上下文匹配失败：' + locateResult.message);
@@ -377,7 +380,8 @@ export const modifyPatch = tool({
             '❌ 错误：pretext 和 endtext 之间没有内容可替换');
         }
       } else {
-        locateMessage = locateResult.message + '，使用原始行号';
+        return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: '上下文匹配失败：' + locateResult.message },
+          '❌ 错误：上下文匹配失败：' + locateResult.message + '。请修正 pretext/endtext 后重试，或改用 startLine/endLine 行号模式。');
       }
     }
 
@@ -495,9 +499,10 @@ export async function applyPatchesToFile(
       switch (patch.type) {
         case 'add': {
           const { lineIndex, Lines } = patch.params as { lineIndex: number; Lines: string[] };
-          const idx = lineIndex === -1 ? currentLines.length : lineIndex - 1;
+          const idx = lineIndex === -1 ? currentLines.length : lineIndex;
           currentLines = [...currentLines.slice(0, idx), ...Lines, ...currentLines.slice(idx)];
-          results.push(`  [ADD] 在第 ${lineIndex} 行前插入 ${Lines.length} 行`);
+          const addDesc = lineIndex === -1 ? '文件末尾' : lineIndex === 0 ? '文件开头' : `第 ${lineIndex} 行后`;
+          results.push(`  [ADD] 在${addDesc}插入 ${Lines.length} 行`);
           break;
         }
         case 'del': {
@@ -535,6 +540,18 @@ export async function applyPatchesToFile(
 
 // ── 导出 UndoStack 以供外部使用 ──
 export { UndoStack } from './patch-undo.js';
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

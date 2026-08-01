@@ -139,9 +139,9 @@ def('replace_file', 'file', '■', (args) => {
 def('add_patch', 'patch', '■', (args) => {
   const fp = (args?.filePath ?? '(?)') as string;
   const line = args?.lineIndex ?? '?';
-  return `暂存插入: ${fp} (行 ${line})`;
+  const pos = line === -1 ? '末尾' : line === 0 ? '开头' : `第 ${line} 行后`;
+  return `暂存插入: ${fp} (${pos})`;
 }, 'after-round');
-
 def('del_patch', 'patch', '■', (args) => {
   const fp = (args?.filePath ?? '(?)') as string;
   const range = JSON.stringify(args?.lineIndex ?? '?');
@@ -328,6 +328,10 @@ export function registerSkillTranslations(
     registerTool(name, trans);
   }
 }
+
+
+
+
 
 
 

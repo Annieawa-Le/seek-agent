@@ -56,12 +56,12 @@
 
 **双重定位策略：**
 
-- **行号定位**：提供 `lineIndex`/`startLine`/`endLine` 按行号精确操作
+- **行号定位**：提供 `lineIndex`/`startLine`/`endLine` 按行号精确操作（`add_patch` 的 `lineIndex=N` 表示在第 N 行**之后**插入）
 - **上下文定位**：可选 `pretext`/`endtext` 参数，在锚定行附近匹配上下文行，精准定位插入/删除/替换位置（匹配失败时回退到原始行号）
 
 | 工具 | 用途 |
 |------|------|
-| `add_patch` | 在指定位置插入内容（`lineIndex=-1` 追加到末尾；支持 `pretext`/`endtext` 上下文匹配） |
+| `add_patch` | 在第 N 行**之后**插入内容（`lineIndex=0` 表示文件开头，`lineIndex=-1` 追加到末尾；支持 `pretext`（其后插入）/`endtext`（其前插入）上下文匹配） |
 | `del_patch` | 删除指定行范围（支持行号范围 `[[start,end],...]` 或 `pretext`/`endtext` 上下文匹配 |
 |                 |                                                              |
 | `undo_patch` | 撤销最近一次文件修改操作（跨会话） |
@@ -237,6 +237,7 @@ spawn_agent(
 每当完成一组文件修改后，执行编译检查，
 
 如果环境不允许，告知用户。
+
 
 
 

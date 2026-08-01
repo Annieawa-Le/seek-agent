@@ -1,5 +1,5 @@
+import type { AgentMessage, AgentStatus, CollabLogEntry, CollabSession, FileTreeNode, GitChange, IdentityCard, SessionInfo } from '@/types/index.ts';
 import { useEffect, useRef, useCallback, useMemo } from 'react';
-import type { AgentMessage, AgentStatus, FileTreeNode, GitChange, SessionInfo } from '@/types/index.ts';
 
 export function isElectron(): boolean {
   return !!window.electronAPI;
@@ -110,6 +110,45 @@ export function useElectronAPI() {
     return api.listSessions();
   }, [api]);
 
+  const generateIdentityCard = useCallback(async (sessionId?: string) => {
+    if (!api) return { error: 'API 不可用' };
+    return api.generateIdentityCard(sessionId);
+  }, [api]);
+
+  const onIdentityCard = useCallback((cb: (data: { sessionId: string; card?: IdentityCard; error?: string }) => void) => {
+    if (!api) return () => {};
+    const unsub = api.onIdentityCard(cb);
+    listenersRef.current.push(unsub);
+    return unsub;
+  }, [api]);
+
+  const onCollabEvent = useCallback((cb: (data: { type: string }) => void) => {
+    if (!api) return () => {};
+    const unsub = api.onCollabEvent(cb);
+    listenersRef.current.push(unsub);
+    return unsub;
+  }, [api]);
+
+  const onSessionError = useCallback((cb: (data: { sessionId: string; error: string }) => void) => {
+    if (!api) return () => {};
+    const unsub = api.onSessionError(cb);
+    listenersRef.current.push(unsub);
+    return unsub;
+  }, [api]);
+
+
+  const getCollabSessions = useCallback(async () => {
+    if (!api) return [];
+    return api.getCollabSessions();
+  }, [api]);
+
+  const getCollabLog = useCallback(async () => {
+    if (!api) return [];
+    return api.getCollabLog();
+  }, [api]);
+
+
+
   // ─── 多会话控制 ───
 
   const switchSession = useCallback(async (sessionId: string, name?: string) => {
@@ -194,6 +233,12 @@ export function useElectronAPI() {
     readFileTree,
     readGitStatus,
     listSessions,
+    generateIdentityCard,
+    onIdentityCard,
+    onCollabEvent,
+    onSessionError,
+    getCollabSessions,
+    getCollabLog,
     getSkillsList,
     switchSession,
     newSession,
@@ -209,6 +254,19 @@ export function useElectronAPI() {
     onMaximizedChange,
   }), [api]);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

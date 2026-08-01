@@ -18,9 +18,10 @@ import {
   memoryRemember, memoryRecall, memoryClear, memoryStats,
 } from './memory';
 import { searchAllFile, searchSubFile, searchDirectory, searchContent } from './search-files';
-import { createFile, addPatch, delPatch, replaceFile, undoPatch, historyPatch } from './file-manipulation';
+import { createFile, addPatch, delPatch, modifyPatch, replaceFile, undoPatch, historyPatch } from './file-manipulation';
 import { createTodo, finishStep, undoStep, rerollStep, delStep, readTodo, delTodo, activeTodo } from './todo';
 import { toolCache } from './tool-cache';
+import { collabSessionsTool, collabSendTool } from './collab';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,6 +68,7 @@ const coreTools = {
   replace_file: wrapTool('replace_file', replaceFile),
   add_patch: wrapTool('add_patch', addPatch),
   del_patch: wrapTool('del_patch', delPatch),
+  modify_patch: wrapTool('modify_patch', modifyPatch),
   undo_patch: wrapTool('undo_patch', undoPatch),
   history_patch: wrapTool('history_patch', historyPatch),
   // 参考桌面管理
@@ -96,6 +98,9 @@ const coreTools = {
   memory_clear: wrapTool('memory_clear', memoryClear),
   memory_stats: wrapTool('memory_stats', memoryStats),
   memory_shorten: wrapTool('memory_shorten', memoryShorten),
+  // 跨会话协作
+  collab_sessions: wrapTool('collab_sessions', collabSessionsTool),
+  collab_send: wrapTool('collab_send', collabSendTool),
 };
 
 // ── 技能→工具映射（用于卸载） ──
@@ -390,6 +395,28 @@ export async function loadSingleSkill(skillName: string): Promise<boolean> {
 // ── MCP 相关导出 ──
 export { getMcpManager, shutdownMCP, reloadMCP } from '../mcp';
 
+// ── 工具归属 skill 反查（供子模型注入技能使用说明） ──
+
+/** 返回当前 工具名→所属 skill 名 的映射副本（核心工具不在其中） */
+export function getSkillToolMap(): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(skillToolMap).map(([skill, names]) => [skill, [...names]]),
+  );
+}
+
+/** 反查某个工具所属 skill，读取其 SYSTEM_INJECTION.md（无则返回空串）。每次读盘，避免 reload 后缓存过期 */
+export async function getSkillInjectionForTool(toolName: string): Promise<string> {
+  for (const [skill, names] of Object.entries(skillToolMap)) {
+    if (!names.includes(toolName)) continue;
+    const injPath = path.join(__dirname, 'inner_skills', skill, 'SYSTEM_INJECTION.md');
+    try {
+      return (await readFile(injPath, 'utf-8')).trim();
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
 
 
 
@@ -406,4 +433,34 @@ export { getMcpManager, shutdownMCP, reloadMCP } from '../mcp';
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * 剥离工具定义的 execute 字段，生成仅供模型看 schema 的只读工具集。
+ *
+ * AI SDK v6 的 streamText 在传入带 execute 的工具时会内部自动执行工具（agent loop），
+ * 而本系统工具统一由 agent 层 executeToolCalls / 子模型循环手动执行——
+ * 不剥离会导致同一工具被 SDK 与 agent 层各执行一次（双重执行）。
+ */
+export function stripToolExecutes(toolSet: Record<string, any>): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [name, t] of Object.entries(toolSet)) {
+    if (t && typeof t === 'object' && 'execute' in t) {
+      const { execute: _exec, ...schema } = t;
+      result[name] = schema;
+    } else {
+      result[name] = t;
+    }
+  }
+  return result;
+}
 

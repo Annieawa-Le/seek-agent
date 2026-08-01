@@ -36,7 +36,7 @@ function recentUserInputs(messages: ModelMessage[], max = 6): string {
     if (m.role !== 'user' || typeof m.content !== 'string') continue;
     const text = m.content.trim();
     if (!text) continue;
-    if (text.startsWith('[工作记忆]') || text.startsWith('【')) continue;
+    if (text.startsWith('[工作记忆]') || text.startsWith('【') || text.startsWith('[知识库检索]')) continue;
     inputs.push(text);
   }
   return inputs.join('\n');
@@ -72,13 +72,19 @@ export function sanitizeTitle(title: string): string {
   return cleaned.slice(0, 40) || '未命名会话';
 }
 
-/** 首轮 fallback 标题：取首条用户输入前 20 字 */
+/** 首轮 fallback 标题：取首条真实用户输入前 20 字（排除系统注入的 [工作记忆] 与子模型提交） */
 export function fallbackTitle(messages: ModelMessage[]): string {
-  const first = messages.find((m) => m.role === 'user' && typeof m.content === 'string');
+  const first = messages.find((m) =>
+    m.role === 'user' && typeof m.content === 'string'
+    && !m.content.startsWith('[工作记忆]') && !m.content.startsWith('【') && !m.content.startsWith('[知识库检索]'),
+  );
   if (first && typeof first.content === 'string') {
     return sanitizeTitle(first.content.slice(0, 20));
   }
   return '未命名会话';
 }
+
+
+
 
 

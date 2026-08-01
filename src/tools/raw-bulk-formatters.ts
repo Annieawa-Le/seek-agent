@@ -165,19 +165,19 @@ function formatReadTUI(bulk: ReadFileBulk): string {
 function formatSearchTUI(bulk: SearchBulk): string {
   if (bulk.error) return `● 读取文件失败: ${bulk.error}`;
   if (bulk.totalCount === 0) return `●  未找到匹配结果`;
-  const items = bulk.results.slice(0, 15).map(item => `  ${item.name}`).join('\n');
-  const more = bulk.truncated ? `\n${BLUE_GRAY}  ... 还有 ${bulk.totalCount - 15} 个结果\x1b[0m` : '';
+  const items = bulk.results.map(item => `  ${item.name}${item.isDir ? '/' : ''}`).join('\n');
+  const more = bulk.truncated ? `\n${BLUE_GRAY}  ... 还有 ${Math.max(0, bulk.totalCount - bulk.results.length)} 个结果\x1b[0m` : '';
   return `●  找到 ${PURPLE}${bulk.totalCount}\x1b[0m 条结果\n${items}${more}`;
 }
 
 function formatSearchContentTUI(bulk: SearchContentBulk): string {
   if (bulk.error) return `● 读取或搜索文件失败: ${bulk.error}`;
-  if (bulk.totalCount === 0) return `●  未在文件 ${bulk.filePath} 中找到匹配内容"${bulk.pattern}"`;
-  const display = bulk.matches.map(m => `  ${m.lineNum}: ${m.line}`);
-  if (display.length <= 12) return `● ${display.join('\n')}`;
+  if (bulk.totalCount === 0) return `●  未在 ${bulk.filePath} 中找到匹配内容"${bulk.pattern}"`;
+  const display = bulk.matches.map(m => m.filePath ? `  ${m.filePath}:${m.lineNum}: ${m.line}` : `  ${m.lineNum}: ${m.line}`);
+  if (display.length <= 12 && !bulk.truncated) return `● ${display.join('\n')}`;
   const head = display.slice(0, 8).join('\n');
-  const remaining = display.length - 8;
-  return `●  共 ${PURPLE}${bulk.totalCount}\x1b[0m 行匹配\n${head}\n${BLUE_GRAY}  ... 还有 ${remaining} 行 ...\x1b[0m`;
+  const tail = bulk.truncated ? `${BLUE_GRAY}  ... 结果已截断，共 ${bulk.totalCount} 行\x1b[0m` : `${BLUE_GRAY}  ... 还有 ${display.length - 8} 行 ...\x1b[0m`;
+  return `●  共 ${PURPLE}${bulk.totalCount}\x1b[0m 行匹配\n${head}\n${tail}`;
 }
 
 function formatExecTUI(bulk: ExecBulk): string {
@@ -272,9 +272,9 @@ function formatSearchWebUI(bulk: SearchBulk): Record<string, unknown> {
   if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
   if (bulk.totalCount === 0) return { html: '<div class="empty">未找到匹配结果</div>' };
   const items = bulk.results.slice(0, 30).map(r =>
-    `<div class="search-item"><span class="name">${esc(r.name)}</span><span class="path">${esc(r.path)}</span></div>`
+    `<div class="search-item"><span class="name">${esc(r.name)}${r.isDir ? '/' : ''}</span><span class="path">${esc(r.path)}</span></div>`
   ).join('');
-  const more = bulk.truncated ? `<div class="more">… 还有 ${bulk.totalCount - 30} 个结果</div>` : '';
+  const more = bulk.truncated ? `<div class="more">… 还有 ${Math.max(0, bulk.totalCount - bulk.results.length)} 个结果</div>` : '';
   return { html: `<div class="search-result"><div class="meta">找到 ${bulk.totalCount} 条结果</div>${items}${more}</div>` };
 }
 
@@ -285,10 +285,10 @@ function formatSearchContentWebUI(bulk: SearchContentBulk): Record<string, unkno
     return { html: `<div class="empty">未在 ${esc(bulk.filePath)} 中找到匹配内容</div>` };
   }
   const matches = bulk.matches.slice(0, 50).map(m =>
-    `<div class="match-line"><span class="line-num">${m.lineNum}</span><code>${esc(m.line)}</code></div>`
+    `<div class="match-line"><span class="line-num">${m.filePath ? esc(m.filePath) + ':' : ''}${m.lineNum}</span><code>${esc(m.line)}</code></div>`
   ).join('');
-  const more = bulk.totalCount > 50 ? `<div class="more">… 还有 ${bulk.totalCount - 50} 行匹配</div>` : '';
-  return { html: `<div class="search-content-result">${esc(bulk.filePath)}（共 ${bulk.totalCount} 处匹配）${matches}${more}</div>` };
+  const more = bulk.truncated ? `<div class="more">… 结果已截断，共 ${bulk.totalCount} 行</div>` : '';
+  return { html: `<div class="search-content-result">${esc(bulk.filePath)}（${bulk.truncated ? '已截断，共 ' + bulk.totalCount + ' 处' : '共 ' + bulk.totalCount + ' 处匹配'}）${matches}${more}</div>` };
 }
 
 // ── ExecBulk ──
@@ -387,6 +387,8 @@ function formatMemoryWebUI(bulk: MemoryBulk): Record<string, unknown> {
   }
   return { html: `<div class="memory-result"><span class="label">${label}</span><span class="meta">${bulk.itemCount != null ? `${bulk.itemCount} 条` : ''}</span>${body}</div>` };
 }
+
+
 
 
 

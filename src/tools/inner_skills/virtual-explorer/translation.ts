@@ -168,7 +168,8 @@ const translations: Record<string, {
     callLabel: (args) => {
       const fp = (args?.filePath ?? '(?)') as string;
       const line = args?.lineIndex ?? '?';
-      return `暂存插入: ${fp} (行 ${line})`;
+      const pos = line === -1 ? '末尾' : line === 0 ? '开头' : `第 ${line} 行后`;
+      return `暂存插入: ${fp} (${pos})`;
     },
     collapse: 'after-round',
   },
@@ -204,3 +205,8 @@ const translations: Record<string, {
   },
 };
 export default translations;
+
+
+
+
+

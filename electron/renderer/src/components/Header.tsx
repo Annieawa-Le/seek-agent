@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
 import type { AgentStatusState } from '@/hooks/useAgentStatus.ts';
+import { FolderSelector } from './FolderSelector.tsx';
 
 interface Props {
   status: AgentStatusState;
@@ -47,6 +48,7 @@ export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSideba
       </div>
 
       <div className="header-right">
+        <FolderSelector />
         <span className="header-ctx" title="上下文长度">{ctxText}</span>
 
         <button className="theme-toggle" onClick={onToggleTheme}
@@ -95,4 +97,6 @@ export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSideba
     </header>
   );
 }
+
+
 

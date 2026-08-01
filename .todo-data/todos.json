@@ -42,5 +42,55 @@
       }
     ],
     "createdAt": "2026-06-17T16:01:27.122Z"
+  },
+  {
+    "name": "模式系统实现",
+    "steps": [
+      {
+        "content": "P0 摸底：读 agent.ts / tools/index.ts / command 系统，确认挂载点",
+        "completed": true
+      },
+      {
+        "content": "P0 实现 src/modes/types.ts + registry.ts（模式注册表）",
+        "completed": true
+      },
+      {
+        "content": "P0 messageHook 异步化（agent.ts + message_managing.ts + 入口）",
+        "completed": true
+      },
+      {
+        "content": "P0 工具执行层模式白名单门",
+        "completed": true
+      },
+      {
+        "content": "P0 新增 /mode 指令（TUI + Electron 命令通道）",
+        "completed": true
+      },
+      {
+        "content": "P0 编译验证 + 自测",
+        "completed": true
+      },
+      {
+        "content": "P1 知识库模式：kb prompt + 强制检索 hook + 索引守卫",
+        "completed": true
+      },
+      {
+        "content": "P2 Manager 模式：子 agent 编排 + 面板",
+        "completed": true
+      },
+      {
+        "content": "P2.5 打工人模式：collab 任务识别 + 回传地址注入",
+        "completed": true
+      },
+      {
+        "content": "UI ModePicker 组件（renderer 消息区空态启动页）",
+        "completed": true
+      },
+      {
+        "content": "整体编译 + 联调验证",
+        "completed": true
+      }
+    ],
+    "createdAt": "2026-08-01T09:10:14.047Z"
   }
 ]

@@ -138,9 +138,8 @@ export const explorerReplaceFile = tool({
 
 // ═════════════════════════════════════════════════════
 // explorer-add-patch
-// ═════════════════════════════════════════════════════
 export const explorerAddPatch = tool({
-  description: '相对于 virtual-explorer 当前目录暂存插入操作。filePath 相对 explorer 当前目录。',
+  description: '相对于 virtual-explorer 当前目录暂存插入操作。filePath 相对 explorer 当前目录。lineIndex 在第 N 行之后插入（0=文件开头，-1=末尾追加）。',
   inputSchema: z.object({ filePath: z.string(), lineIndex: z.number().int(), Lines: z.array(z.string()) }),
   execute: async ({ filePath, lineIndex, Lines }) => {
     return callExecute(addPatch, { filePath: resolveExplorerPath(filePath), lineIndex, Lines });
@@ -180,3 +179,5 @@ export const explorerExecuteCommand = tool({
     return callExecute(executeCommandTool, { command: `cd /d "${explorerPath}" && ${command}` });
   },
 });
+
+

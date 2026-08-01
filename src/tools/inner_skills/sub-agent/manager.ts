@@ -9,22 +9,31 @@ import type { SubAgentState, SubAgentMode, SubAgentStatus, SubmissionPayload } f
 // ── 子 agent 注入队列 ──
 const pendingInjections: Array<{ name: string; payload: SubmissionPayload }> = [];
 
-/** 向主模型的 messages 数组注入一条子 agent 提交（模拟用户中断） */
+/** 提交监听器：入队后通知 agent 排空（CLIAAgent 注册，用于空闲时触发新一轮） */
+let submissionListener: (() => void) | null = null;
+export function setSubmissionListener(fn: (() => void) | null): void {
+  submissionListener = fn;
+}
+
+/** 向主模型的 messages 数组注入一条子 agent 提交（入队 + 通知监听器） */
 export function queueSubmissionInjection(
   name: string,
   payload: SubmissionPayload,
 ): void {
   pendingInjections.push({ name, payload });
+  submissionListener?.();
 }
 
-/** 消费所有待注入的提交（返回注入内容列表） */
-export function drainPendingInjections(): Array<{ name: string; submission: string }> {
-  const result = pendingInjections.map(p => ({
-    name: p.name,
-    submission: `【${p.name} 提交工作结果】\n概要: ${p.payload.summary}\n详情: ${p.payload.details}`,
-  }));
+/** 消费所有待注入的提交（返回结构化列表，由调用方注入消息对） */
+export function drainPendingInjections(): Array<{ name: string; payload: SubmissionPayload }> {
+  const result = pendingInjections.map(p => ({ name: p.name, payload: p.payload }));
   pendingInjections.length = 0;
   return result;
+}
+
+/** 是否有待注入的子模型提交（供 agent 轮末兜底触发新一轮） */
+export function hasPendingInjections(): boolean {
+  return pendingInjections.length > 0;
 }
 
 // ── SubAgentManager ──
@@ -167,4 +176,6 @@ class SubAgentManager {
 
 /** 全局单例 */
 export const subAgentManager = new SubAgentManager();
+
+
 

@@ -45,8 +45,12 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
   const [loadingInstruction, setLoadingInstruction] = useState<string | null>(null);
 
   const loadSessions = useCallback(async () => {
-    const data = await api.listSessions();
-    if (Array.isArray(data)) setSessions(data);
+    try {
+      const data = await api.listSessions();
+      if (Array.isArray(data)) setSessions(data);
+    } catch {
+      // 主进程 handler 可能暂不可用，保留旧列表，等待下一次定时刷新自愈
+    }
   }, [api]);
 
   const loadStatic = useCallback(async () => {
@@ -58,14 +62,40 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
     const data = await api.listActiveSessions();
     if (Array.isArray(data)) setActiveSessionIds(data.map(d => d.sessionId));
   }, [api]);
+  /** 正在生成身份卡的会话集合 */
+  const [cardGenerating, setCardGenerating] = useState<Set<string>>(new Set());
+
+  const handleGenerateCard = useCallback(async (sessionName: string) => {
+    setCardGenerating(prev => new Set(prev).add(sessionName));
+    try {
+      const res = await api.generateIdentityCard(sessionName);
+      if (res?.error) console.warn('[identity-card]', res.error);
+      // 身份卡写入后刷新列表（preview 会更新为 focus）
+      await loadSessions();
+    } finally {
+      setCardGenerating(prev => {
+        const next = new Set(prev);
+        next.delete(sessionName);
+        return next;
+      });
+    }
+  }, [api, loadSessions]);
 
   useEffect(() => {
     loadSessions();
     loadStatic();
     loadActive();
-    const t = setInterval(loadActive, 5000);
-    return () => clearInterval(t);
+    // 定时刷新：运行中会话每 5s，历史会话每 10s（主进程有签名缓存，开销小；失败可自愈、新会话自动出现）
+    const t = setInterval(() => { loadActive(); loadSessions(); }, 10000);
+    const tActive = setInterval(loadActive, 5000);
+    return () => { clearInterval(t); clearInterval(tActive); };
   }, [loadSessions, loadStatic, loadActive]);
+
+  // 工作区切换后立即刷新会话列表（不等 10s 轮询，且列表目录已随工作区切换）
+  useEffect(() => {
+    const unsub = api.onWorkdirChanged(() => { loadSessions(); loadActive(); });
+    return () => unsub();
+  }, [api, loadSessions, loadActive]);
 
   // 监听消息流：更新各会话的运行状态（后台会话也在继续跑）
   useEffect(() => {
@@ -180,13 +210,29 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
             const timeStr = s.timestamp ? new Date(s.timestamp).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
             const isActive = currentSessionId === s.name;
             const isRunning = runningSessions.has(s.name) || (activeSessionIds.includes(s.name) && isActive);
+            // 身份卡按钮仅对已拉起 agent 进程的会话可用（历史会话需先打开）
+            const canGenerate = isActive || activeSessionIds.includes(s.name);
+            const generating = cardGenerating.has(s.name);
             return (
               <div key={s.name} className={`session-item${isActive ? ' active' : ''}`} onClick={() => handleSwitchSession(s)} title={`切换到会话 ${s.name}`}>
                 <div className="session-name">
                   {s.name}
                   {isRunning && <span className="session-dot" title="该会话正在运行">●</span>}
                 </div>
-                <div className="session-meta">{s.messageCount} msgs{timeStr ? ` · ${timeStr}` : ''}</div>
+                <div className="session-meta-row">
+                  <div className="session-meta">{s.messageCount} msgs{timeStr ? ` · ${timeStr}` : ''}</div>
+                  <button
+                    className={`card-btn${generating ? ' generating' : ''}${canGenerate ? '' : ' disabled'}`}
+                    title={canGenerate ? '用轻量模型生成/更新身份卡' : '需先打开该会话才能生成身份卡'}
+                    disabled={!canGenerate || generating}
+                    onClick={(e) => { e.stopPropagation(); handleGenerateCard(s.name); }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><path d="M6 15h4"/>
+                    </svg>
+                    {generating && <span className="card-btn-spinner" />}
+                  </button>
+                </div>
                 {s.preview && <div className="session-preview">{s.preview.slice(0, 60)}</div>}
               </div>
             );
@@ -261,4 +307,18 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
     </aside>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

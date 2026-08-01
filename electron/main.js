@@ -242,9 +242,212 @@ function handleAgentMessage(msg, sessionId) {
     }
     return;
   }
+
+  // ── 跨会话协作请求：由主进程路由，不直接转发渲染层 ──
+  if (msg.type === 'collab-request') {
+    handleCollabRequest(msg, sessionId);
+    return;
+  }
+  // ── 会话身份卡：agent 总结完成后上报，主进程写入附属目录 ──
+  if (msg.type === 'identity-card') {
+    handleIdentityCard(msg, sessionId);
+    return;
+  }
+  // ── 回复自动回传：目标会话产生的 agent 回复送回发起方 ──
+  if (msg.type === 'message' && msg.role === 'agent' && collabReplyWaiters.has(sessionId)) {
+    const from = collabReplyWaiters.get(sessionId);
+    collabReplyWaiters.delete(sessionId);
+    logCollab(sessionId, from, msg.content, 'reply');
+    sendToAgent(from, { type: 'collab-message', from: sessionTitle(sessionId), content: msg.content });
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     // 转发时附加 sessionId，渲染层据此区分会话
     mainWindow.webContents.send('agent:message', { ...msg, sessionId });
+  }
+}
+
+// ═════════════════════════════════════════════════════
+// 跨会话协作（collab）：身份卡 / 转发 / 回复回传
+// ═════════════════════════════════════════════════════
+
+/** 协作日志（最近 200 条，供 UI 展示通信记录） */
+const collabLog = [];
+function logCollab(from, to, content, direction) {
+  collabLog.push({ from, to, content, direction, ts: Date.now() });
+  if (collabLog.length > 200) collabLog.shift();
+  // 通知渲染层刷新协作动态（collab Tab）
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('collab:event', { type: 'log' });
+  }
+}
+
+/** 等待目标回复的映射：目标 sessionId → 发起方 sessionId */
+const collabReplyWaiters = new Map();
+
+/** 会话显示名：优先文件名中的标题，去掉 session- 前缀与 .json 后缀 */
+function sessionTitle(sessionId) {
+  return String(sessionId).replace(/^session-/, '').replace(/\.json$/, '');
+}
+
+/** 读取 sessions/*.json 的历史会话身份卡列表（按 mtime 倒序） */
+function listHistoryCards() {
+  const sessionsDir = join(currentWorkDir, 'sessions');
+  const cards = [];
+  try {
+    for (const file of readdirSync(sessionsDir, { withFileTypes: true })) {
+      if (!file.name.endsWith('.json')) continue;
+      const fullPath = join(sessionsDir, file.name);
+      try {
+        const data = JSON.parse(readFileSync(fullPath, 'utf8'));
+        const msgCount = data.agentMessages ? data.agentMessages.length : 0;
+        const lastMsg = msgCount > 0 ? data.agentMessages[msgCount - 1] : null;
+        let previewText = '';
+        if (lastMsg && lastMsg.content) {
+          if (typeof lastMsg.content === 'string') {
+            previewText = lastMsg.content;
+          } else if (Array.isArray(lastMsg.content)) {
+            previewText = lastMsg.content.map(p => (p && p.type === 'text' ? p.text : '')).filter(Boolean).join(' ');
+          }
+        }
+        const st = statSync(fullPath);
+        // 优先读附属身份卡（sessions/identity/ 同名文件）
+        const identity = readIdentityCardFor(file.name);
+        cards.push({
+          sessionId: file.name.replace('.json', ''),
+          name: data.title || file.name.replace('.json', ''),
+          messageCount: msgCount,
+          preview: (identity?.focus) || previewText.replace(/<[^>]+>/g, '').slice(0, 80).replace(/\n/g, ' '),
+          mtime: st.mtime.toISOString().slice(0, 16).replace('T', ' '),
+          active: false,
+          identity: identity || null,
+        });
+      } catch { /* 单个文件损坏跳过 */ }
+    }
+  } catch { /* sessions 目录不存在 */ }
+  cards.sort((a, b) => String(b.mtime || '').localeCompare(String(a.mtime || '')));
+  return cards;
+}
+
+/** 列出所有会话身份卡（活跃 + 历史，活跃在前） */
+function listSessionCards() {
+  const active = Array.from(agentProcs.keys()).map(sid => {
+    const card = { sessionId: sid, name: sessionTitle(sid), active: true };
+    const identity = agentIdentityMap.get(sid);
+    if (identity) {
+      Object.assign(card, {
+        messageCount: identity.messageCount,
+        preview: identity.focus || identity.summary || '',
+        identity,
+      });
+    }
+    const hist = findHistoryCard(sid);
+    if (hist && !card.identity) Object.assign(card, { messageCount: hist.messageCount, mtime: hist.mtime, preview: hist.preview, identity: hist.identity });
+    return card;
+  });
+  const history = listHistoryCards().filter(h => !agentProcs.has(h.sessionId));
+  return [...active, ...history];
+}
+/** 按 sessionId 或标题模糊查找历史会话身份卡 */
+function findHistoryCard(target) {
+  const t = String(target || '').toLowerCase();
+  if (!t) return null;
+  return listHistoryCards().find(c =>
+    c.sessionId.toLowerCase() === t ||
+    c.name.toLowerCase() === t ||
+    c.name.toLowerCase().includes(t) ||
+    c.sessionId.toLowerCase().includes(t)
+  ) || null;
+}
+
+/** 处理 agent 进程发来的跨会话协作请求（collab-request） */
+function handleCollabRequest(msg, fromSessionId) {
+  const reply = (data, error) => {
+    sendToAgent(fromSessionId, { type: 'collab-result', requestId: msg.requestId, ok: !error, data, error });
+  };
+  if (msg.kind === 'sessions') {
+    reply({ sessions: listSessionCards() });
+    return;
+  }
+  if (msg.kind === 'send') {
+    const to = String(msg.to || '');
+    const content = String(msg.content || '');
+    if (!to || !content) {
+      reply(null, '缺少目标会话或消息内容');
+      return;
+    }
+    logCollab(fromSessionId, to, content, 'out');
+    const entry = agentProcs.get(to);
+    if (entry && entry.ready) {
+      // 目标活跃：直接送达，并登记回复回传
+      collabReplyWaiters.set(to, fromSessionId);
+      sendToAgent(to, { type: 'collab-message', from: sessionTitle(fromSessionId), content });
+      reply({ delivered: true, target: to });
+    } else {
+      // 目标未活跃：身份卡优先，不自动唤醒完整会话
+      const card = findHistoryCard(to);
+      if (card) {
+        reply({ delivered: false, target: to, identityCard: card });
+      } else {
+        reply(null, `未找到会话「${to}」`);
+      }
+    }
+    return;
+  }
+  reply(null, `未知的协作请求类型: ${msg.kind}`);
+}
+
+// ═════════════════════════════════════════════════════
+// 会话身份卡：附属目录 sessions/identity/ 读写
+// ═════════════════════════════════════════════════════
+
+/** 活跃会话身份卡内存索引：sessionId → card */
+const agentIdentityMap = new Map();
+
+/** 会话身份卡目录（子目录，避免被会话列表扫描误判为会话文件） */
+function identityDir() {
+  return join(currentWorkDir, 'sessions', 'identity');
+}
+
+/** 清洗会话名，用于身份卡文件名 */
+function sanitizeSessionName(name) {
+  return String(name || '未命名会话').replace(/[\\/:*?"<>|\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40) || '未命名会话';
+}
+
+/** 读取某会话文件对应的身份卡（sessions/identity/{同名}.json） */
+function readIdentityCardFor(sessionFileName) {
+  try {
+    const p = join(identityDir(), sessionFileName);
+    return JSON.parse(readFileSync(p, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** 处理 agent 上报的身份卡：写入附属目录并通知渲染层 */
+function handleIdentityCard(msg, sessionId) {
+  const card = msg.card || {};
+  if (msg.error) {
+    console.warn(`[main] identity-card failed for ${sessionId}:`, msg.error);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('agent:identity-card', { sessionId, error: msg.error });
+    }
+    return;
+  }
+  const title = sanitizeSessionName(card.name);
+  const sessionFileName = `session-${title}.json`;
+  const saved = {
+    ...card,
+    generatedAt: new Date().toISOString(),
+  };
+  try {
+    mkdirSync(identityDir(), { recursive: true });
+    writeFileSync(join(identityDir(), sessionFileName), JSON.stringify(saved, null, 2), 'utf8');
+    agentIdentityMap.set(sessionId, saved);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('agent:identity-card', { sessionId, card: saved });
+    }
+  } catch (e) {
+    console.warn('[main] write identity card failed:', e.message);
   }
 }
 
@@ -321,58 +524,67 @@ ipcMain.on('renderer:restart', () => {
 
 /**
  * 切换到指定会话。
- * - 会话进程已存在 → 直接切换路由，并让进程重放当前 UI 消息（session:activate）
- * - 进程不存在（首次打开已保存会话）→ 拉起新进程，init 后通过 /loadsession 恢复历史
- * 无论哪种情况，其他会话的 Agent 进程都不受影响，继续运行。
+ * - 会话进程已存在 → 立即切换路由，后台发 session:activate 重放 UI 消息
+ * - 进程不存在（首次打开已保存会话）→ 立即切换路由，后台拉起新进程，init 后通过 /loadsession 恢复历史
+ * 无论哪种情况，handler 不等待 Agent 就绪（避免阻塞渲染层），启动失败通过 agent:session-error 通知。
  */
 ipcMain.handle('session:switch', async (_e, sessionId, name) => {
   try {
     if (!sessionId) return { error: '缺少 sessionId' };
     const existed = agentProcs.has(sessionId);
-    let entry = agentProcs.get(sessionId);
-    if (!entry) {
-      spawnAgent(sessionId);
-      await waitForReady(sessionId);
-      if (agentProcs.has(sessionId) && agentProcs.get(sessionId).ready) {
-        if (name) {
-          sendToAgent(sessionId, { type: 'command', cmd: `/loadsession ${name}`, id: `load-${sessionId}` });
+    if (!existed) spawnAgent(sessionId);
+    currentSessionId = sessionId;
+    // 后台拉起：就绪后下发激活/加载命令，失败则通知渲染层
+    waitForReady(sessionId).then(() => {
+      const entry = agentProcs.get(sessionId);
+      if (entry?.ready) {
+        if (!existed) {
+          // 新拉起的进程：先静默同步当前工作区，再恢复会话
+          if (currentWorkDir !== ROOT) sendWorkdirToAgent(sessionId);
+          if (name) {
+            sendToAgent(sessionId, { type: 'command', cmd: `/loadsession ${name}`, id: `load-${sessionId}` });
+          } else {
+            sendToAgent(sessionId, { type: 'command', cmd: 'session:new', id: `new-${sessionId}` });
+          }
         } else {
-          sendToAgent(sessionId, { type: 'command', cmd: 'session:new', id: `new-${sessionId}` });
+          // 已有进程：重放显示（不打断其工作循环）
+          sendToAgent(sessionId, { type: 'command', cmd: 'session:activate', id: `activate-${sessionId}` });
         }
       } else {
-        return { error: 'Agent 进程启动失败或超时', sessionId };
+        notifySessionError(sessionId, 'Agent 进程启动失败或超时');
       }
-    } else {
-      // 已有进程：等就绪后重放显示（不打断其工作循环）
-      await waitForReady(sessionId);
-      if (agentProcs.get(sessionId)?.ready) {
-        sendToAgent(sessionId, { type: 'command', cmd: 'session:activate', id: `activate-${sessionId}` });
-      } else {
-        return { error: 'Agent 进程不可用', sessionId };
-      }
-    }
-    currentSessionId = sessionId;
+    });
     return { success: true, sessionId, name: name || null, created: !existed };
   } catch (err) {
     return { error: err.message };
   }
 });
 
-/** 新建会话：拉起全新 Agent 进程并切换过去 */
+/** 新建会话：立即切路由，Agent 进程在后台拉起（不阻塞渲染层） */
 ipcMain.handle('session:new', async () => {
   const sessionId = `new-${Date.now().toString(36)}`;
   spawnAgent(sessionId);
-  await waitForReady(sessionId);
-  if (agentProcs.get(sessionId)?.ready) {
-    sendToAgent(sessionId, { type: 'command', cmd: 'session:new', id: 'new-session' });
-  } else {
-    return { error: 'Agent 进程启动失败或超时' };
-  }
   currentSessionId = sessionId;
+  // 新进程初始即为空会话，无需下发 session:new（避免 clear-messages 清掉渲染层刚组装的初始气泡）
+  // 后台等待就绪，仅做失败兜底
+  waitForReady(sessionId).then(() => {
+    const entry = agentProcs.get(sessionId);
+    if (entry?.ready) {
+      // 新会话继承当前工作区（静默同步，不产生气泡）
+      if (currentWorkDir !== ROOT) sendWorkdirToAgent(sessionId);
+    } else {
+      notifySessionError(sessionId, 'Agent 进程启动失败或超时');
+    }
+  });
   return { success: true, sessionId };
 });
 
-/** 关闭会话：杀掉对应 Agent 进程（不影响其他会话） */
+/** 通知渲染层某会话的 Agent 后台拉起失败 */
+function notifySessionError(sessionId, error) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('agent:session-error', { sessionId, error });
+  }
+}
 ipcMain.handle('session:close', (_e, sessionId) => {
   const entry = agentProcs.get(sessionId);
   if (entry?.proc) {
@@ -396,6 +608,29 @@ ipcMain.handle('session:list', () => {
     ready: agentProcs.get(sid)?.ready ?? false,
   }));
 });
+
+/** 生成会话身份卡：通知目标 agent 用轻量模型总结当前对话 */
+ipcMain.handle('session:generateIdentityCard', async (_e, sessionId) => {
+  const sid = sessionId || currentSessionId;
+  const entry = agentProcs.get(sid);
+  if (!entry || !entry.ready) {
+    return { error: '会话 Agent 未就绪，无法生成身份卡' };
+  }
+  sendToAgent(sid, { type: 'command', cmd: 'identity-card:generate', id: `idcard-${sid}` });
+  return { success: true };
+});
+
+/** 跨会话协作：会话列表（活跃 + 历史，含身份卡，活跃在前） */
+ipcMain.handle('collab:sessions', () => listSessionCards());
+
+/** 跨会话协作：通信记录（最新在前，含展示名） */
+ipcMain.handle('collab:log', () => collabLog.slice().reverse().map(e => ({
+  ...e,
+  fromName: sessionTitle(e.from),
+  toName: sessionTitle(e.to),
+  time: new Date(e.ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+})));
+
 
 // ── 窗口控制 ──
 
@@ -425,6 +660,20 @@ ipcMain.handle('window:isMaximized', () => {
 
 // ── 工作区目录管理 ──
 
+/** 向指定会话的 agent 同步当前工作区（静默：只改状态，不产生气泡） */
+function sendWorkdirToAgent(sessionId) {
+  if (!sessionId || !currentWorkDir) return;
+  sendToAgent(sessionId, { type: 'command', cmd: `workdir-global silent ${currentWorkDir}`, id: `workdir-sync-${sessionId}` });
+}
+
+/** 向所有存活会话同步当前工作区（切换工作区后广播，保证已存在的会话也一致） */
+function syncWorkdirToAllAgents() {
+  for (const sessionId of agentProcs.keys()) {
+    sendWorkdirToAgent(sessionId);
+  }
+}
+
+
 ipcMain.handle('workdir:get', () => {
   return currentWorkDir;
 });
@@ -441,8 +690,12 @@ ipcMain.handle('workdir:set', async (_e, newDir) => {
     }
     currentWorkDir = resolved;
     addRecentDir(resolved);
+    // 会话列表/身份卡目录随工作区变化，重置签名缓存强制重新读取
+    __sessionsSig = '';
+    __sessionsCache = [];
 
-    sendToCurrent({ type: 'command', cmd: `workdir-global ${resolved}`, id: 'workdir-change' });
+    // 广播到所有存活会话（静默同步，不产生气泡；后续新建/拉起的会话由 session:new / session:switch 补发）
+    syncWorkdirToAllAgents();
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('workdir:changed', resolved);
@@ -507,12 +760,12 @@ function buildFileTree(dir, relativePath, depth) {
     const fullPath = join(dir, entry.name);
     const relPath = relativePath ? join(relativePath, entry.name) : entry.name;
     if (entry.isDirectory()) {
-      const node = { name: entry.name, path: relPath, type: 'folder' };
+      const node = { name: entry.name, path: relPath, absPath: fullPath, type: 'folder' };
       if (depth > 1) node.children = buildFileTree(fullPath, relPath, depth - 1);
       children.push(node);
     } else {
       const ext = entry.name.split('.').pop().toLowerCase();
-      children.push({ name: entry.name, path: relPath, type: 'file', ext });
+      children.push({ name: entry.name, path: relPath, absPath: fullPath, type: 'file', ext });
     }
   }
   return children.sort((a, b) => {
@@ -539,18 +792,39 @@ ipcMain.handle('fs:readGitStatus', () => {
 });
 
 ipcMain.handle('fs:listSessions', async () => {
-  const sessionsDir = join(ROOT, 'sessions');
+  const sessionsDir = join(currentWorkDir, 'sessions');
   try {
     const files = readdirSync(sessionsDir, { withFileTypes: true });
     // [缓存] 签名 = 文件名:大小:mtime，无变化直接返回缓存（避免反复全量解析大文件）
     const sig = files
       .filter(f => f.name.endsWith('.json'))
       .map(f => {
-        const st = statSync(join(sessionsDir, f.name));
-        return `${f.name}:${st.size}:${st.mtimeMs}`;
+        try {
+          const st = statSync(join(sessionsDir, f.name));
+          return `${f.name}:${st.size}:${st.mtimeMs}`;
+        } catch {
+          // 文件可能正被 agent 清理（标题变更 unlink），跳过，不中断整个列表
+          return null;
+        }
       })
+      .filter(Boolean)
       .join('|');
-    if (sig === __sessionsSig) return __sessionsCache;
+    // 身份卡子目录变化也纳入签名（生成身份卡后刷新列表预览）
+    const idSig = (() => {
+      try {
+        return readdirSync(identityDir(), { withFileTypes: true })
+          .filter(f => f.name.endsWith('.json'))
+          .map(f => {
+            try {
+              const st = statSync(join(identityDir(), f.name));
+              return `${f.name}:${st.mtimeMs}`;
+            } catch { return null; }
+          })
+          .filter(Boolean)
+          .join('|');
+      } catch { return ''; }
+    })();
+    if (sig + '#' + idSig === __sessionsSig) return __sessionsCache;
     const sessions = [];
     for (const file of files) {
       if (!file.name.endsWith('.json')) continue;
@@ -559,9 +833,18 @@ ipcMain.handle('fs:listSessions', async () => {
         const data = JSON.parse(readFileSync(fullPath, 'utf8'));
         const msgCount = data.agentMessages ? data.agentMessages.length : 0;
         const lastMsg = msgCount > 0 ? data.agentMessages[msgCount - 1] : null;
-        const preview = lastMsg && lastMsg.content
-          ? lastMsg.content.replace(/<[^>]+>/g, '').slice(0, 80).replace(/\n/g, ' ')
-          : '';
+        // lastMsg.content 可能是字符串（user）或 parts 数组（assistant），统一提取文本
+        let previewText = '';
+        if (lastMsg && lastMsg.content) {
+          if (typeof lastMsg.content === 'string') {
+            previewText = lastMsg.content;
+          } else if (Array.isArray(lastMsg.content)) {
+            previewText = lastMsg.content.map((p) => (p && p.type === 'text' ? p.text : '')).filter(Boolean).join(' ');
+          }
+        }
+        // 有身份卡时用 focus 作预览（无则回退最后消息截断）
+        const identity = readIdentityCardFor(file.name);
+        const preview = (identity?.focus) || previewText.replace(/<[^>]+>/g, '').slice(0, 80).replace(/\n/g, ' ');
         sessions.push({
           name: file.name.replace('.json', ''),
           timestamp: data.timestamp || null,
@@ -724,6 +1007,54 @@ app.on('before-quit', () => {
   }
   agentProcs.clear();
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

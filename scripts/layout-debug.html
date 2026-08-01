@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>布局调试：ModePicker + InputBar</title>
+<style>
+  :root {
+    --bg-base: #151210; --bg-elevated: #1A1714; --bg-hover: rgba(255,255,255,0.05);
+    --border-default: rgba(255,255,255,0.1); --border-subtle: rgba(255,255,255,0.06);
+    --border-strong: rgba(255,255,255,0.15);
+    --text-primary: #f8fafc; --text-muted: #94a3b8; --text-dim: #64748b;
+    --accent: #d4a843; --accent-bg: rgba(212,168,67,0.1);
+    --space-3: 12px; --space-4: 16px; --radius-lg: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Inter', -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    display: flex;
+    flex-direction: column;
+  }
+  /* 模拟 Header */
+  .header { height: 48px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; padding: 0 16px; font-size: 13px; color: var(--text-dim); flex-shrink: 0; }
+
+  /* ── 真实 #main-content ── */
+  #main-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    background: var(--bg-base);
+  }
+
+  /* ── ModePicker（当前样式） ── */
+  .mode-picker {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    padding: 40px 20px;
+    min-height: 0;
+    overflow-y: auto;
+    border: 2px dashed #f00; /* 调试边框：看 ModePicker 实际占多大 */
+  }
+  .mode-picker-badge {
+    width: 56px; height: 56px; border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-bg); border: 1px solid var(--border-default); color: var(--accent);
+  }
+  .mode-picker-title { font-size: 24px; font-weight: 600; }
+  .mode-picker-options { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .mode-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 18px; border-radius: 999px;
+    border: 1px solid var(--border-default); background: transparent; color: var(--text-muted);
+    font-size: 14px; cursor: pointer;
+  }
+  .mode-pill.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 500; }
+  .mode-picker-desc { font-size: 13px; color: var(--text-dim); }
+
+  /* ── 真实 .input-bar（简化内容） ── */
+  .input-bar {
+    display: flex;
+    align-items: flex-start;
+    padding: var(--space-3) var(--space-4) var(--space-4);
+    background: rgba(13, 10, 8, 0.5);
+    border-top: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+    border: 2px solid #0f0; /* 调试边框：看 InputBar 是否可见 */
+  }
+  .input-bar-body { flex: 1; }
+  .input-wrapper {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+    background: rgba(255,255,255,0.03);
+    padding: 6px 8px;
+  }
+  .input-field-area textarea {
+    width: 100%; border: none; background: transparent; color: var(--text-primary);
+    font-family: inherit; font-size: 14px; resize: none; outline: none; padding: 6px 4px; min-height: 36px;
+  }
+</style>
+</head>
+<body>
+  <div class="header">⌘ Seek Agent — 布局调试</div>
+  <div id="main-content">
+    <div class="mode-picker">
+      <div class="mode-picker-badge">🐋</div>
+      <h1 class="mode-picker-title">使用快速模式开始对话</h1>
+      <div class="mode-picker-options">
+        <button class="mode-pill active">⚡ 快速模式</button>
+        <button class="mode-pill">📚 知识库模式</button>
+        <button class="mode-pill">🧑‍💼 Manager 模式</button>
+        <button class="mode-pill">🧑‍🔧 打工人模式</button>
+      </div>
+      <p class="mode-picker-desc">通用循环，不挂策略</p>
+    </div>
+    <div class="input-bar">
+      <div class="input-bar-body">
+        <div class="input-wrapper">
+          <div class="input-field-area">
+            <textarea placeholder="给 DeepSeek 发送消息"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

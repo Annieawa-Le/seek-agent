@@ -1,3 +1,4 @@
+import type { ModelMessage } from 'ai';
 /**
  * memory_agent.ts — 消息 Hook 组合工具
  *
@@ -6,17 +7,18 @@
  *
  * 仅保留 composeHooks 供 index.ts 组合 messageHook 链使用。
  */
-
-import { ModelMessage } from 'ai';
-
 export function composeHooks(
-  ...hooks: ((messages: ModelMessage[]) => ModelMessage[])[]
-): (messages: ModelMessage[]) => ModelMessage[] {
-  return (messages: ModelMessage[]): ModelMessage[] => {
+  ...hooks: ((messages: ModelMessage[]) => ModelMessage[] | Promise<ModelMessage[]>)[]
+): (messages: ModelMessage[]) => Promise<ModelMessage[]> {
+  return async (messages: ModelMessage[]): Promise<ModelMessage[]> => {
     let current = messages;
     for (const hook of hooks) {
-      if (hook) current = hook(current);
+      if (hook) current = await hook(current);
     }
     return current;
   };
 }
+
+
+
+

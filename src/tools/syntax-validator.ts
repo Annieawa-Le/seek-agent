@@ -349,7 +349,7 @@ function stripStringsAndComments(content: string): string {
 export function formatSyntaxErrors(result: SyntaxCheckResult): string {
   if (result.ok) return '';
 
-  const lines: string[] = ['⚠️ 语法检查发现以下可能问题：'];
+  const lines: string[] = ['插入未成功！无需撤销，因为语法检查发现以下可能问题：'];
   for (const err of result.errors) {
     const pos = err.line ? `第 ${err.line} 行` : '';
     const col = err.column ? `:${err.column}` : '';

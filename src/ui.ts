@@ -299,7 +299,7 @@ function timestamp(): string {
 // 消息类型
 // ═════════════════════════════════════════════════════
 export interface UIMessage {
-  role: 'user' | 'agent' | 'system' | 'tool' | 'divider' | 'banner' | 'blank' | 'subagent';
+  role: 'user' | 'agent' | 'system' | 'tool' | 'divider' | 'banner' | 'blank' | 'subagent' | 'thinking';
   content: string;
   /** 消息创建时间戳（毫秒） */
   createdAt?: number;
@@ -311,6 +311,12 @@ export interface UIMessage {
   toolMeta?: { toolName: string; args: Record<string, unknown> };
   /** 结构化功能数据（工具结果，供多端消费） */
   rawBulk?: RawBulk;
+  /** 工具调用参数 HTML（实时流式中由 bridge 生成，重建会话时透传） */
+  toolCallHtml?: string;
+  /** 工具结果 HTML（实时流式中由 toWebUI 生成，重建会话时透传） */
+  toolResultHtml?: string;
+  /** 工具结果的完整原始输出（未截断） */
+  fullOutput?: string;
   /** 标记为「不渲染」，用于移除已折叠工具的调用消息而不影响其他索引 */
   doNotRender?: boolean;
 }
@@ -1781,6 +1787,10 @@ export class TerminalUI {
     out.write(cursorTo(row, 1) + BG.white + displayText + eraseLine(0));
   }
 }
+
+
+
+
 
 
 

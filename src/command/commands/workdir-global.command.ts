@@ -23,18 +23,27 @@ export const WorkdirGlobalCommand: Command = {
 
     if (match) {
       const raw = match[1].trim();
+      // 静默模式：workdir-global silent <path> —— 主进程切换工作区/新建会话同步时使用，不产生气泡
+      let silent = false;
+      let pathArg = raw;
+      if (raw.toLowerCase().startsWith('silent ')) {
+        silent = true;
+        pathArg = raw.slice('silent '.length).trim();
+      }
+
 
       // 特殊值：reset
-      if (raw.toLowerCase() === 'reset') {
+      if (pathArg.toLowerCase() === 'reset') {
         resetExplorerRoot();
         resetExplorerPath();
         resetWorkspaceRoot();
         setCwd(getWorkspaceRoot());
-        ctx.ui.addUserMessage(`/workdir-global reset`);
-        ctx.ui.addAgentMessage(
-          `virtual-explorer 根目录和工作目录已重置为工作区根目录:
-${getExplorerRoot()}`
-        );
+        if (!silent) {
+          ctx.ui.addUserMessage(`/workdir-global reset`);
+          ctx.ui.addAgentMessage(
+            `virtual-explorer 根目录和工作目录已重置为工作区根目录:\n${getExplorerRoot()}`
+          );
+        }
         ctx.agent.reloadPrompt();
         return;
       }
@@ -42,22 +51,22 @@ ${getExplorerRoot()}`
       // 正常路径切换
       try {
         // 绝对路径直接用，相对路径基于当前 explorerRoot 解析
-        const resolved = path.isAbsolute(raw)
-          ? path.normalize(raw)
-          : path.resolve(getExplorerRoot(), raw);
+        const resolved = path.isAbsolute(pathArg)
+          ? path.normalize(pathArg)
+          : path.resolve(getExplorerRoot(), pathArg);
 
         // 确保目标目录存在
         try {
           fs.accessSync(resolved, fs.constants.F_OK);
         } catch {
-          ctx.ui.addUserMessage(`/workdir-global ${raw}`);
+          if (!silent) ctx.ui.addUserMessage(`/workdir-global ${pathArg}`);
           ctx.ui.addAgentMessage(`❌ 目录不存在: ${resolved}`);
           return;
         }
 
         const stat = fs.statSync(resolved);
         if (!stat.isDirectory()) {
-          ctx.ui.addUserMessage(`/workdir-global ${raw}`);
+          if (!silent) ctx.ui.addUserMessage(`/workdir-global ${pathArg}`);
           ctx.ui.addAgentMessage(`❌ 路径不是目录: ${resolved}`);
           return;
         }
@@ -65,17 +74,16 @@ ${getExplorerRoot()}`
         resetExplorerPath();
         setCwd(resolved);
         setWorkspaceRoot(resolved);
-        ctx.ui.addUserMessage(`/workdir-global ${raw}`);
-        ctx.ui.addAgentMessage(
-          `virtual-explorer 根目录和工作目录已切换至:
-${resolved}
-
-` +
-          `提示：当前 explorer 位置已重置到新根目录。`
-        );
+        if (!silent) {
+          ctx.ui.addUserMessage(`/workdir-global ${pathArg}`);
+          ctx.ui.addAgentMessage(
+            `virtual-explorer 根目录和工作目录已切换至:\n${resolved}\n\n` +
+            `提示：当前 explorer 位置已重置到新根目录。`
+          );
+        }
         ctx.agent.reloadPrompt();
       } catch (err: any) {
-        ctx.ui.addUserMessage(`/workdir-global ${raw}`);
+        if (!silent) ctx.ui.addUserMessage(`/workdir-global ${pathArg}`);
         ctx.ui.addAgentMessage(`❌ 路径无效: ${err.message}`);
       }
     } else {
@@ -88,4 +96,6 @@ ${resolved}
     }
   },
 };
+
+
 

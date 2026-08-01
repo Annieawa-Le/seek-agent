@@ -56,5 +56,15 @@ const translations: Record<string, {
     },
     collapse: 'after-round',
   },
+  'subagent_submission': {
+    icon: '■',
+    category: 'other',
+    callLabel: (args) => {
+      const name = (args?.name ?? '(?)') as string;
+      return `子模型提交: ${name}`;
+    },
+    collapse: 'after-round',
+  },
 };
 export default translations;
+
