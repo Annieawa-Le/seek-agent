@@ -448,6 +448,7 @@ html, body {
   border-radius: 2px 2px 0 0;
 }
 .header-tab-title {
+  flex: 1 1 auto; /* 撑开剩余空间，把关闭按钮推到标签右侧对齐 */
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
@@ -3615,6 +3616,7 @@ html, body {
   font-weight: 600;
 }
 .chat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 
 
 
