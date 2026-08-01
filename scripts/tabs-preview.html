@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <title>标题栏标签页预览</title>
@@ -47,51 +47,63 @@
 
   .header-center {
     flex: 1;
+    height: 100%;
     min-width: 0;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: center;
     padding: 0 var(--space-2);
   }
-
   .header-tabs {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     width: 100%;
     max-width: 760px;
     overflow: hidden;
+    height: 100%;
   }
   .header-tabs-scroll {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    align-items: flex-end;
+    gap: 2px;
     overflow-x: auto;
     scrollbar-width: none;
     -ms-overflow-style: none;
     flex: 1;
+    height: 100%;
   }
   .header-tabs-scroll::-webkit-scrollbar { display: none; }
   .header-tab {
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 28px;
-    padding: 0 8px 0 12px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    height: 30px;
+    padding: 0 10px 0 14px;
+    border-radius: 10px 10px 0 0;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    border-bottom: none;
     color: var(--text-muted);
     cursor: pointer;
     flex-shrink: 0;
     max-width: 200px;
     min-width: 60px;
+    position: relative;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
   }
-  .header-tab:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
+  .header-tab:hover { background: rgba(255, 255, 255, 0.06); color: var(--text-primary); }
   .header-tab.active {
-    background: rgba(212, 168, 67, 0.12);
+    background: rgba(255, 255, 255, 0.07);
     border-color: rgba(212, 168, 67, 0.35);
     color: var(--gold-300);
+  }
+  .header-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px; left: 0; right: 0;
+    height: 2px;
+    background: var(--gold-400);
+    border-radius: 2px 2px 0 0;
   }
   .header-tab-title {
     font-size: 12px;
@@ -137,8 +149,40 @@
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.5); }
   .fake-btn { width: 26px; height: 26px; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-subtle); }
 
-  .body-note { padding: 40px; color: var(--text-dim); font-size: 13px; line-height: 2; }
+  /* 亮色主题 */
+  html[data-theme='light'] { background: #f5f5f4; }
+  html[data-theme='light'] #header {
+    background: rgba(255, 255, 255, 0.88);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  }
+  html[data-theme='light'] #header::after {
+    background: linear-gradient(90deg, transparent, rgba(57, 100, 254, 0.2), transparent);
+  }
+  html[data-theme='light'] .header-tab {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: #555;
+  }
+  html[data-theme='light'] .header-tab:hover { background: rgba(0, 0, 0, 0.05); color: #1a1a2e; }
+  html[data-theme='light'] .header-tab.active {
+    background: #ffffff;
+    border-color: rgba(57, 100, 254, 0.3);
+    color: #1a1a2e;
+  }
+  html[data-theme='light'] .header-tab.active::after { background: #3964fe; }
+  html[data-theme='light'] .header-tab-new:hover { background: rgba(0, 0, 0, 0.05); }
+  html[data-theme='light'] .header-ctx { background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.08); color: #777; }
+  html[data-theme='light'] .fake-btn { background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.08); }
+
+  .controls { padding: 12px 16px; display: flex; gap: 8px; align-items: center; }
+  .controls button {
+    padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);
+    background: rgba(255,255,255,0.05); color: var(--text-muted); cursor: pointer; font-size: 12px;
+  }
+  .controls button:hover { color: var(--text-primary); }
+  .body-note { padding: 0 40px; color: var(--text-dim); font-size: 13px; line-height: 2; }
   .body-note code { color: var(--gold-400); }
+  html[data-theme='light'] .body-note code { color: #3964fe; }
 </style>
 </head>
 <body>
@@ -183,17 +227,19 @@
     </div>
   </header>
 
-  <div class="body-note">
-    <p>标签页视觉预览（深色主题）：</p>
-    <p>· 当前活动标签 <code>manager-协作面板</code> 金色高亮，其余为次级灰</p>
-    <p>· 每个标签有 <code>×</code> 关闭按钮（hover 变红），末尾 <code>+</code> 新建</p>
-    <p>· 标签过多时横向滚动（滚动条隐藏），标题超长省略号截断</p>
+  <div class="controls">
+    <button id="theme-toggle">切换到亮色 / 暗色</button>
+    <button id="scroll-demo">演示滚动（滚到最右）</button>
   </div>
-</body>
-</html>
+
+  <div class="body-note">
+    <p>浏览器风格标签页（参考图样式）：</p>
+    <p>· 形状：<code>顶部大圆角 + 底部直角</code>，贴住标题栏底边，像从内容区“长出”</p>
+    <p>· 活动标签：深色下金色高亮 + <code>底部金色高亮条</code>；亮色下纯白背景 + <code>蓝色高亮条</code>（同参考图）</p>
+    <p>· 非活动标签：半透明底，hover 微亮</p>
+  </div>
 
 <script>
-  // 预览交互：点击标签切换 active（演示标签保持原位不重排 + 平滑滚入视野）
   const tabs = Array.from(document.querySelectorAll('.header-tab'));
   const scrollBox = document.querySelector('.header-tabs-scroll');
   tabs.forEach(tab => {
@@ -203,6 +249,22 @@
       tab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     });
   });
-  // 演示：把第一个标签滚动出视野，再点击它，验证自动滚回
-  setTimeout(() => { scrollBox.scrollLeft = scrollBox.scrollWidth; }, 800);
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    const cur = document.documentElement.dataset.theme;
+    document.documentElement.dataset.theme = cur === 'light' ? 'dark' : 'light';
+  });
+  document.getElementById('scroll-demo').addEventListener('click', () => {
+    scrollBox.scrollLeft = scrollBox.scrollWidth;
+  });
 </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+

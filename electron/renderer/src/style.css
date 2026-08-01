@@ -380,56 +380,72 @@ html, body {
 
 .header-center {
   flex: 1;
+  height: 100%; /* 撑满标题栏高度，标签 flex-end 才能真正贴底 */
   min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-end; /* 标签贴住标题栏底部，形成浏览器式“长在内容区上”的形态 */
   justify-content: center;
   padding: 0 var(--space-2);
-  -webkit-app-region: no-drag; /* 标签页可交互，不能是拖拽区 */
+  /* 继承 #header 的 drag：标签栏空白处可拖动窗口（与浏览器行为一致） */
 }
 
-/* ─── 标题栏标签页（浏览器风格） ─── */
+/* ─── 标题栏标签页（浏览器风格：顶部圆角 + 底部直角 + 活动标签底部高亮条） ─── */
 .header-tabs {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   width: 100%;
   max-width: 760px;
   overflow: hidden;
+  height: 100%;
 }
 .header-tabs-scroll {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  align-items: flex-end;
+  gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
   flex: 1;
+  height: 100%;
 }
 .header-tabs-scroll::-webkit-scrollbar { display: none; }
 .header-tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 8px 0 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  height: 30px;
+  padding: 0 10px 0 14px;
+  border-radius: 10px 10px 0 0; /* 顶部大圆角、底部直角（浏览器标签形状） */
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
+  border-bottom: none;
   color: var(--text-muted);
   cursor: pointer;
+  -webkit-app-region: no-drag; /* 标签本体可点击，不拖窗口 */
   flex-shrink: 0;
   max-width: 200px;
   min-width: 60px;
+  position: relative;
   transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s var(--ease-out);
 }
 .header-tab:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text-primary);
 }
 .header-tab.active {
-  background: rgba(212, 168, 67, 0.12);
+  background: rgba(255, 255, 255, 0.07); /* 活动标签背景浮出（深色下比标题栏略亮） */
   border-color: rgba(212, 168, 67, 0.35);
   color: var(--gold-300);
+}
+.header-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px; /* 贴住标题栏底部边框，压住金色渐变线 */
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--gold-400); /* 底部高亮条：指示当前活动标签 */
+  border-radius: 2px 2px 0 0;
 }
 .header-tab-title {
   font-size: 12px;
@@ -468,6 +484,7 @@ html, body {
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
+  -webkit-app-region: no-drag; /* + 按钮可点击，不拖窗口 */
   flex-shrink: 0;
   margin-left: 2px;
   transition: background 0.12s, color 0.12s;
@@ -2968,18 +2985,21 @@ html, body {
 
 /* 亮色标签页 */
 [data-theme='light'] .header-tab {
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(0, 0, 0, 0.03);
   border-color: rgba(0, 0, 0, 0.08);
   color: var(--text-muted);
 }
 [data-theme='light'] .header-tab:hover {
-  background: rgba(0, 0, 0, 0.07);
+  background: rgba(0, 0, 0, 0.05);
   color: var(--text-primary);
 }
 [data-theme='light'] .header-tab.active {
-  background: rgba(57, 100, 254, 0.1);
-  border-color: rgba(57, 100, 254, 0.35);
-  color: #3964fe;
+  background: #ffffff; /* 参考图风格：活动标签纯白浮出 */
+  border-color: rgba(57, 100, 254, 0.3);
+  color: #1a1a2e;
+}
+[data-theme='light'] .header-tab.active::after {
+  background: #3964fe; /* 参考图风格：底部蓝色高亮条 */
 }
 [data-theme='light'] .header-tab-new:hover {
   background: rgba(0, 0, 0, 0.07);
@@ -3595,6 +3615,21 @@ html, body {
   font-weight: 600;
 }
 .chat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
