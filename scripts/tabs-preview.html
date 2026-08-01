@@ -191,3 +191,18 @@
   </div>
 </body>
 </html>
+
+<script>
+  // 预览交互：点击标签切换 active（演示标签保持原位不重排 + 平滑滚入视野）
+  const tabs = Array.from(document.querySelectorAll('.header-tab'));
+  const scrollBox = document.querySelector('.header-tabs-scroll');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      tab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    });
+  });
+  // 演示：把第一个标签滚动出视野，再点击它，验证自动滚回
+  setTimeout(() => { scrollBox.scrollLeft = scrollBox.scrollWidth; }, 800);
+</script>

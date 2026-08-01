@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 export interface TabItem {
   id: string;
   title: string;
@@ -13,6 +15,12 @@ interface Props {
 
 /** 标题栏中间区域的浏览器风格标签页（对应已打开会话，为后续页面管理打底） */
 export function Tabs({ tabs, activeTabId, onSelect, onClose, onNew }: Props) {
+  const activeTabRef = useRef<HTMLDivElement | null>(null);
+  // 活动标签变化时滚到可见区域（浏览器行为：切到远处标签平滑滚过去，标签位置不重排）
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }, [activeTabId]);
+
   return (
     <div className="header-tabs">
       <div className="header-tabs-scroll">
@@ -21,6 +29,7 @@ export function Tabs({ tabs, activeTabId, onSelect, onClose, onNew }: Props) {
           return (
             <div
               key={tab.id}
+              ref={isActive ? activeTabRef : undefined}
               className={`header-tab${isActive ? ' active' : ''}`}
               onClick={() => onSelect(tab.id)}
               title={`切换到 ${tab.title}`}
@@ -49,3 +58,4 @@ export function Tabs({ tabs, activeTabId, onSelect, onClose, onNew }: Props) {
     </div>
   );
 }
+

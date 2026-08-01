@@ -239,11 +239,14 @@ export function App() {
     endStreaming();
   }, [api, endStreaming]);
 
-  /** 把会话登记到标签栏（去重；已存在则移到末尾 = 最近使用） */
+  /** 把会话登记到标签栏：新会话追加到末尾；已存在则保持原位（仅标题变化时更新），不重排 */
   const ensureTab = useCallback((id: string, title?: string) => {
     setTabs(prev => {
-      const item: TabItem = { id, title: title || id };
-      return [...prev.filter(t => t.id !== id), item];
+      const t = prev.find(x => x.id === id);
+      if (t) {
+        return t.title === (title || id) ? prev : prev.map(x => x.id === id ? { ...x, title: title || id } : x);
+      }
+      return [...prev, { id, title: title || id }];
     });
   }, []);
 
@@ -369,6 +372,7 @@ export function App() {
     </div>
   );
 }
+
 
 
 
