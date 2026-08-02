@@ -27,6 +27,13 @@ export function useAgentStatus(currentSessionId: string = 'default') {
   const sessionRef = useRef(currentSessionId);
   useEffect(() => {
     sessionRef.current = currentSessionId;
+    // 切换会话：新会话默认空闲（processing/thinking/listening 归零），立即恢复发送按钮；
+    // 真实状态由 state / input-state 消息纠正（正在运行的会话激活时会推送真实快照）
+    setStatus(prev => {
+      const next = { ...prev, processing: false, thinking: false, listening: false };
+      next.activity = updateActivity(next);
+      return next;
+    });
     // 切换会话后主动查询新会话的连接状态
     getAgentStatus().then(result => {
       setStatus(prev => {
@@ -66,6 +73,14 @@ export function useAgentStatus(currentSessionId: string = 'default') {
       if ((msg.sessionId || 'default') !== sessionRef.current) return;
       switch (msg.type) {
         case 'state':
+          setStatus(prev => {
+            const next = { ...prev, processing: msg.processing ?? prev.processing };
+            next.activity = updateActivity(next);
+            return next;
+          });
+          break;
+        case 'input-state':
+          // 会话激活/就绪时推送的真实快照：覆盖 processing（空闲会话的发送按钮立即恢复）
           setStatus(prev => {
             const next = { ...prev, processing: msg.processing ?? prev.processing };
             next.activity = updateActivity(next);
@@ -131,4 +146,6 @@ export function useAgentStatus(currentSessionId: string = 'default') {
 
   return status;
 }
+
+
 

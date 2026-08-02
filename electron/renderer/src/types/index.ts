@@ -84,7 +84,7 @@ export interface ReplayMessage {
 }
 
 export interface AgentMessage {
-  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'thinking-bubble' | 'thinking-delta' | 'listen' | 'subagent' | 'append' | 'kb-build' | 'clear-messages' | 'sidebar-data' | 'replace-messages';
+  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'thinking-bubble' | 'thinking-delta' | 'listen' | 'subagent' | 'append' | 'kb-build' | 'input-state' | 'clear-messages' | 'sidebar-data' | 'replace-messages';
   /** 所属会话（主进程在转发时附加） */
   sessionId?: string;
   role?: MessageRole;
@@ -102,6 +102,10 @@ export interface AgentMessage {
   count?: number;
   phase?: 'building' | 'done' | 'failed';
   message?: string;
+  /** input-state 消息负载：胶囊开关状态 + 处理中标志（供按会话同步发送按钮与胶囊） */
+  kbEnabled?: boolean;
+  smartSearch?: boolean;
+  thinking?: boolean;
   msgId?: string;
   /** replace-messages 消息负载：重建后的完整消息列表 */
   messages?: ReplayMessage[];
@@ -165,6 +169,8 @@ export interface GitChange {
 
 export interface SessionInfo {
   name: string;
+  /** 自动保存文件内记录的 sessionId（运行中会话的关联键，与主进程活跃进程对齐） */
+  sessionId: string | null;
   timestamp: string | null;
   messageCount: number;
   preview: string;
@@ -230,6 +236,9 @@ export interface AgentStatus {
   sessionId?: string;
   code?: number;
 }
+
+
+
 
 
 

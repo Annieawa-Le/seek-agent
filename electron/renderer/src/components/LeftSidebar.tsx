@@ -12,6 +12,8 @@ interface Props {
   onNewSession: () => void;
   /** 切换到指定会话（已保存会话传 name） */
   onSwitchSession: (sessionId: string, name?: string) => void;
+  /** 会话列表更新回调（父组件用它同步标签页标题：sessionId/文件名 → 显示名） */
+  onSessionsChanged?: (sessions: SessionInfo[]) => void;
 }
 
 const customItems = [
@@ -30,7 +32,7 @@ const statusLabelMap: Record<string, string> = {
   idle: '空闲', running: '运行中', done: '完成', error: '错误',
 };
 
-export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession, onSwitchSession }: Props) {
+export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession, onSwitchSession, onSessionsChanged }: Props) {
   const api = useElectronAPI();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [staticData, setStaticData] = useState<SidebarStaticData | null>(null);
@@ -47,11 +49,14 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
   const loadSessions = useCallback(async () => {
     try {
       const data = await api.listSessions();
-      if (Array.isArray(data)) setSessions(data);
+      if (Array.isArray(data)) {
+        setSessions(data);
+        onSessionsChanged?.(data);
+      }
     } catch {
       // 主进程 handler 可能暂不可用，保留旧列表，等待下一次定时刷新自愈
     }
-  }, [api]);
+  }, [api, onSessionsChanged]);
 
   const loadStatic = useCallback(async () => {
     const data = await api.getSidebarStatic();
@@ -130,7 +135,10 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
   };
 
   const handleSwitchSession = (s: SessionInfo) => {
-    onSwitchSession(s.name, s.name);
+    // 该会话已有存活进程（自动保存后仍在运行/已加载）→ 用其进程 sessionId 切换，
+    // 避免按文件名重复拉起第二个进程；未运行的历史会话才按文件名 spawn + /loadsession。
+    const target = activeSessionIds.includes(s.sessionId as string) ? (s.sessionId as string) : s.name;
+    onSwitchSession(target, s.name);
   };
 
   /** 展开/收起 Instruction 文件内容 */
@@ -208,10 +216,12 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
         {sessions.length === 0 && activeSessionIds.length === 0 ? <div className="session-empty">暂无会话</div> : <>
           {sessions.map(s => {
             const timeStr = s.timestamp ? new Date(s.timestamp).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-            const isActive = currentSessionId === s.name;
-            const isRunning = runningSessions.has(s.name) || (activeSessionIds.includes(s.name) && isActive);
+            // 活跃进程关联：进程 sessionId 匹配文件 sessionId（新身份）或文件名（旧文件/手动保存兜底）
+            const alive = activeSessionIds.includes(s.sessionId as string) || activeSessionIds.includes(s.name);
+            const isActive = currentSessionId === s.sessionId || currentSessionId === s.name;
+            const isRunning = runningSessions.has(s.sessionId as string) || runningSessions.has(s.name) || (alive && isActive);
             // 身份卡按钮仅对已拉起 agent 进程的会话可用（历史会话需先打开）
-            const canGenerate = isActive || activeSessionIds.includes(s.name);
+            const canGenerate = isActive || alive;
             const generating = cardGenerating.has(s.name);
             return (
               <div key={s.name} className={`session-item${isActive ? ' active' : ''}`} onClick={() => handleSwitchSession(s)} title={`切换到会话 ${s.name}`}>
@@ -237,8 +247,8 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
               </div>
             );
           })}
-          {/* 运行中但尚未落盘的新会话 */}
-          {activeSessionIds.filter(id => !sessions.some(s => s.name === id)).map(id => (
+          {/* 运行中但尚未落盘的新会话（自动保存后 sessionId 出现在历史条目中，不再重复显示） */}
+          {activeSessionIds.filter(id => !sessions.some(s => s.sessionId === id || s.name === id)).map(id => (
             <div key={id} className={`session-item${currentSessionId === id ? ' active' : ''}`} onClick={() => onSwitchSession(id)} title={`切换到运行中会话 ${id}`}>
               <div className="session-name">
                 {id}
@@ -307,6 +317,13 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
     </aside>
   );
 }
+
+
+
+
+
+
+
 
 
 

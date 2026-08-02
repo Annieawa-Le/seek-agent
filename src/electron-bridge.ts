@@ -58,6 +58,7 @@ export type ChildToParent =
   | { type: 'sidebar-data'; data: Record<string, unknown> }
   | { type: 'collab-request'; requestId: string; kind: 'sessions' | 'send'; to?: string; content?: string }
   | { type: 'identity-card'; card: Record<string, unknown>; error?: string }
+  | { type: 'input-state'; kbEnabled: boolean; smartSearch: boolean; thinking: boolean; processing: boolean }
   | { type: 'exit' };
 
 /** 主进程 → 子进程 */
@@ -297,6 +298,11 @@ export class ElectronUIBridge {
     this.send({ type: 'state', processing });
   }
 
+  /** 推送输入栏状态快照：胶囊开关（kb/智能搜索/思考）+ 当前是否处理中（供渲染层按会话同步） */
+  sendInputState(kbEnabled: boolean, smartSearch: boolean, thinking: boolean): void {
+    this.send({ type: 'input-state', kbEnabled, smartSearch, thinking, processing: this.isProcessing });
+  }
+
   setContextLength(chars: number, tokens: number = 0): void {
     this.send({ type: 'context', chars, tokens });
   }
@@ -435,6 +441,8 @@ function formatToolCallHtml(toolName: string, args: Record<string, unknown>): st
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+
 
 
 

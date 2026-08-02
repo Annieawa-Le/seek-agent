@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { getWorkspaceRoot, setCwd } from '../../workdir';
 import { friendlyToolCallLabel, friendlyToolResultLabel } from '../../assets/tool-translations';
 import { setActiveModes } from '../../modes/registry';
+import { KB_INJECT_PREFIX } from '../../modes/preprocess';
 
 /** 会话保存目录 */
 function getSessionDir(): string {
@@ -47,8 +48,8 @@ export function reconstructUIMessages(data: any): UIMessage[] {
             .filter((p: any) => p?.type === 'text')
             .map((p: any) => p.text)
             .join('\n');
-      // 排除系统注入的 [工作记忆] 与【子模型提交】（每轮重新注入/实时展示，加载时不重复展示）
-      if (text && !text.startsWith('[工作记忆]') && !text.startsWith('【')) {
+      // 排除系统注入的 [工作记忆] / [知识库检索] 与【子模型提交】（每轮重新注入/实时展示，加载时不重复展示）
+      if (text && !text.startsWith('[工作记忆]') && !text.startsWith(KB_INJECT_PREFIX) && !text.startsWith('【')) {
         uiMessages.push({ role: 'user', content: text });
       }
     } else if (msg.role === 'assistant') {
@@ -185,10 +186,11 @@ export const LoadSessionCommand: Command = {
     ctx.agent.setMessages(data.agentMessages);
 
     // ── 恢复会话 ID（后续自动保存会覆盖同一文件） ──
-    if (data.sessionId) {
+    // Electron 模式下 sessionId 已在构造时对齐 AGENT_SESSION_ID（主进程身份），
+    // 不覆盖，避免与主进程/渲染层的会话关联断裂；TUI 模式沿用文件内身份。
+    if (data.sessionId && !process.env.AGENT_SESSION_ID) {
       ctx.agent.setSessionId(data.sessionId);
     }
-
     // ── 恢复工作目录（如果保存的路径在当前工作区内） ──
     if (data.cwd) {
       try {
@@ -221,6 +223,10 @@ export const LoadSessionCommand: Command = {
 
   },
 };
+
+
+
+
 
 
 

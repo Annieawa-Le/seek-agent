@@ -9,7 +9,7 @@ import { ModePicker } from '@/components/ModePicker.tsx';
 import { InputBar } from '@/components/InputBar.tsx';
 import { RightPanel } from '@/components/RightPanel.tsx';
 import { StatusBar } from '@/components/StatusBar.tsx';
-import type { AgentMessage, SidebarRuntimeData } from '@/types/index.ts';
+import type { AgentMessage, SessionInfo, SidebarRuntimeData } from '@/types/index.ts';
 import type { TabItem } from '@/components/Tabs.tsx';
 
 export function App() {
@@ -18,14 +18,16 @@ export function App() {
   const [currentSessionId, setCurrentSessionId] = useState('default');
   /** 会话是否已就绪（切换会话时防 ModePicker 闪现；replace-messages 到达后置 true） */
   const [sessionReady, setSessionReady] = useState(true);
-  /** 是否为新会话（仅新建会话显示模式选择启动页；切回旧会话不显示，与 DeepSeek 一致） */
-  const [isFreshSession, setIsFreshSession] = useState(true);
   const currentSessionRef = useRef('default');
   useEffect(() => { currentSessionRef.current = currentSessionId; }, [currentSessionId]);
+  /** 当前会话进程的真实胶囊状态（input-state 快照，发送时差量比对用） */
+  const inputStateRef = useRef<{ kbEnabled: boolean; smartSearch: boolean; thinking: boolean } | null>(null);
   // 当前会话的运行时数据（hooks/子agent/MCP 状态，由 sidebar:data 消息更新）
   const [runtimeData, setRuntimeData] = useState<SidebarRuntimeData | null>(null);
   /** 标题栏标签页：本次会话期间打开过的会话（浏览器式多标签管理的基础） */
   const [tabs, setTabs] = useState<TabItem[]>([]);
+  /** sessionId/文件名 → 会话显示名 映射（来自会话列表，用于同步标签页标题） */
+  const [sessionNameMap, setSessionNameMap] = useState<Record<string, string>>({});
 
 
   const status = useAgentStatus(currentSessionId);
@@ -107,6 +109,14 @@ export function App() {
 
       case 'sidebar-data':
         if (msg.data) setRuntimeData(msg.data);
+        break;
+      case 'input-state':
+        // 会话进程真实胶囊状态快照：发送时据此做差量同步（UI 全局偏好 vs 进程实际）
+        inputStateRef.current = {
+          kbEnabled: msg.kbEnabled ?? false,
+          smartSearch: msg.smartSearch ?? false,
+          thinking: msg.thinking ?? false,
+        };
         break;
 
       case 'message':
@@ -229,10 +239,17 @@ export function App() {
   }, [api]);
 
   const handleSend = useCallback((text: string) => {
+    // 胶囊状态按会话独立存于各 agent 进程；UI 开关是全局偏好，发送前做差量同步
+    const actual = inputStateRef.current;
+    if (actual) {
+      if (kbEnabled !== actual.kbEnabled) api.sendCommand(kbEnabled ? 'kb_enable' : 'kb_disable');
+      if (smartSearchEnabled !== actual.smartSearch) api.sendCommand(smartSearchEnabled ? 'smart_search_enable' : 'smart_search_disable');
+      if (thinkingEnabled !== actual.thinking) api.sendCommand(thinkingEnabled ? 'thinking_enable' : 'thinking_disable');
+    }
     beginNewRound();
     appendMessage({ role: 'user', content: text, createdAt: Date.now() });
     api.sendInput(text);
-  }, [api, appendMessage, beginNewRound]);
+  }, [api, appendMessage, beginNewRound, kbEnabled, smartSearchEnabled, thinkingEnabled]);
 
   const handleAbort = useCallback(() => {
     api.abort();
@@ -250,6 +267,32 @@ export function App() {
     });
   }, []);
 
+  /** 会话列表刷新（LeftSidebar 回调）：构建 sessionId/文件名 → 显示名 映射 */
+  const handleSessionsChanged = useCallback((list: SessionInfo[]) => {
+    const map: Record<string, string> = {};
+    for (const s of list) {
+      if (s.sessionId) map[s.sessionId] = s.name;
+      map[s.name] = s.name;
+    }
+    setSessionNameMap(map);
+  }, []);
+
+  // 标签页标题同步：会话自动保存产生标题后，把仍是 sessionId 形态的 tab 标题替换为显示名
+  useEffect(() => {
+    setTabs(prev => {
+      let changed = false;
+      const next = prev.map(t => {
+        const name = sessionNameMap[t.id];
+        if (name && name !== t.title && t.title === t.id) {
+          changed = true;
+          return { ...t, title: name };
+        }
+        return t;
+      });
+      return changed ? next : prev; // 无实际变化时返回原引用，避免列表轮询触发的无谓重渲染
+    });
+  }, [sessionNameMap]);
+
 
   /** 新建会话：不中断当前会话，拉起独立 Agent 进程 */
   const handleNewSession = useCallback(async () => {
@@ -261,7 +304,6 @@ export function App() {
     setRuntimeData(null);
     clearMessages();
     setSessionReady(true); // 新会话：显示模式选择启动页
-    setIsFreshSession(true); // 仅新建会话显示启动页
     api.sendCommand('mode:set default'); // 新会话进程从 default 开始（静默，不产生消息）
     appendMessage({ role: 'banner', content: '', createdAt: Date.now() });
     appendMessage({ role: 'blank', content: '' });
@@ -281,7 +323,6 @@ export function App() {
     // 立即清空当前消息与重放状态：防止新数据到达前旧会话窗口触发误加载
     clearMessages();
     setSessionReady(false); // 防 ModePicker 在重放到达前闪现
-    setIsFreshSession(false); // 切回旧会话不显示启动页（模式随会话持久化，由 agent 进程恢复）
     api.sendCommand('sidebar:data');
   }, [api, clearMessages, ensureTab]);
 
@@ -334,11 +375,12 @@ export function App() {
             runtimeData={runtimeData}
             onNewSession={handleNewSession}
             onSwitchSession={handleSwitchSession}
+            onSessionsChanged={handleSessionsChanged}
           />
           {sidebarOpen && <div className="sidebar-overlay" onClick={closeSidebar} />}
           <div id="main-content">
             {/* 切换会话（!sessionReady）时 Agent 在后台拉起/重放，先显示加载占位避免空白“卡住”观感 */}
-            {sessionReady && isFreshSession && !hasRealMessage ? (
+            {sessionReady && !hasRealMessage ? ( // 消息列表为空时展示模式选择启动页（新建/切回空会话均适用）
               <ModePicker api={api} sessionKey={currentSessionId} />
             ) : !sessionReady ? (
               <div id="session-loading-area">
@@ -349,6 +391,7 @@ export function App() {
             )}
             <InputBar
               processing={status.processing}
+              sessionKey={currentSessionId}
               kbEnabled={kbEnabled}
               thinking={status.thinking}
               smartSearchEnabled={smartSearchEnabled}
@@ -372,6 +415,19 @@ export function App() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

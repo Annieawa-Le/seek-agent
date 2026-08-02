@@ -75,6 +75,11 @@ const commandRegistry = createCommandRegistry();
 // ── 知识库开关状态 ──
 let kbEnabled = true;
 
+/** 推送输入栏状态快照给渲染层（胶囊开关 + 处理中标志），供按会话同步 */
+function pushInputState() {
+  bridge.sendInputState(kbEnabled, agent.getSmartSearch(), agent.getThinking());
+}
+
 /** 自动构建知识库索引（忽略构建失败，不阻塞用户输入） */
 async function ensureKbIndex() {
   bridge.addKbStatus('building', '正在构建知识库索引...');
@@ -285,6 +290,7 @@ bridge.onCommand = async (cmd: string) => {
         });
       }
       bridge.addToolMessage('知识库已启用');
+      pushInputState();
       break;
     }
     case 'kb_disable': {
@@ -295,26 +301,31 @@ bridge.onCommand = async (cmd: string) => {
         removeSkill('kb-query');
       } catch {}
       bridge.addToolMessage('知识库已禁用');
+      pushInputState();
       break;
     }
     case 'smart_search_enable': {
       agent.setSmartSearch(true);
       bridge.addToolMessage('智能搜索已启用');
+      pushInputState();
       break;
     }
     case 'smart_search_disable': {
       agent.setSmartSearch(false);
       bridge.addToolMessage('智能搜索已禁用');
+      pushInputState();
       break;
     }
     case 'thinking_enable': {
       agent.setThinking(true);
       bridge.addToolMessage('思考模式已启用');
+      pushInputState();
       break;
     }
     case 'thinking_disable': {
       agent.setThinking(false);
       bridge.addToolMessage('思考模式已禁用');
+      pushInputState();
       break;
     }
     // ── 多会话控制（由主进程按会话路由下发） ──
@@ -323,6 +334,7 @@ bridge.onCommand = async (cmd: string) => {
       const { reconstructUIMessages } = await import('./command/commands/loadsession.command');
       const uiMessages = reconstructUIMessages({ agentMessages: agent.getMessages() });
       bridge.replaceMessages(uiMessages);
+      pushInputState(); // 切回本会话：推送真实处理中状态，空闲会话的发送按钮立即恢复
       break;
     }
     case 'session:new': {
@@ -351,6 +363,20 @@ bridge.startListening();
 
 // ── 通知主进程已就绪 ──
 bridge.emitReady();
+
+// 进程就绪后推送一次输入栏状态，渲染层据此恢复发送/停止按钮与胶囊比对基准
+pushInputState();
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 export interface TabItem {
   id: string;
@@ -16,6 +16,30 @@ interface Props {
 /** 标题栏中间区域的浏览器风格标签页（对应已打开会话，为后续页面管理打底） */
 export function Tabs({ tabs, activeTabId, onSelect, onClose, onNew }: Props) {
   const activeTabRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  // 跟踪滚动容器宽度，供等宽均分计算使用（窗口缩放/侧栏开关都会影响）
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => setContainerWidth(el.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // 手动均分标签宽度：flex 弹性布局的收缩是布局引擎算的，transition 捕获不到，
+  // 改为 JS 算出目标宽度写入 width 属性，增删标签时宽度就能平滑过渡
+  const tabWidth = useMemo(() => {
+    const n = tabs.length;
+    if (n === 0 || containerWidth === 0) return 200;
+    const GAP = 2; // 标签间及标签与 + 按钮间的 flex gap
+    const PLUS_WIDTH = 26; // + 按钮 24px + margin-left 2px
+    const available = containerWidth - PLUS_WIDTH - GAP * n;
+    return Math.max(60, Math.min(200, Math.round(available / n)));
+  }, [containerWidth, tabs.length]);
   // 活动标签变化时滚到可见区域（浏览器行为：切到远处标签平滑滚过去，标签位置不重排）
   useEffect(() => {
     activeTabRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
@@ -23,7 +47,7 @@ export function Tabs({ tabs, activeTabId, onSelect, onClose, onNew }: Props) {
 
   return (
     <div className="header-tabs">
-      <div className="header-tabs-scroll">
+      <div className="header-tabs-scroll" ref={scrollRef}>
         {tabs.map(tab => {
           const isActive = tab.id === activeTabId;
           return (
@@ -31,6 +55,7 @@ export function Tabs({ tabs, activeTabId, onSelect, onClose, onNew }: Props) {
               key={tab.id}
               ref={isActive ? activeTabRef : undefined}
               className={`header-tab${isActive ? ' active' : ''}`}
+              style={{ width: tabWidth }}
               onClick={() => onSelect(tab.id)}
               title={`切换到 ${tab.title}`}
             >
@@ -58,4 +83,9 @@ export function Tabs({ tabs, activeTabId, onSelect, onClose, onNew }: Props) {
     </div>
   );
 }
+
+
+
+
+
 

@@ -847,6 +847,8 @@ ipcMain.handle('fs:listSessions', async () => {
         const preview = (identity?.focus) || previewText.replace(/<[^>]+>/g, '').slice(0, 80).replace(/\n/g, ' ');
         sessions.push({
           name: file.name.replace('.json', ''),
+          // 文件内 sessionId：运行中会话的自动保存文件写入 AGENT_SESSION_ID，渲染层据此关联活跃进程
+          sessionId: data.sessionId || null,
           timestamp: data.timestamp || null,
           messageCount: msgCount,
           preview,
@@ -1007,6 +1009,7 @@ app.on('before-quit', () => {
   }
   agentProcs.clear();
 });
+
 
 
 

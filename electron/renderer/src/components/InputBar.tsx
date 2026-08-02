@@ -10,6 +10,8 @@ interface Attachment {
 
 interface Props {
   processing: boolean;
+  /** 当前会话 id：输入栏草稿（文本/附件/技能选择）按会话独立保存与恢复 */
+  sessionKey: string;
   thinking: boolean;
   kbEnabled: boolean;
   thinkingEnabled: boolean;
@@ -58,12 +60,16 @@ function inferSkillLabel(name: string, description: string): string {
 }
 
 export function InputBar({
-  processing, thinking, kbEnabled, smartSearchEnabled, thinkingEnabled, skillsList,
+  sessionKey, processing, thinking, kbEnabled, smartSearchEnabled, thinkingEnabled, skillsList,
   onSend, onAbort, onToggleKb, onToggleSmartSearch, onToggleThinking,
 }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // 输入栏草稿按会话隔离：sessionKey → { value, attachments, selectedSkills }
+  const draftsRef = useRef<Map<string, { value: string; attachments: Attachment[]; selectedSkills: Set<string> }>>(new Map());
+  const prevSessionRef = useRef<string | null>(null);
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
 
@@ -78,6 +84,31 @@ export function InputBar({
   }, []);
 
   useEffect(() => { adjustHeight(); }, [value, adjustHeight]);
+
+  // 切换会话：保存上一个会话的草稿，恢复当前会话的草稿（空会话重置输入栏）
+  useEffect(() => {
+    const prev = prevSessionRef.current;
+    if (prev !== null && prev !== sessionKey) {
+      if (value.trim() || attachments.length > 0 || selectedSkills.size > 0) {
+        draftsRef.current.set(prev, { value, attachments, selectedSkills });
+      }
+    }
+    const draft = draftsRef.current.get(sessionKey);
+    if (draft) {
+      setValue(draft.value);
+      setAttachments(draft.attachments);
+      setSelectedSkills(draft.selectedSkills);
+    } else {
+      setValue('');
+      setAttachments([]);
+      setSelectedSkills(new Set());
+    }
+    prevSessionRef.current = sessionKey;
+    setSkillsOpen(false);
+    // 切换会话后重新聚焦输入框
+    setTimeout(() => textareaRef.current?.focus(), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionKey]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -403,6 +434,10 @@ export function InputBar({
     </div>
   );
 }
+
+
+
+
 
 
 

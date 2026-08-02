@@ -422,15 +422,21 @@ html, body {
   color: var(--text-muted);
   cursor: pointer;
   -webkit-app-region: no-drag; /* 标签本体可点击，不拖窗口 */
-  flex: 1 1 0; /* 等宽弹性：basis 0 + 均等 grow/shrink，占满后按数量平分容器宽度 */
+  flex: none; /* 宽度由 JS 均分（inline width），使增删标签时宽度可平滑过渡 */
   max-width: 200px;
   min-width: 60px;
   position: relative;
-  transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s var(--ease-out);
+  transition: width 0.2s var(--ease-out), background 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s var(--ease-out);
+  animation: tab-fade-in 0.18s var(--ease-out); /* 新标签淡入（仅挂载时播放） */
 }
 .header-tab:hover {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-primary);
+}
+
+@keyframes tab-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
 }
 .header-tab.active {
   background: rgba(255, 255, 255, 0.07); /* 活动标签背景浮出（深色下比标题栏略亮） */
@@ -3616,6 +3622,8 @@ html, body {
   font-weight: 600;
 }
 .chat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+
 
 
 

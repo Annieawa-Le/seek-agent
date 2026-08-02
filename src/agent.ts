@@ -88,7 +88,9 @@ export class CLIAAgent {
   postRoundHook: PostRoundHook | null = null;
 
   constructor(ui: TerminalUI, systemPrompt?: string) {
-    this.sessionId = this.generateSessionId();
+    // Electron 多会话模式下与主进程身份对齐（渲染层/主进程按此 ID 关联会话与自动保存文件）；
+    // TUI 单会话模式无 AGENT_SESSION_ID，退化为随机生成。
+    this.sessionId = process.env.AGENT_SESSION_ID || this.generateSessionId();
     this.ui = ui;
     this.modelName = process.env.OPENAI_MODEL || 'gpt-4o-mini';
     this.systemPrompt = this.withModePrompts(systemPrompt ?? this.loadDefaultPrompts());
@@ -132,6 +134,16 @@ export class CLIAAgent {
     this.thinkingEnabled = enabled;
     this.reloadPrompt();
   }
+  /** 查询当前智能搜索模式状态 */
+  getSmartSearch(): boolean {
+    return this.smartSearchEnabled;
+  }
+
+  /** 查询当前思考模式状态 */
+  getThinking(): boolean {
+    return this.thinkingEnabled;
+  }
+
 
   /**
    * 构建会话开场指令（随思考模式注入，仅每轮第一次 AI 调用时生效）。
@@ -1238,6 +1250,8 @@ export class CLIAAgent {
     this.sessionId = id;
   }
 }
+
+
 
 
 
