@@ -19,8 +19,14 @@
 | JSON File | `KB_STORE=json` | 无 | 小规模（<10k chunks），零配置 |
 | SQLite | `KB_STORE=sqlite` | `better-sqlite3`, `sqlite-vec` | 中规模（<50k chunks），文件存储 |
 | PostgreSQL | `KB_STORE=postgres` | `pg`, 服务端 pgvector+pg_trgm | 大规模生产部署 |
+## 存储位置
+
+知识库索引**按工作区隔离**：默认存储在 `<工作区根目录>/.seek-agent/kb/`（与增量追踪状态文件 `.seek-agent/kb-file-state.json` 同目录）。切换工作区后自动使用新工作区的独立索引，互不干扰。
+
+可通过 `KB_PATH` 环境变量指定自定义存储根目录（此时所有工作区共享该目录，需自行管理隔离）。
 
 ## 环境变量
+
 
 ```env
 # 存储后端
@@ -41,3 +47,5 @@ PG_URL=postgresql://user:pass@localhost:5432/seek_kb
 2. 运行一次 `kb_build_index` 构建索引
 3. 之后直接问代码相关的问题即可
 4. 项目代码变更后，再次运行 `kb_build_index` 重建
+
+

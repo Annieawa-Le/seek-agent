@@ -9,6 +9,7 @@
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { getWorkspaceRoot } from '../../../../../workdir';
 import type { Chunk, SearchResult, VectorStore } from './interface';
 
 const KB_DIR = '.seek-agent/kb';
@@ -26,7 +27,7 @@ export class SqliteVectorStore implements VectorStore {
   private embeddingDim = 0;
 
   constructor(basePath?: string) {
-    const base = basePath ? path.join(basePath, KB_DIR) : path.resolve(KB_DIR);
+    const base = basePath ? path.join(basePath, KB_DIR) : path.join(getWorkspaceRoot(), KB_DIR);
     this.dbPath = path.join(base, DB_FILE);
   }
 
@@ -225,4 +226,6 @@ export class SqliteVectorStore implements VectorStore {
     };
   }
 }
+
+
 

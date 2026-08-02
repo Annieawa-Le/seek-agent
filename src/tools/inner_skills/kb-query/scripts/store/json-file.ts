@@ -9,6 +9,7 @@ import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { cosineSimilarity } from '../cosine';
+import { getWorkspaceRoot } from '../../../../../workdir';
 import type { Chunk, SearchResult, VectorStore } from './interface';
 
 const KB_DIR = '.seek-agent/kb';
@@ -29,7 +30,7 @@ export class JsonFileVectorStore implements VectorStore {
   private loaded = false;
 
   constructor(basePath?: string) {
-    this.kbPath = basePath ? path.join(basePath, KB_DIR) : path.resolve(KB_DIR);
+    this.kbPath = basePath ? path.join(basePath, KB_DIR) : path.join(getWorkspaceRoot(), KB_DIR);
   }
 
   async init(dim?: number): Promise<void> {
@@ -171,5 +172,7 @@ export class JsonFileVectorStore implements VectorStore {
     };
   }
 }
+
+
 
 

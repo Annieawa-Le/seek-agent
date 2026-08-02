@@ -11,8 +11,17 @@ import type { VectorStore } from './interface';
 import { JsonFileVectorStore } from './json-file';
 import type { SqliteVectorStore as SqliteStoreType } from './sqlite';
 import type { PostgresVectorStore as PostgresStoreType } from './postgres';
+import { getWorkspaceRoot } from '../../../../../workdir';
 
-let _instance: VectorStore | null = null;
+/** 按「后端类型 + 工作区/显式路径」缓存 store 实例：切换工作区后自动使用新工作区的索引 */
+const _instances = new Map<string, VectorStore>();
+
+/** 缓存键：后端类型 + 工作区根目录（或显式 KB_PATH） */
+function storeKey(): string {
+  const type = getStoreType();
+  const base = process.env.KB_PATH || getWorkspaceRoot();
+  return `${type}|${base}`;
+}
 
 function detectStoreType(): string {
   return (process.env.KB_STORE || 'json').toLowerCase().trim();
@@ -37,12 +46,14 @@ export function getStoreConnectionString(): string {
 }
 
 /**
- * 获取 VectorStore 单例
+ * 获取 VectorStore 实例（按工作区缓存）
  * 首次调用时根据环境变量自动选择并初始化后端。
  * dim 为向量维度，如果提供则建表时直接指定，否则从首条数据推断。
  */
 export async function getStore(dim?: number): Promise<VectorStore> {
-  if (_instance) return _instance;
+  const key = storeKey();
+  const cached = _instances.get(key);
+  if (cached) return cached;
 
   const type = getStoreType();
   const basePath = process.env.KB_PATH || undefined;
@@ -52,29 +63,32 @@ export async function getStore(dim?: number): Promise<VectorStore> {
       const { PostgresVectorStore } = await import('./postgres');
       const store = new PostgresVectorStore(getStoreConnectionString(), basePath);
       await store.init(dim);
-      _instance = store;
+      _instances.set(key, store);
       break;
     }
     case 'sqlite': {
       const { SqliteVectorStore } = await import('./sqlite');
       const store = new (SqliteVectorStore as any)(basePath) as SqliteStoreType;
       await store.init(dim);
-      _instance = store as unknown as VectorStore;
+      _instances.set(key, store as unknown as VectorStore);
       break;
     }
     default: {
       const store = new JsonFileVectorStore(basePath);
       await store.init(dim);
-      _instance = store;
+      _instances.set(key, store);
       break;
     }
   }
 
-  return _instance!;
+  return _instances.get(key)!;
 }
 
-/** 重置单例（切换后端或重建索引时使用） */
+/** 重置全部缓存实例（切换后端或重建索引时使用） */
 export function resetStore(): void {
-  _instance = null;
+  _instances.clear();
 }
+
+
+
 

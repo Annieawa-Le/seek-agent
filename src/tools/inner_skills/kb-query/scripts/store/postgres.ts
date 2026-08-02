@@ -11,6 +11,7 @@
 import { mkdir } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { getWorkspaceRoot } from '../../../../../workdir';
 import type { Chunk, SearchResult, VectorStore } from './interface';
 
 const KB_DIR = '.seek-agent/kb';
@@ -30,7 +31,7 @@ export class PostgresVectorStore implements VectorStore {
 
   constructor(connectionString?: string, basePath?: string) {
     this.connectionString = connectionString || process.env.PG_URL || 'postgresql://localhost:5432/seek_kb';
-    const base = basePath ? path.join(basePath, KB_DIR) : path.resolve(KB_DIR);
+    const base = basePath ? path.join(basePath, KB_DIR) : path.join(getWorkspaceRoot(), KB_DIR);
     this.metaPath = path.join(base, META_FILE);
   }
 
@@ -302,5 +303,7 @@ export class PostgresVectorStore implements VectorStore {
     };
   }
 }
+
+
 
 
