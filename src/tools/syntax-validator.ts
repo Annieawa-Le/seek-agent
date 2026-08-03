@@ -345,8 +345,13 @@ function stripStringsAndComments(content: string): string {
 /**
  * 将 SyntaxCheckResult 格式化为用户可读的错误消息。
  * 如果校验通过返回空字符串。
+ * 传入 newLines（修改后内容）时，额外追加"修改后模拟状态"预览：
+ * 错误位置附近的上下文 + 更改行标记（+ 为相对旧文件的新增/修改行，⚠ 为语法错误位置）。
  */
-export function formatSyntaxErrors(result: SyntaxCheckResult): string {
+export function formatSyntaxErrors(
+  result: SyntaxCheckResult,
+  options?: { oldLines?: string[]; newLines?: string[] },
+): string {
   if (result.ok) return '';
 
   const lines: string[] = ['插入未成功！无需撤销，因为语法检查发现以下可能问题：'];
@@ -355,9 +360,57 @@ export function formatSyntaxErrors(result: SyntaxCheckResult): string {
     const col = err.column ? `:${err.column}` : '';
     lines.push(`  ${pos}${col}  ${err.message}`);
   }
+  if (options?.newLines && options.newLines.length > 0) {
+    const preview = buildSyntaxPreview(options.newLines, options.oldLines, result.errors);
+    if (preview) lines.push('', preview);
+  }
   lines.push('💡 如果你确认修改无误，可以添加 force: true 参数跳过检查');
   return lines.join('\n');
 }
+
+/**
+ * 生成"修改后模拟状态"预览：错误行附近的上下文（带行号），
+ * 标记相对旧文件发生变化的行（+）与语法错误所在行（⚠）。
+ * 行号与内容均基于修改后的 newLines。
+ */
+function buildSyntaxPreview(
+  newLines: string[],
+  oldLines: string[] | undefined,
+  errors: SyntaxError[],
+): string {
+  const WINDOW = 4; // 错误行前后展示的行数
+  const errorLines = errors
+    .map(e => e.line)
+    .filter((l): l is number => typeof l === 'number' && l >= 1 && l <= newLines.length);
+  if (errorLines.length === 0) return '';
+
+  // 合并各错误行的展示窗口（±WINDOW）
+  const ranges: [number, number][] = errorLines
+    .map(l => [Math.max(1, l - WINDOW), Math.min(newLines.length, l + WINDOW)] as [number, number])
+    .sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const [s, e] of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && s <= last[1] + 1) last[1] = Math.max(last[1], e);
+    else merged.push([s, e]);
+  }
+
+  // 旧文件行集合：内容在旧文件中存在 → 视为保留行；否则为本次更改行
+  const oldSet = new Set(oldLines ?? []);
+  const errorSet = new Set(errorLines);
+
+  const out: string[] = ['── 修改后模拟状态（+ 更改行，⚠ 语法错误位置） ──'];
+  for (const [s, e] of merged) {
+    for (let i = s; i <= e; i++) {
+      const content = newLines[i - 1] ?? '';
+      const marker = errorSet.has(i) ? '⚠' : oldSet.has(content) ? ' ' : '+';
+      out.push(`  ${marker}${String(i).padStart(4)} │ ${content}`);
+    }
+    if (merged.length > 1 && e !== merged[merged.length - 1][1]) out.push('  ...');
+  }
+  return out.join('\n');
+}
+
 
 
 

@@ -31,6 +31,7 @@ import { ToolOutput } from './tool-output';
 import type { FileWriteBulk } from './raw-bulk-types.js';
 import { undoStack } from './patch-undo.js';
 import { contextLocate } from './patch-locator.js';
+import { patchBatch } from './patch-batch.js';
 import { checkSyntax, formatSyntaxErrors } from './syntax-validator.js';
 
 // ============================================================
@@ -65,6 +66,171 @@ async function readFileContent(filePath: string): Promise<string> {
   } catch {
     return '';
   }
+}
+
+// ============================================================
+// 定位辅助函数（普通写盘模式与并行批次暂存模式共用）
+// ============================================================
+
+type LocateOk<T> = { ok: true } & T;
+type LocateFail = { ok: false; error: string; message: string };
+type LocateResult<T> = LocateOk<T> | LocateFail;
+
+/** add_patch 定位：返回 0-based 插入索引（lineIndex=-1 表示末尾） */
+function locateAddInsertion(
+  fileLines: string[],
+  lineIndex: number,
+  pretext?: string[],
+  endtext?: string[],
+): LocateResult<{ insertIndex: number; locateMsg: string; description: string }> {
+  let insertIndex = lineIndex === -1 ? fileLines.length : lineIndex;
+  let locateMsg = '';
+
+  // 上下文定位模式
+  if ((pretext && pretext.length > 0) || (endtext && endtext.length > 0)) {
+    const anchorStart = lineIndex === -1 ? fileLines.length : lineIndex;
+    const anchorEnd = anchorStart;
+    const locateResult = contextLocate(fileLines, pretext, endtext, anchorStart, anchorEnd, 20);
+    if (!locateResult.matched) {
+      return {
+        ok: false,
+        error: '上下文匹配失败：' + locateResult.message,
+        message: '❌ 错误：上下文匹配失败：' + locateResult.message + '。请修正 pretext/endtext 后重试，或改用 lineIndex 行号模式。',
+      };
+    }
+    if (locateResult.pretextEndLine > 0) {
+      insertIndex = locateResult.pretextEndLine - 1;
+    } else if (locateResult.endtextStartLine > 0) {
+      insertIndex = locateResult.endtextStartLine - 1;
+    }
+    locateMsg = locateResult.message;
+  } else {
+    if (lineIndex !== -1 && (lineIndex < 0 || lineIndex > fileLines.length)) {
+      return {
+        ok: false,
+        error: `行号 ${lineIndex} 超出范围`,
+        message: `❌ 错误：行号 ${lineIndex} 超出范围（允许 0=开头，1-${fileLines.length}=第 N 行后，-1=末尾追加）`,
+      };
+    }
+  }
+
+  const descLines = lineIndex === -1 ? '文件末尾' : lineIndex === 0 ? '文件开头' : `第 ${lineIndex} 行后`;
+  const description = locateMsg
+    ? `在${locateMsg}处插入`
+    : `在${descLines}插入`;
+  return { ok: true, insertIndex, locateMsg, description };
+}
+
+/** del_patch 定位：返回 1-based 闭区间列表（已合并去重） */
+function locateDelRanges(
+  fileLines: string[],
+  lineIndex: number[][] | undefined,
+  pretext?: string[],
+  endtext?: string[],
+): LocateResult<{ merged: [number, number][]; description: string }> {
+  let merged: [number, number][];
+  let description: string;
+
+  // 上下文匹配模式：删除 pretext 和 endtext 之间的内容
+  if ((pretext && pretext.length > 0) || (endtext && endtext.length > 0)) {
+    // 无可靠行号锚点：全局搜索，不依赖文件中间窗口
+    const locateResult = contextLocate(fileLines, pretext, endtext, 1, fileLines.length, 0);
+    if (!locateResult.matched) {
+      return { ok: false, error: '上下文匹配失败：' + locateResult.message, message: '❌ 错误：上下文匹配失败：' + locateResult.message };
+    }
+    const delStart = locateResult.pretextEndLine;
+    const delEnd = locateResult.endtextStartLine - 1;
+    if (delStart > delEnd) {
+      return { ok: false, error: 'pretext 和 endtext 之间没有内容可删除', message: '❌ 错误：pretext 和 endtext 之间没有内容可删除' };
+    }
+    merged = [[delStart, delEnd]];
+    const deletedRows = delEnd - delStart + 1;
+    description = '删除 pretext 与 endtext 之间的 ' + deletedRows + ' 行（' + locateResult.message + '）';
+  } else if (lineIndex && lineIndex.length > 0) {
+    // 纯行号模式
+    const sorted = [...lineIndex].sort((a, b) => a[0] - b[0]);
+    merged = [];
+    for (const [s, e] of sorted) {
+      if (merged.length === 0 || s > merged[merged.length - 1][1] + 1) merged.push([s, e]);
+      else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e);
+    }
+    for (const [s, e] of merged) {
+      if (s < 1 || e > fileLines.length) {
+        return { ok: false, error: '范围 [' + s + ', ' + e + '] 超出文件范围', message: '❌ 错误：删除范围 [' + s + ', ' + e + '] 超出文件范围' };
+      }
+    }
+    const deletedInfo = merged.map(([s, e]) => s === e ? '行 ' + s : '行 ' + s + '-' + e).join('、');
+    const deletedCount = merged.reduce((sum, [s, e]) => sum + e - s + 1, 0);
+    description = '删除 ' + deletedCount + ' 行（' + deletedInfo + '）';
+  } else {
+    return { ok: false, error: '请提供 lineIndex 或 pretext/endtext 之一', message: '❌ 错误：请提供 lineIndex 或 pretext/endtext 之一' };
+  }
+
+  return { ok: true, merged, description };
+}
+
+/** modify_patch 定位：返回 1-based 闭区间（含智能检测 expandStart/expandEnd） */
+function locateModifyRange(
+  fileLines: string[],
+  startLine: number,
+  endLine: number,
+  replaceLines: string[],
+  pretext?: string[],
+  endtext?: string[],
+): LocateResult<{ actualStart: number; actualEnd: number; locateMessage: string }> {
+  let actualStart = startLine;
+  let actualEnd = endLine;
+  let locateMessage = '';
+
+  // 上下文定位模式
+  if ((pretext && pretext.length > 0) || (endtext && endtext.length > 0)) {
+    const locateResult = contextLocate(fileLines, pretext, endtext, startLine, endLine, 20);
+    if (!locateResult.matched) {
+      return {
+        ok: false,
+        error: '上下文匹配失败：' + locateResult.message,
+        message: '❌ 错误：上下文匹配失败：' + locateResult.message + '。请修正 pretext/endtext 后重试，或改用 startLine/endLine 行号模式。',
+      };
+    }
+    actualStart = locateResult.pretextEndLine;
+    actualEnd = locateResult.endtextStartLine - 1;
+
+    // 智能检测：replaceLines 是否已包含 pretext/endtext
+    // 如果 replaceLines 开头几行与 pretext 完全匹配，则替换范围往前扩至包含 pretext
+    let expandedStart = false;
+    if (pretext && pretext.length > 0 && replaceLines.length >= pretext.length) {
+      const replaceHead = replaceLines.slice(0, pretext.length);
+      if (replaceHead.every((line, i) => line === pretext[i])) {
+        actualStart = locateResult.pretextEndLine - pretext.length;
+        expandedStart = true;
+      }
+    }
+    // 如果 replaceLines 末尾几行与 endtext 完全匹配，则替换范围往后扩至包含 endtext
+    let expandedEnd = false;
+    if (endtext && endtext.length > 0 && replaceLines.length >= endtext.length) {
+      const replaceTail = replaceLines.slice(replaceLines.length - endtext.length);
+      if (replaceTail.every((line, i) => line === endtext[i])) {
+        actualEnd = locateResult.endtextStartLine + endtext.length - 1;
+        expandedEnd = true;
+      }
+    }
+
+    if (expandedStart || expandedEnd) {
+      const parts: string[] = [];
+      if (expandedStart) parts.push('起始前扩包含 pretext');
+      if (expandedEnd) parts.push('结尾后扩包含 endtext');
+      locateMessage += '（智能检测到 replaceLines 包含上下文，' + parts.join('、') + '）';
+    }
+
+    if (actualStart > actualEnd) {
+      return { ok: false, error: 'pretext 和 endtext 之间没有内容可替换', message: '❌ 错误：pretext 和 endtext 之间没有内容可替换' };
+    }
+  }
+
+  // 纯行号模式（不提供上下文时）：精准使用用户行号，不做自动修正
+  if (actualStart < 1) actualStart = 1;
+  if (actualEnd > fileLines.length) actualEnd = fileLines.length;
+  return { ok: true, actualStart, actualEnd, locateMessage };
 }
 
 // ============================================================
@@ -128,7 +294,7 @@ export const replaceFile = tool({
       if (!force) {
         const checkResult = checkSyntax(targetPath, fileContent);
         if (!checkResult.ok) {
-          const errMsg = formatSyntaxErrors(checkResult);
+          const errMsg = formatSyntaxErrors(checkResult, { oldLines, newLines });
           return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: errMsg }, errMsg);
         }
       }
@@ -174,45 +340,39 @@ export const addPatch = tool({
     if (!Lines?.length) return new ToolOutput({ type: 'patch', action: 'add', description: '', error: '写入内容不能为空' }, '❌ 错误：写入内容不能为空');
 
     const resolvedPath = resolvePath(filePath);
-    const { lines: fileLines, hasTrailingNewline, lineEnding } = await readFileLines(resolvedPath);
 
-    let insertIndex = lineIndex === -1 ? fileLines.length : lineIndex;
-    let locateMsg = '';
-
-    // 上下文定位模式
-    if ((pretext && pretext.length > 0) || (endtext && endtext.length > 0)) {
-      const anchorStart = lineIndex === -1 ? fileLines.length : lineIndex;
-      const anchorEnd = anchorStart;
-      const locateResult = contextLocate(fileLines, pretext, endtext, anchorStart, anchorEnd, 20);
-      if (locateResult.matched) {
-        if (locateResult.pretextEndLine > 0) {
-          insertIndex = locateResult.pretextEndLine - 1;
-        } else if (locateResult.endtextStartLine > 0) {
-          insertIndex = locateResult.endtextStartLine - 1;
-        }
-        locateMsg = locateResult.message;
-      } else {
-        return new ToolOutput({ type: 'patch', action: 'add', description: '', error: '上下文匹配失败：' + locateResult.message },
-          '❌ 错误：上下文匹配失败：' + locateResult.message + '。请修正 pretext/endtext 后重试，或改用 lineIndex 行号模式。');
+    // ── 并行批次暂存模式：同批多个 patch 作用于同一文件，只定位 + 入暂存，不写盘 ──
+    if (patchBatch.isBatching(resolvedPath)) {
+      const batch = patchBatch.getBatch(resolvedPath)!;
+      const locate = locateAddInsertion(batch.baseLines, lineIndex, pretext, endtext);
+      if (!locate.ok) {
+        return new ToolOutput({ type: 'patch', action: 'add', description: '', error: locate.error }, locate.message);
       }
-    } else {
-      if (lineIndex !== -1 && (lineIndex < 0 || lineIndex > fileLines.length)) {
-        return new ToolOutput({ type: 'patch', action: 'add', description: '', error: `行号 ${lineIndex} 超出范围` },
-          `❌ 错误：行号 ${lineIndex} 超出范围（允许 0=开头，1-${fileLines.length}=第 N 行后，-1=末尾追加）`);
-      }
+      const seq = patchBatch.stage(resolvedPath, {
+        type: 'add',
+        insertIndex: locate.insertIndex,
+        lines: Lines,
+        description: locate.description,
+      });
+      const stagedMsg = `✅ [ADD 已暂存] ${locate.description} ${Lines.length} 行\n📄 文件：${resolvedPath}\n📦 同批第 ${seq} 个 patch：与同文件其他 patch 从后往前合并应用`;
+      return new ToolOutput({ type: 'patch', action: 'add', description: locate.description + '（已暂存）', filePath: resolvedPath }, stagedMsg);
     }
 
-    let newLines = [...fileLines.slice(0, insertIndex), ...Lines, ...fileLines.slice(insertIndex)];
-    const descLines = lineIndex === -1 ? '文件末尾' : lineIndex === 0 ? '文件开头' : `第 ${lineIndex} 行后`;
-    const description = locateMsg
-      ? `在${locateMsg}处插入 ${Lines.length} 行`
-      : `在${descLines}插入 ${Lines.length} 行`;
+    // ── 普通模式：直接写盘 ──
+    const { lines: fileLines, hasTrailingNewline, lineEnding } = await readFileLines(resolvedPath);
+    const locate = locateAddInsertion(fileLines, lineIndex, pretext, endtext);
+    if (!locate.ok) {
+      return new ToolOutput({ type: 'patch', action: 'add', description: '', error: locate.error }, locate.message);
+    }
+    const { insertIndex, locateMsg } = locate;
+    const newLines = [...fileLines.slice(0, insertIndex), ...Lines, ...fileLines.slice(insertIndex)];
+    const description = locate.description + ' ' + Lines.length + ' 行';
 
     if (!force) {
       const newContent = newLines.join(lineEnding) + (hasTrailingNewline ? lineEnding : '');
       const checkResult = checkSyntax(resolvedPath, newContent);
       if (!checkResult.ok) {
-        const errMsg = formatSyntaxErrors(checkResult);
+        const errMsg = formatSyntaxErrors(checkResult, { oldLines: fileLines, newLines });
         return new ToolOutput({ type: 'patch', action: 'add', description: '', error: errMsg }, errMsg);
       }
     }
@@ -247,51 +407,35 @@ export const delPatch = tool({
     if (!filePath?.trim()) return new ToolOutput({ type: 'patch', action: 'del', description: '', error: '文件路径不能为空' }, '❌ 错误：文件路径不能为空');
 
     const resolvedPath = resolvePath(filePath);
-    const { lines: fileLines, hasTrailingNewline, lineEnding } = await readFileLines(resolvedPath);
 
-    let merged: [number, number][];
-    let description: string;
-
-    // 上下文匹配模式：删除 pretext 和 endtext 之间的内容
-    if ((pretext && pretext.length > 0) || (endtext && endtext.length > 0)) {
-      // 无可靠行号锚点：全局搜索，不依赖文件中间窗口
-      const locateResult = contextLocate(fileLines, pretext, endtext, 1, fileLines.length, 0);
-      if (!locateResult.matched) {
-        return new ToolOutput({ type: 'patch', action: 'del', description: '', error: '上下文匹配失败：' + locateResult.message },
-          '❌ 错误：上下文匹配失败：' + locateResult.message);
+    // ── 并行批次暂存模式：只定位 + 入暂存，不写盘 ──
+    if (patchBatch.isBatching(resolvedPath)) {
+      const batch = patchBatch.getBatch(resolvedPath)!;
+      const locate = locateDelRanges(batch.baseLines, lineIndex, pretext, endtext);
+      if (!locate.ok) {
+        return new ToolOutput({ type: 'patch', action: 'del', description: '', error: locate.error }, locate.message);
       }
-      const delStart = locateResult.pretextEndLine;
-      const delEnd = locateResult.endtextStartLine - 1;
-      if (delStart > delEnd) {
-        return new ToolOutput({ type: 'patch', action: 'del', description: '', error: 'pretext 和 endtext 之间没有内容可删除' },
-          '❌ 错误：pretext 和 endtext 之间没有内容可删除');
-      }
-      merged = [[delStart, delEnd]];
-      const deletedRows = delEnd - delStart + 1;
-      description = '删除 pretext 与 endtext 之间的 ' + deletedRows + ' 行（' + locateResult.message + '）';
-    } else if (lineIndex && lineIndex.length > 0) {
-      // 纯行号模式
-      const sorted = [...lineIndex].sort((a, b) => a[0] - b[0]);
-      merged = [];
-      for (const [s, e] of sorted) {
-        if (merged.length === 0 || s > merged[merged.length - 1][1] + 1) merged.push([s, e]);
-        else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e);
-      }
-      for (const [s, e] of merged) {
-        if (s < 1 || e > fileLines.length) return new ToolOutput({ type: 'patch', action: 'del', description: '', error: '范围 [' + s + ', ' + e + '] 超出文件范围' },
-          '❌ 错误：删除范围 [' + s + ', ' + e + '] 超出文件范围');
-      }
-      const deletedInfo = merged.map(([s, e]) => s === e ? '行 ' + s : '行 ' + s + '-' + e).join('、');
-      const deletedCount = merged.reduce((sum, [s, e]) => sum + e - s + 1, 0);
-      description = '删除 ' + deletedCount + ' 行（' + deletedInfo + '）';
-    } else {
-      return new ToolOutput({ type: 'patch', action: 'del', description: '', error: '请提供 lineIndex 或 pretext/endtext 之一' },
-        '❌ 错误：请提供 lineIndex 或 pretext/endtext 之一');
+      const seq = patchBatch.stage(resolvedPath, {
+        type: 'del',
+        ranges: locate.merged,
+        description: locate.description,
+      });
+      const stagedMsg = `✅ [DEL 已暂存] ${locate.description}\n📄 文件：${resolvedPath}\n📦 同批第 ${seq} 个 patch：与同文件其他 patch 从后往前合并应用`;
+      return new ToolOutput({ type: 'patch', action: 'del', description: locate.description + '（已暂存）', filePath: resolvedPath }, stagedMsg);
     }
+
+    // ── 普通模式：直接写盘 ──
+    const { lines: fileLines, hasTrailingNewline, lineEnding } = await readFileLines(resolvedPath);
+    const locate = locateDelRanges(fileLines, lineIndex, pretext, endtext);
+    if (!locate.ok) {
+      return new ToolOutput({ type: 'patch', action: 'del', description: '', error: locate.error }, locate.message);
+    }
+    const merged = locate.merged;
+    const description = locate.description;
 
     // 执行删除
     const zeroBased = merged.map(([s, e]) => [s - 1, e - 1] as [number, number]).sort((a, b) => b[0] - a[0]);
-    let newLines = [...fileLines];
+    const newLines = [...fileLines];
     let totalDeleted = 0;
     for (const [s, e] of zeroBased) { newLines.splice(s, e - s + 1); totalDeleted += e - s + 1; }
 
@@ -299,7 +443,7 @@ export const delPatch = tool({
       const newContent = newLines.join(lineEnding) + (hasTrailingNewline ? lineEnding : '');
       const checkResult = checkSyntax(resolvedPath, newContent);
       if (!checkResult.ok) {
-        const errMsg = formatSyntaxErrors(checkResult);
+        const errMsg = formatSyntaxErrors(checkResult, { oldLines: fileLines, newLines });
         return new ToolOutput({ type: 'patch', action: 'del', description: '', error: errMsg }, errMsg);
       }
     }
@@ -334,69 +478,41 @@ export const modifyPatch = tool({
     if (!Array.isArray(replaceLines)) return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: 'replaceLines 必须是字符串数组' }, '❌ 错误：replaceLines 必须是字符串数组');
 
     const resolvedPath = resolvePath(filePath);
-    const { lines: fileLines, hasTrailingNewline, lineEnding } = await readFileLines(resolvedPath);
 
-    let actualStart = startLine;
-    let actualEnd = endLine;
-    let locateMessage = '';
-
-    // 上下文定位模式
-    if ((pretext && pretext.length > 0) || (endtext && endtext.length > 0)) {
-      const locateResult = contextLocate(fileLines, pretext, endtext, startLine, endLine, 20);
-      if (locateResult.matched) {
-        actualStart = locateResult.pretextEndLine;
-        actualEnd = locateResult.endtextStartLine - 1;
-        locateMessage = locateResult.message;
-
-        // 智能检测：replaceLines 是否已包含 pretext/endtext
-        // 如果 replaceLines 开头几行与 pretext 完全匹配，则替换范围往前扩至包含 pretext
-        let expandedStart = false;
-        if (pretext && pretext.length > 0 && replaceLines.length >= pretext.length) {
-          const replaceHead = replaceLines.slice(0, pretext.length);
-          if (replaceHead.every((line, i) => line === pretext[i])) {
-            actualStart = locateResult.pretextEndLine - pretext.length;
-            expandedStart = true;
-          }
-        }
-        // 如果 replaceLines 末尾几行与 endtext 完全匹配，则替换范围往后扩至包含 endtext
-        let expandedEnd = false;
-        if (endtext && endtext.length > 0 && replaceLines.length >= endtext.length) {
-          const replaceTail = replaceLines.slice(replaceLines.length - endtext.length);
-          if (replaceTail.every((line, i) => line === endtext[i])) {
-            actualEnd = locateResult.endtextStartLine + endtext.length - 1;
-            expandedEnd = true;
-          }
-        }
-
-        if (expandedStart || expandedEnd) {
-          const parts: string[] = [];
-          if (expandedStart) parts.push('起始前扩包含 pretext');
-          if (expandedEnd) parts.push('结尾后扩包含 endtext');
-          locateMessage += '（智能检测到 replaceLines 包含上下文，' + parts.join('、') + '）';
-        }
-
-        if (actualStart > actualEnd) {
-          return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: 'pretext 和 endtext 之间没有内容可替换' },
-            '❌ 错误：pretext 和 endtext 之间没有内容可替换');
-        }
-      } else {
-        return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: '上下文匹配失败：' + locateResult.message },
-          '❌ 错误：上下文匹配失败：' + locateResult.message + '。请修正 pretext/endtext 后重试，或改用 startLine/endLine 行号模式。');
+    // ── 并行批次暂存模式：只定位 + 入暂存，不写盘 ──
+    if (patchBatch.isBatching(resolvedPath)) {
+      const batch = patchBatch.getBatch(resolvedPath)!;
+      const locate = locateModifyRange(batch.baseLines, startLine, endLine, replaceLines, pretext, endtext);
+      if (!locate.ok) {
+        return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: locate.error }, locate.message);
       }
+      const seq = patchBatch.stage(resolvedPath, {
+        type: 'modify',
+        startLine: locate.actualStart,
+        endLine: locate.actualEnd,
+        lines: replaceLines,
+        description: '修改行 ' + locate.actualStart + '-' + locate.actualEnd + '（' + replaceLines.length + ' 行）',
+      });
+      const stagedMsg = `✅ [MODIFY 已暂存] 修改行 ${locate.actualStart}-${locate.actualEnd}（${replaceLines.length} 行）\n📄 文件：${resolvedPath}\n📦 同批第 ${seq} 个 patch：与同文件其他 patch 从后往前合并应用`;
+      return new ToolOutput({ type: 'patch', action: 'modify', description: '修改行 ' + locate.actualStart + '-' + locate.actualEnd + '（已暂存）', filePath: resolvedPath }, stagedMsg);
     }
 
-    // 纯行号模式（不提供上下文时）：精准使用用户行号，不做自动修正
-    if (actualStart < 1) actualStart = 1;
-    if (actualEnd > fileLines.length) actualEnd = fileLines.length;
+    // ── 普通模式：直接写盘 ──
+    const { lines: fileLines, hasTrailingNewline, lineEnding } = await readFileLines(resolvedPath);
+    const locate = locateModifyRange(fileLines, startLine, endLine, replaceLines, pretext, endtext);
+    if (!locate.ok) {
+      return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: locate.error }, locate.message);
+    }
+    const { actualStart, actualEnd, locateMessage } = locate;
 
-    let newLines = [...fileLines.slice(0, actualStart - 1), ...replaceLines, ...fileLines.slice(actualEnd)];
+    const newLines = [...fileLines.slice(0, actualStart - 1), ...replaceLines, ...fileLines.slice(actualEnd)];
     const description = '修改行 ' + actualStart + '-' + actualEnd + '（' + replaceLines.length + ' 行）';
 
     if (!force) {
       const newContent = newLines.join(lineEnding) + (hasTrailingNewline ? lineEnding : '');
       const checkResult = checkSyntax(resolvedPath, newContent);
       if (!checkResult.ok) {
-        const errMsg = formatSyntaxErrors(checkResult);
+        const errMsg = formatSyntaxErrors(checkResult, { oldLines: fileLines, newLines });
         return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: errMsg }, errMsg);
       }
     }
@@ -540,6 +656,17 @@ export async function applyPatchesToFile(
 
 // ── 导出 UndoStack 以供外部使用 ──
 export { UndoStack } from './patch-undo.js';
+
+
+
+
+
+
+
+
+
+
+
 
 
 

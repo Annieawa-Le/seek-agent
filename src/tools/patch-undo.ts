@@ -29,7 +29,7 @@ const HISTORY_REL_DIR = '.seek-agent/history';
 export interface DiffRecordMeta {
   id: string;
   timestamp: number;
-  type: 'add' | 'del' | 'modify';
+  type: 'add' | 'del' | 'modify' | 'batch';
   filePath: string;
   description: string;
 }
@@ -272,3 +272,4 @@ export class UndoStack {
 
 /** 全局撤销栈单例 */
 export const undoStack = new UndoStack();
+

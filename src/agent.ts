@@ -10,7 +10,7 @@ import * as fs from 'node:fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import path from 'node:path';
-import { getWorkspaceRoot } from './workdir';
+import { getWorkspaceRoot, resolvePath } from './workdir';
 import { deskEditManager, DESK_EDIT_TOOLS } from './tools/desk-edit';
 import { getModel, setSystemPrompt } from './model-provider';
 import {
@@ -19,6 +19,8 @@ import {
   getToolCollapse,
 } from './assets/tool-translations';
 import { toolCache } from './tools/tool-cache';
+import { patchBatch, PATCH_TOOL_NAMES } from './tools/patch-batch';
+import { readFileLines } from './tools/file-manipulation';
 import { summarizeSessionTitle, fallbackTitle, sanitizeTitle } from './tools/session-title';
 import { extractBulk } from './tools/tool-output';
 import { IllusionAgent } from './illusion_agent';
@@ -801,6 +803,8 @@ export class CLIAAgent {
    */
   private async executeToolCalls(toolCalls: any[]): Promise<boolean> {
     let interruptedByInput = false;
+    // 并行 patch 检测：同批（同一条 assistant 消息）≥2 个 patch 作用于同一文件 → 静默建批次
+    await this.beginPatchBatches(toolCalls);
     for (const toolCall of toolCalls) {
       const toolName = toolCall.toolName;
       const args = toolCall.input;
@@ -928,6 +932,7 @@ export class CLIAAgent {
 
     // ── 处理中断/中止（submission 留在队列中，下一轮安全时再排空） ──
     if (interruptedByInput) {
+      patchBatch.discardAll(); // 放弃暂存批次（未写盘），文件保持原状
       this.rollbackPartialToolCalls();
 
       this.ui.addToolMessage('■ 检测到新输入，回滚未完成的工具调用，优先处理用户新指令');
@@ -941,8 +946,12 @@ export class CLIAAgent {
     }
 
     if (this.aborted || this.ui.isAborted) {
+      patchBatch.discardAll();
       return false;
     }
+
+    // ── 正常退出：flush 并行 patch 批次（基于基准快照从后往前合并应用） ──
+    await this.flushPatchBatches();
 
     // ── 排空子模型待注入的提交（仅在正常退出时，避免被 rollback 误删；以 tool 消息对注入） ──
     try {
@@ -950,6 +959,42 @@ export class CLIAAgent {
     } catch { /* 排空失败不影响 */ }
 
     return false;
+  }
+
+  /**
+   * 并行 patch 检测：同一条 assistant 消息里对同一文件有 ≥2 个 patch 调用时，
+   * 建立静默暂存批次（记录基准快照）。patch 工具执行时检测到批次模式会只入暂存不写盘。
+   */
+  private async beginPatchBatches(toolCalls: any[]): Promise<void> {
+    try {
+      const counts = new Map<string, number>();
+      for (const tc of toolCalls) {
+        if (!PATCH_TOOL_NAMES.has(tc.toolName)) continue;
+        const fp = tc.input?.filePath;
+        if (!fp) continue;
+        const key = resolvePath(String(fp)).replace(/\\/g, '/');
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      for (const [key, n] of counts) {
+        if (n < 2) continue;
+        const { lines, hasTrailingNewline, lineEnding } = await readFileLines(key);
+        patchBatch.beginBatch(key, lines, hasTrailingNewline, lineEnding);
+      }
+    } catch { /* 检测失败不影响主流程 */ }
+  }
+
+  /** flush 并行 patch 批次：成功仅 UI 汇总；失败注入模型上下文（user 消息）供模型修正 */
+  private async flushPatchBatches(): Promise<void> {
+    const results = await patchBatch.flushAll();
+    for (const r of results) {
+      if (r.ok) {
+        this.ui.addToolMessage(`📦 ${r.message}\n📄 文件：${r.filePath}\n📐 行数：${r.fromLines} → ${r.toLines} 行（diff 已持久化，undo_patch 可整体回滚）`);
+      } else {
+        const errMsg = `❌ ${r.message}\n📄 文件：${r.filePath}\n（文件保持原状，可修正后重试）`;
+        this.ui.addToolMessage(errMsg);
+        this.messages.push({ role: 'user', content: `【批次应用失败】${r.filePath}\n${r.message}` });
+      }
+    }
   }
 
   // ────────────────────────────────────────────────
@@ -1380,6 +1425,10 @@ export class CLIAAgent {
     worklogStore.setSessionId(id);
   }
 }
+
+
+
+
 
 
 
