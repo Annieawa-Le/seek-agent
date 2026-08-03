@@ -80,8 +80,18 @@ const MODES: ModeMeta[] = [
         <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
       </Icon>
     ),
-    desc: '跨会话执行者，接受协作派活',
+    desc: '真正的打工人，开工前先创建开发引导员监督',
   },
+  {
+    name: 'hallucination',
+    label: '100% AI 模式',
+    icon: (
+      <Icon>
+        <path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z" />
+      </Icon>
+    ),
+    desc: '万能工具幻觉世界，所有工具调用由后台 AI 圆梦',
+  }
 ];
 
 interface Props {
@@ -123,6 +133,8 @@ export function ModePicker({ api, sessionKey }: Props) {
     </div>
   );
 }
+
+
 
 
 

@@ -161,6 +161,9 @@ class SubAgentManager {
       waiter.reject(new Error(`子模型 "${name}" 已被销毁`));
       this.submissionWaiters.delete(name);
     }
+    // 中断正在后台运行的 instructor 流
+    const agent = this.agents.get(name);
+    agent?.instructorAbortController?.abort();
     return this.agents.delete(name);
   }
 
@@ -170,12 +173,23 @@ class SubAgentManager {
       waiter.reject(new Error('所有子模型已被销毁'));
     }
     this.submissionWaiters.clear();
+    this.abortAllInstructors();
     this.agents.clear();
+  }
+
+  /** 中断所有 instructor 的后台执行（agent 退出/停止时调用） */
+  abortAllInstructors(): void {
+    for (const agent of this.agents.values()) {
+      if (agent.mode === 'instructor') {
+        agent.instructorAbortController?.abort();
+      }
+    }
   }
 }
 
 /** 全局单例 */
 export const subAgentManager = new SubAgentManager();
+
 
 
 

@@ -49,6 +49,7 @@
 ## 推荐工具组（spawn_agent tools 参数）
 
 ----TOOLS_START----
-["read_file", "read_lines", "read_num_line", "scan_file", "search_all_file", "search_sub_file", "search_directory", "search_content", "execute_command", "search_web", "fetch_page", "extract_links", "crawl_site", "kb_query", "kb_status", "desk_add", "desk_list", "desk_remove", "memory_add"]
+["read_file", "read_lines", "scan_file", "search_all_file", "search_sub_file", "search_directory", "search_content", "execute_command", "search_web", "fetch_page", "extract_links", "crawl_site", "kb_query", "kb_status", "desk_add", "desk_list", "desk_remove", "memory_add"]
 ----TOOLS_END----
+
 

@@ -97,6 +97,27 @@ export const MessageItem = memo(function MessageItem({ msg }: Props) {
       );
 
     case 'divider': return <div className="message divider" />;
+
+    case 'instructor':
+      // instructor 建议：复用用户气泡样式，头部用小鲸鱼标志区分
+      return (
+        <div className="message user instructor">
+          <div className="message-instructor-header">
+            <svg className="instructor-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2.5 16.5c1-2.5 3.5-4 7-4 2.6 0 4.9 1 6.7 2.5"/>
+              <path d="M16.2 15l4.8-3.3-.9 4.2"/>
+              <path d="M2.5 16.5c1.2 1.6 3.3 2.4 5.4 2.4h5.6c1.5 0 2.6-.9 2.6-2.1"/>
+              <path d="M9.5 12.5v-2"/>
+              <path d="M9.5 10.5c-.7-.8 0-1.6 0-2.4 0 .8.7 1.6 0 2.4"/>
+              <circle cx="15.7" cy="13.4" r="0.5" fill="currentColor" stroke="none"/>
+            </svg>
+            <span className="instructor-name">{escapeHtml(msg.subagentName || '教练')}</span>
+            <span className="instructor-tag">建议</span>
+          </div>
+          <div className="content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+        </div>
+      );
+
     case 'blank': return <div className="message blank" />;
     case 'banner':
       return <div className="message banner"><div className="content" style={{ userSelect: 'none' }}>{escapeHtml(msg.content)}</div></div>;
@@ -277,6 +298,7 @@ const UserMessage = memo(function UserMessage({ content }: { content: string }) 
     </div>
   );
 });
+
 
 
 

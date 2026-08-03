@@ -49,7 +49,7 @@ export function reconstructUIMessages(data: any): UIMessage[] {
             .map((p: any) => p.text)
             .join('\n');
       // 排除系统注入的 [工作记忆] / [知识库检索] 与【子模型提交】（每轮重新注入/实时展示，加载时不重复展示）
-      if (text && !text.startsWith('[工作记忆]') && !text.startsWith(KB_INJECT_PREFIX) && !text.startsWith('【')) {
+      if (text && !text.startsWith('[工作记忆]') && !text.startsWith(KB_INJECT_PREFIX) && !text.startsWith('【') && !text.startsWith('[Worklog#')) {
         uiMessages.push({ role: 'user', content: text });
       }
     } else if (msg.role === 'assistant') {
@@ -186,9 +186,10 @@ export const LoadSessionCommand: Command = {
     ctx.agent.setMessages(data.agentMessages);
 
     // ── 恢复会话 ID（后续自动保存会覆盖同一文件） ──
-    // Electron 模式下 sessionId 已在构造时对齐 AGENT_SESSION_ID（主进程身份），
-    // 不覆盖，避免与主进程/渲染层的会话关联断裂；TUI 模式沿用文件内身份。
-    if (data.sessionId && !process.env.AGENT_SESSION_ID) {
+    // 会话身份统一以文件内 sessionId 为准（固定形态 new-xxx / xxxx-xxxx-xxxx），
+    // 主进程已在会话列表扫描时一次性迁移历史标题污染文件；此处无条件对齐，
+    // 避免恢复会话后身份漂移（worklog 分区 / 自动保存文件随之稳定）。
+    if (data.sessionId) {
       ctx.agent.setSessionId(data.sessionId);
     }
     // ── 恢复工作目录（如果保存的路径在当前工作区内） ──
@@ -223,6 +224,8 @@ export const LoadSessionCommand: Command = {
 
   },
 };
+
+
 
 
 

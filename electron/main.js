@@ -258,7 +258,7 @@ function handleAgentMessage(msg, sessionId) {
     const from = collabReplyWaiters.get(sessionId);
     collabReplyWaiters.delete(sessionId);
     logCollab(sessionId, from, msg.content, 'reply');
-    sendToAgent(from, { type: 'collab-message', from: sessionTitle(sessionId), content: msg.content });
+    sendToAgent(from, { type: 'collab-message', from: sessionDisplayName(sessionId), content: msg.content });
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
     // 转发时附加 sessionId，渲染层据此区分会话
@@ -289,6 +289,34 @@ function sessionTitle(sessionId) {
   return String(sessionId).replace(/^session-/, '').replace(/\.json$/, '');
 }
 
+/**
+ * 会话 ID 固定形态：new-{base36}（Electron 新建）或 {4}-{4}-{4}（TUI 随机）。
+ * 历史文件曾用副模型标题当 sessionId（如 session-工具结果缓存清理策略），
+ * 标题随对话漂移导致身份与 worklog 分区一起漂移。此处检测非固定形态或缺失时，
+ * 重新生成固定 id 并写回会话文件（一次性迁移），保证后续链路拿到稳定身份。
+ */
+const STABLE_SESSION_ID_RE = /^(new-[a-z0-9]+|[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})$/i;
+function ensureStableSessionId(data, filePath) {
+  const cur = data && typeof data.sessionId === 'string' ? data.sessionId.trim() : '';
+  if (STABLE_SESSION_ID_RE.test(cur)) return cur;
+  const fresh = `new-${Date.now().toString(36)}`;
+  if (data && filePath) {
+    try {
+      data.sessionId = fresh;
+      writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    } catch { /* 迁移写回失败不影响本次返回 */ }
+  }
+  return fresh;
+}
+
+/** 会话显示名：优先身份卡上报的标题（agent 侧 getSessionTitle），回退文件名标题 */
+function sessionDisplayName(sessionId) {
+  const identity = agentIdentityMap.get(sessionId);
+  if (identity && identity.name) return identity.name;
+  return sessionTitle(sessionId);
+}
+
+
 /** 读取 sessions/*.json 的历史会话身份卡列表（按 mtime 倒序） */
 function listHistoryCards() {
   const sessionsDir = join(currentWorkDir, 'sessions');
@@ -313,7 +341,8 @@ function listHistoryCards() {
         // 优先读附属身份卡（sessions/identity/ 同名文件）
         const identity = readIdentityCardFor(file.name);
         cards.push({
-          sessionId: file.name.replace('.json', ''),
+          // 固定形态 sessionId：优先文件内身份（历史标题污染文件在此一次性迁移写回）
+          sessionId: ensureStableSessionId(data, fullPath),
           name: data.title || file.name.replace('.json', ''),
           messageCount: msgCount,
           preview: (identity?.focus) || previewText.replace(/<[^>]+>/g, '').slice(0, 80).replace(/\n/g, ' '),
@@ -331,7 +360,7 @@ function listHistoryCards() {
 /** 列出所有会话身份卡（活跃 + 历史，活跃在前） */
 function listSessionCards() {
   const active = Array.from(agentProcs.keys()).map(sid => {
-    const card = { sessionId: sid, name: sessionTitle(sid), active: true };
+    const card = { sessionId: sid, name: sessionDisplayName(sid), active: true };
     const identity = agentIdentityMap.get(sid);
     if (identity) {
       Object.assign(card, {
@@ -847,8 +876,10 @@ ipcMain.handle('fs:listSessions', async () => {
         const preview = (identity?.focus) || previewText.replace(/<[^>]+>/g, '').slice(0, 80).replace(/\n/g, ' ');
         sessions.push({
           name: file.name.replace('.json', ''),
-          // 文件内 sessionId：运行中会话的自动保存文件写入 AGENT_SESSION_ID，渲染层据此关联活跃进程
-          sessionId: data.sessionId || null,
+          // 固定形态 sessionId：文件内身份优先，缺失或标题污染（历史文件）在此一次性迁移写回
+          sessionId: ensureStableSessionId(data, fullPath),
+          // 纯标题（渲染层标签页/列表显示名用；历史文件可能无 title 字段）
+          title: data.title || '',
           timestamp: data.timestamp || null,
           messageCount: msgCount,
           preview,
@@ -1009,6 +1040,14 @@ app.on('before-quit', () => {
   }
   agentProcs.clear();
 });
+
+
+
+
+
+
+
+
 
 
 

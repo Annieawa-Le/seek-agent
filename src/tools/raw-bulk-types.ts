@@ -23,7 +23,7 @@ export interface ReadFileBulk {
   /** 行号范围（部分读取时） */
   startLine?: number;
   endLine?: number;
-  /** 带行号内容（read_num_line / scan_file 时） */
+  /** 带行号内容（read_lines / scan_file 时） */
   numberedLines?: Array<{ lineNum: number; content: string }>;
   error?: string;
 }
@@ -167,7 +167,8 @@ export type RawBulk =
   | PatchBulk
   | DeskBulk
   | TodoBulk
-  | MemoryBulk;
+  | MemoryBulk
+  | WorklogBulk;
 // ============================================================
 // 格式化器接口
 // ============================================================
@@ -182,6 +183,32 @@ export interface RawBulkFormatters {
   toTUIText(rawBulk: RawBulk): string;
   toWebUI(rawBulk: RawBulk): Record<string, unknown>;
 }
+
+
+
+
+
+
+/** Worklog 召回操作结果（记忆消退路径） */
+export interface WorklogBulk {
+  type: 'worklog';
+  action: 'recall' | 'recall-original';
+  /** 是否命中 */
+  found: boolean;
+  /** 查询的 id 或标题关键词 */
+  query: string;
+  /** 命中的 Worklog id */
+  id?: string;
+  /** 标题 */
+  title?: string;
+  /** 梗概（recall 时） */
+  summary?: string;
+  /** 原文大小（recall-original 时） */
+  size?: number;
+  msg: string;
+}
+
+
 
 
 

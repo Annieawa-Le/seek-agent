@@ -170,6 +170,16 @@ export function App() {
         });
         break;
 
+      case 'instructor':
+        // instructor 建议：用户样式 + 鲸鱼标志气泡
+        appendMessage({
+          role: 'instructor',
+          content: msg.content || '',
+          subagentName: msg.name || '教练',
+          createdAt: Date.now(),
+        });
+        break;
+
       case 'append':
         // 流式追加：追加到当前流式气泡，不创建新气泡
         if (msg.content) {
@@ -271,19 +281,21 @@ export function App() {
   const handleSessionsChanged = useCallback((list: SessionInfo[]) => {
     const map: Record<string, string> = {};
     for (const s of list) {
-      if (s.sessionId) map[s.sessionId] = s.name;
-      map[s.name] = s.name;
+      // 显示名优先纯标题（title），回退文件名剥 session- 前缀；name 保留原名用于 /loadsession 匹配
+      const display = s.title || s.name.replace(/^session-/, '');
+      if (s.sessionId) map[s.sessionId] = display;
+      map[s.name] = display;
     }
     setSessionNameMap(map);
   }, []);
 
-  // 标签页标题同步：会话自动保存产生标题后，把仍是 sessionId 形态的 tab 标题替换为显示名
+  // 标签页标题同步：自动保存产生标题（或会话列表刷新）后，把仍是占位/sessionId 形态的 tab 标题替换为显示名
   useEffect(() => {
     setTabs(prev => {
       let changed = false;
       const next = prev.map(t => {
         const name = sessionNameMap[t.id];
-        if (name && name !== t.title && t.title === t.id) {
+        if (name && name !== t.title) {
           changed = true;
           return { ...t, title: name };
         }
@@ -300,7 +312,7 @@ export function App() {
     if (!res?.success || !res.sessionId) return;
     currentSessionRef.current = res.sessionId;
     setCurrentSessionId(res.sessionId);
-    ensureTab(res.sessionId);
+    ensureTab(res.sessionId, '新会话'); // 先占位，自动保存产生标题后由 handleSessionsChanged 替换
     setRuntimeData(null);
     clearMessages();
     setSessionReady(true); // 新会话：显示模式选择启动页
@@ -316,9 +328,11 @@ export function App() {
     if (sessionId === currentSessionRef.current) return;
     const res = await api.switchSession(sessionId, name);
     if (!res?.success) return;
-    currentSessionRef.current = res.sessionId || sessionId;
-    ensureTab(res.sessionId || sessionId, name);
-    setCurrentSessionId(res.sessionId || sessionId);
+    const nextId = res.sessionId || sessionId;
+    currentSessionRef.current = nextId;
+    // 占位标题剥掉文件名 session- 前缀（纯标题），后续由 handleSessionsChanged 映射校正
+    ensureTab(nextId, name ? name.replace(/^session-/, '') : undefined);
+    setCurrentSessionId(nextId);
     setRuntimeData(null);
     // 立即清空当前消息与重放状态：防止新数据到达前旧会话窗口触发误加载
     clearMessages();
@@ -415,6 +429,11 @@ export function App() {
     </div>
   );
 }
+
+
+
+
+
 
 
 

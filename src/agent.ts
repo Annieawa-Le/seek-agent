@@ -3,6 +3,7 @@ import { streamText, type TextPart, type ToolCallPart, type ModelMessage, NoOutp
 import { tools, stripToolExecutes } from './tools';
 import { checkToolGate, getActiveModes, getActiveModeNames } from './modes/registry';
 import { drainPendingInjections, hasPendingInjections, subAgentManager, setSubmissionListener } from './tools/inner_skills/sub-agent/manager';
+import type { SubAgentState } from './tools/inner_skills/sub-agent/types';
 import { TerminalUI } from './ui';
 import { TokenizerService } from './tokenizer-service';
 import * as fs from 'node:fs';
@@ -20,12 +21,15 @@ import {
 import { toolCache } from './tools/tool-cache';
 import { summarizeSessionTitle, fallbackTitle, sanitizeTitle } from './tools/session-title';
 import { extractBulk } from './tools/tool-output';
+import { IllusionAgent } from './illusion_agent';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /** 内部触发标记：子模型提交后空闲时触发新一轮（不显示为 user 消息） */
 const INTERNAL_SUBMISSION_TRIGGER = '__internal_submission__';
 
+import { compactMessages, checkBudget, estimateMessagesTokens, slimOldestRound, type CompactionPlan } from './context-compactor';
+import { worklogStore } from './tools/worklog-store';
 // 类型定义
 // ═════════════════════════════════════════════════════
 
@@ -71,6 +75,10 @@ export class CLIAAgent {
   /** 用户输入队列 —— 可随时入队 */
   private inputQueue: string[] = [];
   /** 是否已中断（取消本轮及后续处理） */
+  /** 上下文压缩：待应用的压缩计划（下一轮输入的安全点应用） */
+  private pendingCompaction: CompactionPlan | null = null;
+  /** 上下文压缩：压缩任务是否在飞（防重入，一轮最多一次） */
+  private compactionInFlight = false;
   private aborted = false;
   /** 是否已完成首次交互（首次交互会清除 banner/启动提示） */
   private hasInteracted = false;
@@ -81,6 +89,8 @@ export class CLIAAgent {
   private smartSearchEnabled = false;
   /** 思考模式开关 */
   private thinkingEnabled = false;
+  /** 「100% AI」幻觉模式专用循环（懒创建，仅 hallucination 模式激活时使用） */
+  private illusionAgent: IllusionAgent | null = null;
   private lastSingleCollapse: { msgIndex: number; toolName: string; args: Record<string, unknown> } | null = null;
 
   messageHook: MessageHook | null = null;
@@ -91,6 +101,8 @@ export class CLIAAgent {
     // Electron 多会话模式下与主进程身份对齐（渲染层/主进程按此 ID 关联会话与自动保存文件）；
     // TUI 单会话模式无 AGENT_SESSION_ID，退化为随机生成。
     this.sessionId = process.env.AGENT_SESSION_ID || this.generateSessionId();
+    // 归档存储绑定当前会话（记忆消退路径的 worklog_recall / work_recall 按会话分区）
+    worklogStore.setSessionId(this.sessionId);
     this.ui = ui;
     this.modelName = process.env.OPENAI_MODEL || 'gpt-4o-mini';
     this.systemPrompt = this.withModePrompts(systemPrompt ?? this.loadDefaultPrompts());
@@ -101,10 +113,10 @@ export class CLIAAgent {
     // 子模型提交监听：入队后注入 tool 消息对（空闲时触发新一轮）
     setSubmissionListener(() => { this.onSubAgentSubmission().catch(() => {}); });
 
-
-    // 注册进程退出时的 MCP 清理
+    // 注册进程退出时的 MCP 清理与 instructor 后台流中断
     const cleanup = () => {
       import('./mcp').then(({ shutdownMCP }) => shutdownMCP()).catch(() => {});
+      subAgentManager.abortAllInstructors();
     };
     process.on('beforeExit', cleanup);
   }
@@ -152,7 +164,7 @@ export class CLIAAgent {
   private static buildSessionInstruction(): string {
     // 核心工具分组（精确列出，随 tools 容器动态校验存在性）
     const coreGroups: [string, string[]][] = [
-      ['文件', ['read_file', 'read_lines', 'read_num_line', 'scan_file', 'create_file', 'replace_file', 'add_patch', 'del_patch', 'undo_patch', 'history_patch']],
+      ['文件', ['read_file', 'read_lines', 'scan_file', 'create_file', 'replace_file', 'add_patch', 'del_patch', 'undo_patch', 'history_patch']],
       ['搜索/执行', ['search_all_file', 'search_sub_file', 'search_directory', 'search_content', 'execute_command']],
       ['任务', ['create_todo', 'finish_step', 'undo_step', 'reroll_step', 'del_step', 'read_todo', 'del_todo', 'active_todo']],
       ['记忆', ['memory_add', 'memory_update', 'memory_touch', 'memory_remove', 'memory_list', 'memory_remember', 'memory_recall', 'memory_stats', 'memory_clear']],
@@ -354,8 +366,8 @@ export class CLIAAgent {
       const inputs = this.drainInputQueue();
       await this.processRound(inputs);
 
-      // ── 触发 instructor（主模型每轮工作完成后） ──
-      await this.triggerInstructorAfterRound();
+      // ── 触发 instructor（发信号，后台异步执行，不阻塞主循环） ──
+      this.triggerInstructorAfterRound();
 
       // ── 兜底：若本轮收尾期间有子模型提交入队（onSubAgentSubmission 因
       // processingPromise 非空未触发 run），继续下一轮让主模型看到 ──
@@ -372,6 +384,20 @@ export class CLIAAgent {
     return inputs;
   }
 
+  /**
+   * 登记一条待处理输入：instructor 建议（【xxx 建议】开头）显示为鲸鱼气泡，
+   * 其余显示为普通 user 气泡；统一作为 user 消息进入模型上下文。
+   */
+  private registerUserInput(input: string): void {
+    const instMatch = input.match(/^【(.+?) 建议】\n?/);
+    if (instMatch) {
+      this.ui.addInstructorMessage(input.slice(instMatch[0].length), instMatch[1]);
+    } else {
+      this.ui.addUserMessage(input);
+    }
+    this.messages.push({ role: 'user', content: input });
+  }
+
   // ────────────────────────────────────────────────
   // 单轮处理
   // ────────────────────────────────────────────────
@@ -384,6 +410,8 @@ export class CLIAAgent {
    * 不会影响当前轮的上下文完整性。
    */
   private async processRound(userInputs: string[]): Promise<void> {
+    // ── 应用上一轮排定的上下文压缩（记忆消退：移除旧轮次，插入 Worklog） ──
+    this.applyPendingCompaction();
     // ── 首次输入自动清除 banner 和启动提示（仅生效一次） ──
     if (!this.hasInteracted) {
       this.hasInteracted = true;
@@ -397,8 +425,7 @@ export class CLIAAgent {
     // ── 阶段1：登记用户输入（内部触发标记不添加 user 气泡，仅驱动新一轮） ──
     for (const input of userInputs) {
       if (input === INTERNAL_SUBMISSION_TRIGGER) continue;
-      this.ui.addUserMessage(input);
-      this.messages.push({ role: 'user', content: input });
+      this.registerUserInput(input);
     }
     this.ui.addBlankLine();
 
@@ -419,7 +446,13 @@ export class CLIAAgent {
 
     try {
       // ── 阶段2：AI 交互循环（含工具调用） ──
-      await this.aiInteractionLoop(roundToolCallIds, roundAssistantTexts);
+      if (getActiveModeNames().includes('hallucination')) {
+        // 「100% AI」模式：走独立幻觉循环（万能工具世界，主循环不参与）
+        this.illusionAgent ??= new IllusionAgent(this);
+        await this.illusionAgent.runRound(userInputs, roundToolCallIds, roundAssistantTexts);
+      } else {
+        await this.aiInteractionLoop(roundToolCallIds, roundAssistantTexts);
+      }
     } catch (error: any) {
       if (this.aborted || this.ui.isAborted) {
         // 中断不视为错误
@@ -484,8 +517,7 @@ export class CLIAAgent {
       if (this.inputQueue.length > 0) {
         const pendingInputs = this.drainInputQueue();
         for (const input of pendingInputs) {
-          this.ui.addUserMessage(input);
-          this.messages.push({ role: 'user', content: input });
+          this.registerUserInput(input);
         }
       }
 
@@ -649,6 +681,13 @@ export class CLIAAgent {
 
         // ── 收集工具调用 ──
         const finalResult = await result;
+        // ── 上下文预算监测：超限则调度记忆消退压缩（异步执行，不阻塞本轮） ──
+        try {
+          const usage = await finalResult.usage;
+          if (usage?.inputTokens) {
+            this.maybeScheduleCompaction(usage.inputTokens);
+          }
+        } catch { /* usage 不可用时跳过 */ }
         if (finalResult.toolCalls) {
           const tl = await finalResult.toolCalls;
           for (const tc of tl) {
@@ -913,6 +952,55 @@ export class CLIAAgent {
     return false;
   }
 
+  // ────────────────────────────────────────────────
+  // 上下文压缩（记忆消退路径）
+  // ────────────────────────────────────────────────
+
+  /**
+   * 上下文预算超限时调度记忆消退压缩。
+   * 压缩由副模型异步执行（不阻塞主循环），结果暂存，下一轮输入安全点应用。
+   * 门控：压缩任务在飞或已有待应用计划时不再重复调度（一轮最多一次）。
+   */
+  private maybeScheduleCompaction(inputTokens: number): void {
+    if (this.pendingCompaction || this.compactionInFlight) return;
+    if (!checkBudget(inputTokens)) return;
+
+    // 分层保真：最旧一轮占比超阈值时，先同步把该轮幂等工具结果简化为"已遗忘，请重新读取"
+    // （不移除、不产生 Worklog、不归档）。回落预算内则跳过该轮（等下次清理），仍超才走归档。
+    const slimmed = slimOldestRound(this.messages);
+    if (slimmed) {
+      this.messages = slimmed;
+      if (!checkBudget(estimateMessagesTokens(this.messages))) return;
+    }
+
+    this.compactionInFlight = true;
+    const snapshot = [...this.messages];
+    const sessionId = this.sessionId;
+    compactMessages(snapshot, sessionId, inputTokens)
+      .then((plan) => {
+        this.compactionInFlight = false;
+        if (plan) this.pendingCompaction = plan;
+      })
+      .catch(() => {
+        this.compactionInFlight = false;
+      });
+  }
+
+  /**
+   * 应用待定的压缩计划（安全点：processRound 开头）。
+   * 移除最旧轮次消息，插入 Worklog（及可能的归档行）。
+   * 被移除消息的原文已由压缩阶段写入归档存储（work_recall 可召回）。
+   */
+  private applyPendingCompaction(): void {
+    const plan = this.pendingCompaction;
+    if (!plan) return;
+    this.pendingCompaction = null;
+    if (this.messages.length === 0) return;
+
+    const removeCount = Math.min(plan.removeCount, this.messages.length);
+    this.messages.splice(0, removeCount, ...plan.insertMessages);
+    // 静默应用：移除旧轮次，插入 Worklog（不打扰 UI，召回走 worklog_recall）
+  }
   /**
    * 回滚因 pending 输入中断而部分执行的工具调用：
    * 移除最后一条 assistant 消息（含 tool-call），
@@ -989,11 +1077,13 @@ export class CLIAAgent {
   // ────────────────────────────────────────────────
 
   /**
-   * 每轮主模型工作完成后，触发所有 instructor 发散思维提出建议。
+   * 每轮主模型工作完成后，向所有 instructor 发信号发散思维提出建议。
+   * 信号只做检查与派发（fire-and-forget），不阻塞主循环：
+   * instructor 在后台异步执行，完成后把建议作为用户输入直接入队开启主模型下一轮。
    * 如果本轮处理的是真实用户输入（非 instructor 自产的消息），重置轮次计数。
    * 如果用户在此过程中终止，已中断的轮次不会触发 instructor。
    */
-  private async triggerInstructorAfterRound(): Promise<void> {
+  private triggerInstructorAfterRound(): void {
     // ── 如果本轮被中止或中断，不触发 instructor ──
     if (this.aborted || this.ui.isAborted) return;
 
@@ -1018,6 +1108,9 @@ export class CLIAAgent {
       const maxRounds = instructor.maxRounds ?? 3;
       if ((instructor.instructorRoundCount ?? 0) >= maxRounds) continue;
 
+      // instructor 正在后台运行（上一轮信号尚未完成）→ 跳过本次触发，避免建议堆积
+      if (instructor.status === 'running') continue;
+
       // 获取主模型最后输出的文本
       let lastOutput = '';
       for (let i = this.messages.length - 1; i >= 0; i--) {
@@ -1040,24 +1133,59 @@ export class CLIAAgent {
       }
       if (!lastOutput.trim()) continue;
 
-      try {
-        const { executeInstructorAgent } = await import('./tools/inner_skills/sub-agent/runner');
-        const result = await executeInstructorAgent(instructor, lastOutput);
-
-        // instructor 运行过程中用户可能中断了
-        if (this.aborted || this.ui.isAborted) return;
-
-        if (result && result.trim()) {
-          const msg = `【${instructor.name} 建议】\n${result}`;
-          this.ui.addSubAgentMessage(instructor.name, msg);
-          this.inputQueue.push(msg);
-          this.ui.addBlankLine();
-          this.ui.addToolMessage(`■ 收到 ${instructor.name} 的建议，继续下一轮处理`);
-        }
-      } catch {
-        // instructor 执行失败不影响主流程
-      }
+      // ── 发信号：后台异步执行 instructor，主循环立即返回 ──
+      void this.runInstructorAsync(instructor, lastOutput);
     }
+  }
+
+  /**
+   * 后台执行 instructor：完成后把建议作为用户输入直接 push 进 inputQueue，
+   * 开启主模型下一轮（保持“建议 = 用户输入”的语义）。
+   */
+  private async runInstructorAsync(
+    instructor: SubAgentState,
+    lastOutput: string,
+  ): Promise<void> {
+    try {
+      const { executeInstructorAgent } = await import('./tools/inner_skills/sub-agent/runner');
+      const result = await executeInstructorAgent(instructor, lastOutput);
+      if (!result?.trim()) return;
+
+      // instructor 运行期间主模型被中断/销毁 → 丢弃建议
+      if (this.aborted || this.ui.isAborted) return;
+
+      const msg = `【${instructor.name} 建议】\n${result}`;
+      this.ui.addToolMessage(`■ 收到 ${instructor.name} 的建议，继续下一轮处理`);
+      this.inputQueue.push(msg);
+
+      // 主模型空闲时启动处理循环消费建议（直接开启下一轮）；
+      // 若处理循环仍在跑，inputQueue 会被其下一轮自动消费
+      this.ensureProcessingLoop();
+    } catch {
+      // instructor 执行失败不影响主流程
+    }
+  }
+
+  /**
+   * 确保存在处理循环消费 inputQueue。
+   * 竞态兜底：若现有 loop 正在退出（while 判断空但 finally 尚未置 null），
+   * processingPromise 非空会导致直接启动不成立 → 建议滞留；微任务后再查一次。
+   */
+  private ensureProcessingLoop(): void {
+    if (!this.processingPromise) {
+      this.processingPromise = this.runProcessingLoop().finally(() => {
+        this.processingPromise = null;
+      });
+      return;
+    }
+    queueMicrotask(() => {
+      // loop 已结束且建议仍未被消费 → 补启动
+      if (!this.processingPromise && this.inputQueue.length > 0) {
+        this.processingPromise = this.runProcessingLoop().finally(() => {
+          this.processingPromise = null;
+        });
+      }
+    });
   }
 
   // ────────────────────────────────────────────────
@@ -1225,7 +1353,8 @@ export class CLIAAgent {
         typeof m.content === 'string' &&
         !m.content.startsWith('[工作记忆]') &&
         !m.content.startsWith('【') &&
-        !m.content.startsWith('[知识库检索]'),
+        !m.content.startsWith('[知识库检索]') &&
+        !m.content.startsWith('[Worklog#'),
     ).length;
   }
 
@@ -1245,11 +1374,45 @@ export class CLIAAgent {
     return `${rand()}-${rand()}-${rand()}`;
   }
 
-  /** 设置会话 ID（用于从文件恢复会话时指定） */
+  /** 设置会话 ID（用于从文件恢复会话时指定），并同步 worklog 归档分区 */
   setSessionId(id: string): void {
     this.sessionId = id;
+    worklogStore.setSessionId(id);
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

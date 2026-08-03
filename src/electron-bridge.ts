@@ -13,7 +13,7 @@ import type { UIMessage } from './ui';
 // ═════════════════════════════════════════════════════
 
 export interface BridgeMessage {
-  role: 'user' | 'agent' | 'system' | 'tool' | 'divider' | 'banner' | 'blank' | 'subagent' | 'thinking';
+  role: 'user' | 'agent' | 'system' | 'tool' | 'divider' | 'banner' | 'blank' | 'subagent' | 'instructor' | 'thinking';
   content: string;
   createdAt?: number;
   subagentName?: string;
@@ -54,6 +54,7 @@ export type ChildToParent =
   | { type: 'blank' }
   | { type: 'init-done' }
   | { type: 'subagent'; name: string; content: string }
+  | { type: 'instructor'; name: string; content: string }
   | { type: 'kb-build'; phase: 'building' | 'done' | 'failed'; message: string }
   | { type: 'sidebar-data'; data: Record<string, unknown> }
   | { type: 'collab-request'; requestId: string; kind: 'sessions' | 'send'; to?: string; content?: string }
@@ -209,6 +210,12 @@ export class ElectronUIBridge {
       this.messages.push({ role: 'subagent', content, subagentName: name, createdAt: Date.now() });
     }
     this.send({ type: 'subagent', name, content });
+  }
+
+  /** 展示 instructor 建议气泡（用户样式 + 鲸鱼标志，建议内容已剥离【xxx 建议】头） */
+  addInstructorMessage(content: string, name?: string): void {
+    this.messages.push({ role: 'instructor', content, subagentName: name, createdAt: Date.now() });
+    this.send({ type: 'instructor', name: name || '', content });
   }
 
   addDivider(): void {
@@ -441,6 +448,9 @@ function formatToolCallHtml(toolName: string, args: Record<string, unknown>): st
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+
+
 
 
 

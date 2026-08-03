@@ -38,6 +38,8 @@ export interface SubAgentState {
   instructorRoundCount?: number;
   /** instructor 独立消息历史 */
   instructorMessages?: import('ai').ModelMessage[];
+  /** instructor 当前执行的 AbortController（fire/agent 退出时用于中断后台流） */
+  instructorAbortController?: AbortController;
 }
 
 /** 子模型工作提交内容 */
@@ -65,4 +67,7 @@ export interface TaskParams {
   task: string;
   context?: string;
 }
+
+
+
 

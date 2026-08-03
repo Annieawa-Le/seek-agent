@@ -41,11 +41,22 @@ export function registerBuiltinModes(): void {
   registerMode({
     name: 'worker',
     label: '打工人模式',
-    description: '跨会话执行者，接受协作派活',
-    icon: '🧑‍🔧',
+    description: '真正的打工人，开工前先创建开发引导员监督',
+    icon: '🧑🔧',
     mainReplacement: readAddon('WORKER.md'), // 角色模式：替换 MAIN.md 成为主提示词
   });
+
+  // 幻觉模式只注册 meta（/mode 可激活、UI 可选），提示词由 illusion_agent.ts 自管：
+  // 不挂 mainReplacement/promptAddon，避免 loadDefaultPrompts 注入真实技能列表戳破"万能工具"幻觉。
+  registerMode({
+    name: 'hallucination',
+    label: '100% AI 模式',
+    description: '万能工具幻觉世界：主模型自由编造工具调用，后台 AI 执行器圆梦',
+    icon: '🪄',
+  });
 }
+
+
 
 
 

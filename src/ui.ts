@@ -299,7 +299,7 @@ function timestamp(): string {
 // 消息类型
 // ═════════════════════════════════════════════════════
 export interface UIMessage {
-  role: 'user' | 'agent' | 'system' | 'tool' | 'divider' | 'banner' | 'blank' | 'subagent' | 'thinking';
+  role: 'user' | 'agent' | 'system' | 'tool' | 'divider' | 'banner' | 'blank' | 'subagent' | 'instructor' | 'thinking';
   content: string;
   /** 消息创建时间戳（毫秒） */
   createdAt?: number;
@@ -967,6 +967,13 @@ export class TerminalUI {
     this.resetScroll();
     this.refreshDisplay();
   }
+  addInstructorMessage(content: string, name?: string): void {
+    this.messages.push({ role: 'instructor', content, subagentName: name, createdAt: Date.now() });
+    this.inputBuffer = '';
+    this.cursorPos   = 0;
+    this.resetScroll();
+    this.refreshDisplay();
+  }
   addAgentMessage(content: string): void {
     this.messages.push({ role: 'agent', content, createdAt: Date.now() });
     this.resetScroll();
@@ -1360,6 +1367,47 @@ export class TerminalUI {
           });
         }
         // 同 user 消息一样右对齐
+        const allLines: string[] = [title, sep];
+        for (const { body, indicator } of contentPairs) {
+          const fullLine = body + indicator;
+          if (visibleWidth(stripAnsi(fullLine)) <= width) {
+            allLines.push(fullLine);
+          } else {
+            const indW = indicator ? visibleWidth(stripAnsi(indicator)) : 0;
+            const wrapW = Math.max(10, width - indW);
+            const wrapped = ansiWrap(body, wrapW, '    ');
+            for (let wi = 0; wi < wrapped.length; wi++) {
+              allLines.push(wrapped[wi] + (wi === wrapped.length - 1 ? indicator : ''));
+            }
+          }
+        }
+        const maxW = Math.min(width,
+          Math.max(...allLines.map(l => visibleWidth(stripAnsi(l)))),
+        );
+        const basePad = Math.max(0, width - maxW - 7);
+        for (const raw of allLines) {
+          const lineW = visibleWidth(stripAnsi(raw));
+          const extra = maxW - lineW;
+          const pad = Math.max(0, basePad + extra);
+          lines.push(`${' '.repeat(pad)}${raw}`);
+        }
+        lines.push('');
+        break;
+      }
+      case 'instructor': {
+        // 鲸鱼指导：右对齐 user 风格 + 🐋 标志，与用户输入同侧区分
+        const sname = msg.subagentName ?? '教练';
+        const title = '    ' + FG.cyan + '🐋 ' + sname + RESET_BG + ' ' + DIM + FG.black + formatTime(msg.createdAt) + RESET_BG + ' ' + FG.cyan + '|' + RESET_BG;
+        const sep = '  ' + FG.cyan + '╰═' + '═'.repeat(visibleWidth(sname + formatTime(msg.createdAt)) + 4) + '╯' + RESET_BG;
+        const contentPairs: Array<{ body: string; indicator: string }> = [];
+        const mdLines = renderMarkdownText(msg.content);
+        for (let ci = 0; ci < mdLines.length; ci++) {
+          const indicator = ci === 0 ? ` ${FG.cyan}◀${RESET_BG}` : '';
+          contentPairs.push({
+            body: `    ${mdLines[ci]}${RESET_BG}`,
+            indicator,
+          });
+        }
         const allLines: string[] = [title, sep];
         for (const { body, indicator } of contentPairs) {
           const fullLine = body + indicator;
@@ -1787,6 +1835,9 @@ export class TerminalUI {
     out.write(cursorTo(row, 1) + BG.white + displayText + eraseLine(0));
   }
 }
+
+
+
 
 
 

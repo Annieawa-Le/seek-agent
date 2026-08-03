@@ -41,12 +41,9 @@ const READ_TOOLS = new Set([
   'scanning_class',
   'read_package',
 ]);
-
 const LINE_READ_TOOLS = new Set([
   'read_lines',
-  'read_num_line',
 ]);
-
 const SEARCH_TOOLS = new Set([
   'search_all_file',
   'search_sub_file',
@@ -193,6 +190,7 @@ export function createMessageHook(options?: ContextManagerOptions): MessageHook 
       .filter(Boolean) as ModelMessage[];
   };
 }
+
 
 
 

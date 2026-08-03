@@ -16,6 +16,11 @@ import { getModel } from '../../../model-provider';
 import { subAgentManager } from './manager';
 import { appendChatMessage } from '../../../modes/chat-thread';
 import type { SubAgentState, SubmissionPayload } from './types';
+import * as fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── 子模型系统提示词（注入工具调用说明） ──
 
@@ -312,6 +317,40 @@ export async function executeChildAgent(
 
 // ── Instructor 执行引擎 ──
 
+/** 内置默认 instructor 提示词（src/prompts/INSTRUCTOR.md 缺失/解析失败时回退） */
+const DEFAULT_INSTRUCTOR_PROMPT = `你是一个开发指导助手。你的任务是按照以下要求发散思维：
+
+{{requirement}}
+
+每次你收到主模型的最新输出后，基于它进行发散思考，提出下一步开发的建议方向。
+你的输出会作为用户消息注入主模型，推动开发进程。
+请保持思维的发散性、创造性和建设性。
+
+注意：
+- 每次只提交一轮思考结果
+- 不需要使用工具，直接输出文本
+- 使用 markdown 格式输出，让内容更易读
+- 输出应简洁有深度，不要过长
+{{extraInstruction}}`;
+
+/**
+ * 加载 instructor 提示词模板（src/prompts/INSTRUCTOR.md），替换占位符。
+ * 每次执行时读盘，便于用户编辑文件后即时生效；文件缺失时回退内置默认。
+ */
+export function loadInstructorPrompt(requirement: string, extraInstruction: string): string {
+  const render = (tpl: string) =>
+    tpl.replaceAll('{{requirement}}', requirement).replaceAll('{{extraInstruction}}', extraInstruction);
+  try {
+    const promptPath = path.join(__dirname, '..', '..', '..', 'prompts', 'INSTRUCTOR.md');
+    if (fs.existsSync(promptPath)) {
+      let tpl = fs.readFileSync(promptPath, 'utf-8').replace(/<!--[\s\S]*?-->/g, ''); // 剥离 HTML 注释（占位符说明等编辑辅助文字不进模型上下文）
+      if (tpl.includes('{{requirement}}')) return render(tpl.trim());
+    }
+  } catch { /* 读盘失败回退默认 */ }
+  return render(DEFAULT_INSTRUCTOR_PROMPT);
+}
+
+
 /**
  * 执行 instructor 模式：主模型每轮工作完成后，发散思维提出建议。
  * instructor 有自己独立的消息历史，每次调用时追加主模型最新输出，
@@ -327,26 +366,18 @@ export async function executeInstructorAgent(
 ): Promise<string | null> {
   subAgentManager.updateStatus(agent.name, 'running');
 
+  // 每次执行使用独立的 AbortController（fire / agent 退出时可中断后台流）；
+  // 上一次执行结束后旧 signal 作废
+  agent.instructorAbortController?.abort();
+  const abortController = new AbortController();
+  agent.instructorAbortController = abortController;
+
   try {
     const requirement = agent.requirement || '对下一步开发提出建设性建议';
-    const extraPrompt = agent.systemPrompt ? `
+    const extraInstruction = agent.systemPrompt ? '\n\n额外指导：\n' + agent.systemPrompt : '';
 
-额外指导：
-${agent.systemPrompt}` : '';
-
-    const systemPrompt = `你是一个开发指导助手。你的任务是按照以下要求发散思维：
-
-${requirement}
-
-每次你收到主模型的最新输出后，基于它进行发散思考，提出下一步开发的建议方向。
-你的输出会作为用户消息注入主模型，推动开发进程。
-请保持思维的发散性、创造性和建设性。
-
-注意：
-- 每次只提交一轮思考结果
-- 不需要使用工具，直接输出文本
-- 使用 markdown 格式输出，让内容更易读
-- 输出应简洁有深度，不要过长${extraPrompt}`;
+    // 提示词模板来自 src/prompts/INSTRUCTOR.md（可自定义，每次执行读盘），缺失时回退内置默认
+    const systemPrompt = loadInstructorPrompt(requirement, extraInstruction);
 
     // ── 根据轮次注入周期性提醒 ──
     const roundCount = agent.instructorRoundCount || 0;
@@ -370,10 +401,13 @@ ${lastAssistantOutput}` },
       model: getModel(),
       system: systemPrompt,
       messages: msgs,
+      abortSignal: abortController.signal,
     });
 
     let fullText = '';
     for await (const chunk of result.textStream) {
+      // 中断信号到达时停止收集（AbortError 由下方 catch 统一处理）
+      if (abortController.signal.aborted) break;
       fullText += chunk;
     }
 
@@ -396,9 +430,20 @@ ${lastAssistantOutput}` },
     return fullText;
 
   } catch (err: any) {
-    const errorMsg = `instructor 出错: ${err.message}`;
-    subAgentManager.setError(agent.name, errorMsg);
+    // 中断视为正常结束（fire / agent 退出），不产生建议也不污染状态
+    if (err?.name === 'AbortError' || err?.message?.includes('abort') || abortController.signal.aborted) {
+      subAgentManager.updateStatus(agent.name, 'done');
+      return null;
+    }
+    // 上游/网络错误：静默复位状态（下次主模型轮次仍可触发），错误细节留到 error 字段
+    agent.error = `instructor 出错: ${err.message}`;
+    subAgentManager.updateStatus(agent.name, 'done');
     return null;
+  } finally {
+    // 执行结束，清掉引用（agent 销毁时不再误 abort 已结束的流）
+    if (agent.instructorAbortController === abortController) {
+      agent.instructorAbortController = undefined;
+    }
   }
 }
 
@@ -446,6 +491,14 @@ export async function queryChildAgent(
     return `查询出错: ${err.message}`;
   }
 }
+
+
+
+
+
+
+
+
 
 
 

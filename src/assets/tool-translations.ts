@@ -78,13 +78,6 @@ def('read_lines', 'read', '■', (args) => {
   const fp = (args?.filePath ?? '(?)') as string;
   const start = args?.startLine ?? '?';
   const end = args?.endLine ?? '?';
-  return `读取: ${makeReadPathLabel(fp)} (行 ${start}-${end})`;
-}, 'single');
-
-def('read_num_line', 'read', '■', (args) => {
-  const fp = (args?.filePath ?? '(?)') as string;
-  const start = args?.startLine ?? '?';
-  const end = args?.endLine ?? '?';
   return `读取(带行号): ${makeReadPathLabel(fp)} (行 ${start}-${end})`;
 }, 'single');
 
@@ -328,6 +321,7 @@ export function registerSkillTranslations(
     registerTool(name, trans);
   }
 }
+
 
 
 

@@ -58,6 +58,23 @@ spawn_agent(
 
 适用场景：在主模型每轮工作后补充思路，保持项目方向感。
 
+#### 异步信号机制（v2）
+
+主模型一轮完成后向 instructor 发信号（fire-and-forget），**不阻塞主循环**：
+
+1. `triggerInstructorAfterRound` 同步派发信号，立即返回
+2. instructor 在后台独立执行 LLM 调用（有自己的 AbortController，可被 `agent_fire` / agent 退出中断）
+3. 完成后把建议**作为用户输入直接 push 进 inputQueue，开启主模型下一轮**（保持"建议 = 用户输入"的语义）
+4. 建议在 UI 上渲染为**用户样式 + 小鲸鱼标志**的气泡（`role: 'instructor'`）
+
+防重入：instructor 正在运行（`status === 'running'`）时跳过本次信号，避免建议堆积。
+中断处理：fire / agent 退出会 abort 后台流，AbortError 视为正常结束，不产生建议也不污染状态。
+
+#### 提示词自定义
+
+instructor 的 system prompt 模板在 `src/prompts/INSTRUCTOR.md`，可直接编辑（每次执行读盘，保存即生效）。
+占位符 `{{requirement}}`（发散方向要求，来自 spawn_agent 的 requirement）与 `{{extraInstruction}}`（额外指导，来自 systemPrompt）会在执行时自动替换。
+
 ## 工作流程
 
 ```
@@ -74,4 +91,7 @@ spawn_agent(
 - 子模型的工具调用直接使用主系统全局注册的工具（`add_patch` / `del_patch` / `modify_patch` 等）
 - 子模型的提交在主模型空闲时才会注入（排队机制）
 - 退出程序时自动销毁所有子模型
+
+
+
 

@@ -135,9 +135,10 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
   };
 
   const handleSwitchSession = (s: SessionInfo) => {
-    // 该会话已有存活进程（自动保存后仍在运行/已加载）→ 用其进程 sessionId 切换，
-    // 避免按文件名重复拉起第二个进程；未运行的历史会话才按文件名 spawn + /loadsession。
-    const target = activeSessionIds.includes(s.sessionId as string) ? (s.sessionId as string) : s.name;
+    // 优先用文件内 sessionId（new-xxx 形态，与自动保存/主进程/Agent 构造对齐），
+    // 避免无存活进程时按文件名（标题）拉起，导致 worklog 归档分区对不上旧文件而计数归零；
+    // 旧文件无 sessionId 字段时回退文件名（标题）。
+    const target = s.sessionId || s.name;
     onSwitchSession(target, s.name);
   };
 
@@ -216,6 +217,8 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
         {sessions.length === 0 && activeSessionIds.length === 0 ? <div className="session-empty">暂无会话</div> : <>
           {sessions.map(s => {
             const timeStr = s.timestamp ? new Date(s.timestamp).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+            // 显示名优先纯标题（title），回退文件名剥 session- 前缀（避免展示 session- 前缀/id 形态）
+            const displayName = s.title || s.name.replace(/^session-/, '');
             // 活跃进程关联：进程 sessionId 匹配文件 sessionId（新身份）或文件名（旧文件/手动保存兜底）
             const alive = activeSessionIds.includes(s.sessionId as string) || activeSessionIds.includes(s.name);
             const isActive = currentSessionId === s.sessionId || currentSessionId === s.name;
@@ -224,9 +227,9 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
             const canGenerate = isActive || alive;
             const generating = cardGenerating.has(s.name);
             return (
-              <div key={s.name} className={`session-item${isActive ? ' active' : ''}`} onClick={() => handleSwitchSession(s)} title={`切换到会话 ${s.name}`}>
+              <div key={s.name} className={`session-item${isActive ? ' active' : ''}`} onClick={() => handleSwitchSession(s)} title={`切换到会话 ${displayName}`}>
                 <div className="session-name">
-                  {s.name}
+                  {displayName}
                   {isRunning && <span className="session-dot" title="该会话正在运行">●</span>}
                 </div>
                 <div className="session-meta-row">
@@ -317,6 +320,10 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
     </aside>
   );
 }
+
+
+
+
 
 
 

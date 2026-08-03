@@ -61,7 +61,7 @@ declare global {
 
 /* ─── Agent 消息 ─── */
 
-export type MessageRole = 'user' | 'agent' | 'tool' | 'system' | 'subagent' | 'divider' | 'blank' | 'banner';
+export type MessageRole = 'user' | 'agent' | 'tool' | 'system' | 'subagent' | 'instructor' | 'divider' | 'blank' | 'banner';
 
 export interface ToolMeta {
   toolName: string;
@@ -84,7 +84,7 @@ export interface ReplayMessage {
 }
 
 export interface AgentMessage {
-  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'thinking-bubble' | 'thinking-delta' | 'listen' | 'subagent' | 'append' | 'kb-build' | 'input-state' | 'clear-messages' | 'sidebar-data' | 'replace-messages';
+  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'thinking-bubble' | 'thinking-delta' | 'listen' | 'subagent' | 'instructor' | 'append' | 'kb-build' | 'input-state' | 'clear-messages' | 'sidebar-data' | 'replace-messages';
   /** 所属会话（主进程在转发时附加） */
   sessionId?: string;
   role?: MessageRole;
@@ -171,6 +171,8 @@ export interface SessionInfo {
   name: string;
   /** 自动保存文件内记录的 sessionId（运行中会话的关联键，与主进程活跃进程对齐） */
   sessionId: string | null;
+  /** 会话纯标题（agent 副模型生成；渲染层标签页/列表显示名用，可能为空） */
+  title?: string;
   timestamp: string | null;
   messageCount: number;
   preview: string;
@@ -236,6 +238,9 @@ export interface AgentStatus {
   sessionId?: string;
   code?: number;
 }
+
+
+
 
 
 

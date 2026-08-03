@@ -3,7 +3,7 @@ import type { AgentMessage, ToolHistoryEntry, PanelState, ReplayMessage } from '
 
 export interface DisplayMessage {
   id: number;
-  role: 'user' | 'agent' | 'tool' | 'system' | 'subagent' | 'divider' | 'blank' | 'banner' | 'thinking';
+  role: 'user' | 'agent' | 'tool' | 'system' | 'subagent' | 'instructor' | 'divider' | 'blank' | 'banner' | 'thinking';
   content: string;
   createdAt: number;
   toolMeta?: { toolName: string; args?: Record<string, unknown> };
@@ -360,6 +360,7 @@ export function useMessages() {
     startThinking, appendThinkingDelta, endThinking, beginNewRound,
   };
 }
+
 
 
 

@@ -78,7 +78,7 @@ async function main() {
   console.log('\n[3] 推荐工具名有效性检查');
   // 从 worker-library/index.ts 与核心注册表读取工具名（静态清单，避免加载整个 tools 容器）
   const coreNames = [
-    'read_file', 'read_lines', 'read_num_line', 'scan_file',
+    'read_file', 'read_lines', 'scan_file',
     'execute_command', 'search_all_file', 'search_sub_file', 'search_directory', 'search_content',
     'create_file', 'replace_file', 'add_patch', 'del_patch', 'modify_patch', 'undo_patch', 'history_patch',
     'desk_add', 'desk_list', 'desk_remove', 'desk_clear',
@@ -202,6 +202,7 @@ main().catch((err) => {
   console.error('测试脚本异常:', err);
   process.exit(1);
 });
+
 
 
 

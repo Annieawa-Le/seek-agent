@@ -36,7 +36,7 @@ function recentUserInputs(messages: ModelMessage[], max = 6): string {
     if (m.role !== 'user' || typeof m.content !== 'string') continue;
     const text = m.content.trim();
     if (!text) continue;
-    if (text.startsWith('[工作记忆]') || text.startsWith('【') || text.startsWith('[知识库检索]')) continue;
+    if (text.startsWith('[工作记忆]') || text.startsWith('【') || text.startsWith('[知识库检索]') || text.startsWith('[Worklog#')) continue;
     inputs.push(text);
   }
   return inputs.join('\n');
@@ -76,13 +76,15 @@ export function sanitizeTitle(title: string): string {
 export function fallbackTitle(messages: ModelMessage[]): string {
   const first = messages.find((m) =>
     m.role === 'user' && typeof m.content === 'string'
-    && !m.content.startsWith('[工作记忆]') && !m.content.startsWith('【') && !m.content.startsWith('[知识库检索]'),
+    && !m.content.startsWith('[工作记忆]') && !m.content.startsWith('【') && !m.content.startsWith('[知识库检索]') && !m.content.startsWith('[Worklog#'),
   );
   if (first && typeof first.content === 'string') {
     return sanitizeTitle(first.content.slice(0, 20));
   }
   return '未命名会话';
 }
+
+
 
 
 

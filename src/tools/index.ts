@@ -10,7 +10,7 @@ import { registerPanelProvider } from './panel-registry';
 import {
   deskAddTool, deskListTool, deskRemoveTool, deskClearTool,
 } from './ref-desk';
-import { readFileTool, readCertainLines, readNumline, scanFileTool } from './read-file';
+import { readFileTool, readNumline, scanFileTool } from './read-file';
 import { executeCommandTool } from './execute-command';
 import {
   memoryFocus, memoryShorten,
@@ -19,6 +19,7 @@ import {
 } from './memory';
 import { searchAllFile, searchSubFile, searchDirectory, searchContent } from './search-files';
 import { createFile, addPatch, delPatch, modifyPatch, replaceFile, undoPatch, historyPatch } from './file-manipulation';
+import { worklogRecallTool, workRecallTool } from './worklog-tools';
 import { createTodo, finishStep, undoStep, rerollStep, delStep, readTodo, delTodo, activeTodo } from './todo';
 import { toolCache } from './tool-cache';
 import { collabSessionsTool, collabSendTool } from './collab';
@@ -56,8 +57,7 @@ async function tryImport(basePath: string): Promise<any> {
 // ── 核心工具表 ──
 const coreTools = {
   read_file: wrapTool('read_file', readFileTool),
-  read_lines: wrapTool('read_lines', readCertainLines),
-  read_num_line: wrapTool('read_num_line', readNumline),
+  read_lines: wrapTool('read_lines', readNumline),
   scan_file: wrapTool('scan_file', scanFileTool),
   execute_command: wrapTool('execute_command', executeCommandTool),
   search_all_file: wrapTool('search_all_file', searchAllFile),
@@ -98,6 +98,9 @@ const coreTools = {
   memory_clear: wrapTool('memory_clear', memoryClear),
   memory_stats: wrapTool('memory_stats', memoryStats),
   memory_shorten: wrapTool('memory_shorten', memoryShorten),
+  // Worklog 归档召回（记忆消退路径）
+  worklog_recall: wrapTool('worklog_recall', worklogRecallTool),
+  work_recall: wrapTool('work_recall', workRecallTool),
   // 跨会话协作
   collab_sessions: wrapTool('collab_sessions', collabSessionsTool),
   collab_send: wrapTool('collab_send', collabSendTool),
@@ -463,4 +466,8 @@ export function stripToolExecutes(toolSet: Record<string, any>): Record<string, 
   }
   return result;
 }
+
+
+
+
 
