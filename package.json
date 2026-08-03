@@ -91,10 +91,12 @@
     "dotenv": "^17.4.2",
     "iconv-lite": "^0.7.2",
     "image-size": "^2.0.2",
+    "ink": "^7.1.1",
     "parse5": "^8.0.1",
     "pdf-parse": "^2.4.5",
     "playwright-core": "^1.62.1",
     "pngjs": "^7.0.0",
+    "react": "19.2.7",
     "tesseract.js": "^7.0.0",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",
@@ -102,6 +104,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
+    "@types/react": "^19.2.17",
     "electron": "^42.5.0",
     "electron-builder": "^26.15.3"
   }

@@ -4,9 +4,9 @@
     "target": "ESNext",
     // 设置模块系统为 ESNext
     "module": "ESNext",
-    // 使用 Bundler 模块解析策略 (更灵活，适用于 tsc 不打包的场景)
     "moduleResolution": "Bundler",
-    "lib": ["ES2022"],                 // 只包含 ES 类型，无 DOM（因为是 CLI）
+    "jsx": "react",                     // Ink TUI 使用 JSX（classic，与 tsx 运行时一致）
+    "lib": ["ES2022", "DOM"],         // 含 DOM 类型（React 类型依赖）
     "resolveJsonModule": true,        // 允许导入 .json 文件
 
     /* 输出配置 */
