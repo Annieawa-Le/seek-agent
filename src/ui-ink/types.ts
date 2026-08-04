@@ -54,4 +54,15 @@ export interface UIState {
   scrollOffset: number;
   /** 提示符文本 */
   promptText: string;
+  /** 命令叠加层是否打开 */
+  paletteOpen: boolean;
+  /** 叠加层搜索词 */
+  paletteQuery: string;
+  /** 叠加层当前选中项索引（在过滤后的列表中） */
+  /** 叠加层当前选中项索引（在过滤后的列表中） */
+  paletteIndex: number;
+  /** 当前 git 分支名（空字符串表示未知） */
+  gitBranch: string;
 }
+
+

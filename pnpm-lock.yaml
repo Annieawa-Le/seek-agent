@@ -41,6 +41,9 @@ importers:
       ink:
         specifier: ^7.1.1
         version: 7.1.1(@types/react@19.2.17)(react@19.2.7)
+      ink-use-mouse:
+        specifier: ^1.0.0
+        version: 1.0.0(ink@7.1.1(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
       parse5:
         specifier: ^8.0.1
         version: 8.0.1
@@ -1686,6 +1689,12 @@ packages:
 
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
+
+  ink-use-mouse@1.0.0:
+    resolution: {integrity: sha512-n2M+NAoL5+3/O9j3SIanJhEMseBZU2/RPerHTQOg9OHtMVaf4NBxa0gmj+TkAC/vH9jfv9dErKLx/Qar3vd1GQ==}
+    peerDependencies:
+      ink: '>=4.0.0'
+      react: '>=18.0.0'
 
   ink@7.1.1:
     resolution: {integrity: sha512-Y43xxa1ZSPvpmfLHcN5o+OdP8Rf8ykkNJEuKYOUNZKT8wXVNLFTtEm1nSDMQkfBH+YANF4Xuu0hhZ4ejqAtN2w==}
@@ -4166,6 +4175,11 @@ snapshots:
       wrappy: 1.0.2
 
   inherits@2.0.4: {}
+
+  ink-use-mouse@1.0.0(ink@7.1.1(@types/react@19.2.17)(react@19.2.7))(react@19.2.7):
+    dependencies:
+      ink: 7.1.1(@types/react@19.2.17)(react@19.2.7)
+      react: 19.2.7
 
   ink@7.1.1(@types/react@19.2.17)(react@19.2.7):
     dependencies:

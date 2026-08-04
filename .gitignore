@@ -40,3 +40,8 @@ repos/
 # VS Code 源码（本地参考，非项目代码）
 ai-ide/
 
+
+
+# TUI 调试产物（截图 / 鼠标事件探针输出）
+test/*.png
+mouse-*-result.json

@@ -1,8 +1,8 @@
+import { readFileSync } from 'node:fs';
 import type { UIState, UIMessage } from './types';
 import type { RawBulk } from '../tools/raw-bulk-types';
 import { WHALE } from '../assets/whale';
-
-/** render() 返回的 Ink 实例最小接口 */
+import { createDefaultPaletteItems, filterPalette, type PaletteItem } from './palette';
 interface InkInstance {
   unmount: () => void;
   waitUntilExit: Promise<unknown>;
@@ -48,6 +48,13 @@ export class TerminalUI {
   // ─── 滚动状态（按消息条数） ───
   private scrollOffset = 0;
 
+  // ─── 命令叠加层状态 ───
+  private paletteOpen = false;
+  private paletteQuery = '';
+  private paletteIndex = 0;
+  private paletteItems: PaletteItem[] = [];
+  private gitBranch = '';
+
   // ─── Ink 渲染桥接：useSyncExternalStore 订阅 ───
   private listeners = new Set<() => void>();
   private version = 0;
@@ -90,6 +97,10 @@ export class TerminalUI {
       toolCallCount: this.toolCallCount,
       scrollOffset: this.scrollOffset,
       promptText: this.promptText,
+      paletteOpen: this.paletteOpen,
+      paletteQuery: this.paletteQuery,
+      paletteIndex: this.paletteIndex,
+      gitBranch: this.gitBranch,
     };
   }
 
@@ -101,6 +112,8 @@ export class TerminalUI {
     if (this.running) return;
     this.promptText = promptText;
     this.running = true;
+    this.gitBranch = this.detectGitBranch();
+    this.initPalette();
     this.messages = [
       { role: 'banner', content: WHALE },
       { role: 'system', content: '✦ Seek Agent 已启动。输入 /exit 退出，/clear 清屏。PageUp/PageDown 或滚轮滚动历史。' },
@@ -109,6 +122,16 @@ export class TerminalUI {
     void this.mountInk();
   }
 
+  /** 读取当前 git 分支（失败返回空字符串） */
+  private detectGitBranch(): string {
+    try {
+      const head = readFileSync('.git/HEAD', 'utf8').trim();
+      const m = head.match(/^ref:\s*refs\/heads\/(.+)$/);
+      return m ? m[1] : head.slice(0, 12);
+    } catch {
+      return '';
+    }
+  }
   /** 异步挂载 Ink 渲染树（避免 start 内 await 阻塞） */
   private async mountInk(): Promise<void> {
     const { render } = await import('ink');
@@ -390,11 +413,133 @@ export class TerminalUI {
   }
 
   // ═══════════════════════════════════════════════════
+  // 命令叠加层（command palette）
+  // ═══════════════════════════════════════════════════
+
+  /** 初始化默认命令清单（在 start 前由外部设置回调后调用） */
+  initPalette(): void {
+    this.paletteItems = createDefaultPaletteItems({
+      onSubmit: (text) => { if (this.onSubmit) this.onSubmit(text); },
+      onCommand: (cmd) => { if (this.onCommand) this.onCommand(cmd); },
+      onExit: () => { if (this.onExit) this.onExit(); },
+    });
+  }
+
+  /** 外部追加命令面板项 */
+  addPaletteItem(item: PaletteItem): void {
+    this.paletteItems = [...this.paletteItems, item];
+  }
+
+  getPaletteItems(): PaletteItem[] {
+    return this.paletteItems;
+  }
+
+  isPaletteOpen(): boolean {
+    return this.paletteOpen;
+  }
+
+  /** 打开 / 关闭叠加层 */
+  togglePalette(): void {
+    if (this.paletteOpen) {
+      this.paletteOpen = false;
+      this.paletteQuery = '';
+      this.paletteIndex = 0;
+    } else {
+      this.paletteOpen = true;
+      this.paletteQuery = '';
+      this.paletteIndex = 0;
+    }
+    this.notify();
+  }
+
+  /** 设置搜索词并重置选中到第一项 */
+  setPaletteQuery(q: string): void {
+    this.paletteQuery = q;
+    this.paletteIndex = 0;
+    this.notify();
+  }
+
+  /** 移动选中（支持循环），列表为过滤后的可见项 */
+  movePaletteIndex(delta: number, visibleCount: number): void {
+    if (visibleCount <= 0) {
+      this.paletteIndex = 0;
+      this.notify();
+      return;
+    }
+    this.paletteIndex = (this.paletteIndex + delta + visibleCount) % visibleCount;
+    this.notify();
+  }
+
+  /** 执行当前选中项；找不到则忽略 */
+  runSelectedPalette(visibleItems: PaletteItem[]): void {
+    const item = visibleItems[this.paletteIndex];
+    if (item) {
+      this.paletteOpen = false;
+      this.paletteQuery = '';
+      this.paletteIndex = 0;
+      this.notify();
+      item.run();
+    }
+  }
+
+  /** 鼠标点击某项直接执行 */
+  runPaletteItem(item: PaletteItem): void {
+    this.paletteOpen = false;
+    this.paletteQuery = '';
+    this.paletteIndex = 0;
+    this.notify();
+    item.run();
+  }
+
+  // ═══════════════════════════════════════════════════
   // 按键处理（由 Ink useInput 调用）
   // ═══════════════════════════════════════════════════
 
   handleKey(input: string, key: { upArrow?: boolean; downArrow?: boolean; leftArrow?: boolean; rightArrow?: boolean; pageUp?: boolean; pageDown?: boolean; home?: boolean; end?: boolean; return?: boolean; escape?: boolean; ctrl?: boolean; shift?: boolean; tab?: boolean; backspace?: boolean; delete?: boolean; meta?: boolean }): void {
     const isCtrl = !!key.ctrl;
+
+    // ─── 鼠标序列（\x1b[<...）直接忽略：由 ink-use-mouse 处理 ───
+    if (input.startsWith('\x1b[<')) return;
+
+    // ─── 命令叠加层激活时：按键全部转给面板 ───
+    if (this.paletteOpen) {
+      const visible = filterPalette(this.paletteItems, this.paletteQuery);
+      if (key.escape || (isCtrl && input === 'p')) {
+        this.togglePalette();
+        return;
+      }
+      if (key.return) {
+        this.runSelectedPalette(visible);
+        return;
+      }
+      if (key.upArrow || key.pageUp) {
+        this.movePaletteIndex(-1, visible.length);
+        return;
+      }
+      if (key.downArrow || key.pageDown) {
+        this.movePaletteIndex(1, visible.length);
+        return;
+      }
+      if (key.backspace) {
+        this.setPaletteQuery(this.paletteQuery.slice(0, -1));
+        return;
+      }
+      // 可打印字符：追加到搜索词
+      if (input && !isCtrl && !key.meta) {
+        const printable = input.replace(/[\x00-\x1f\x7f]/g, '');
+        if (printable) {
+          this.setPaletteQuery(this.paletteQuery + printable);
+          return;
+        }
+      }
+      return; // 其余按键在叠加层打开时忽略
+    }
+
+    // ─── Ctrl+P 打开命令叠加层 ───
+    if (isCtrl && input === 'p') {
+      this.togglePalette();
+      return;
+    }
 
     // ─── Ctrl+C：AI 运行时中断当前轮次，否则退出 ───
     if (isCtrl && input === 'c') {
@@ -574,6 +719,30 @@ export class TerminalUI {
     }
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

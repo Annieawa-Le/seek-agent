@@ -92,6 +92,7 @@
     "iconv-lite": "^0.7.2",
     "image-size": "^2.0.2",
     "ink": "^7.1.1",
+    "ink-use-mouse": "^1.0.0",
     "parse5": "^8.0.1",
     "pdf-parse": "^2.4.5",
     "playwright-core": "^1.62.1",
