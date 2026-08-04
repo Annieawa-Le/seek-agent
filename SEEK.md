@@ -1,6 +1,6 @@
 # seek-agent — 项目总览
 
-seek-agent 是一个**AI 编程助手运行时**，核心是一个由 system prompt + 工具系统驱动的 AI Agent，同时配套了 TUI / Electron / VS Code Extension 三种交互界面。整个项目围绕"让 AI 在本地工作区安全、高效地协助编程"这一目标设计。
+seek-agent 是一个**AI 编程助手运行时**，核心是一个由 system prompt + 工具系统驱动的 AI Agent，配套 TUI / Electron 两种交互界面（VS Code 扩展已搁置）。整个项目围绕"让 AI 在本地工作区安全、高效地协助编程"这一目标设计。
 
 ---
 
@@ -18,7 +18,8 @@ seek-agent/
 │   ├── index.ts                  # TUI 模式入口（TerminalUI + CLIAAgent）
 │   ├── electron-entry.ts         # Electron 模式入口（ElectronUIBridge + CLIAAgent）
 │   ├── agent.ts                  # CLIAAgent — 核心 Agent 类
-│   ├── ui.ts                     # TerminalUI — 终端渲染层（大文件，约 2000 行）
+│   ├── ui.ts                     # TerminalUI 转发薄壳（实现见 src/ui-ink/）
+│   ├── ui-ink/                   # TUI 终端渲染层（Ink + React 组件化）
 │   ├── electron-bridge.ts        # ElectronUIBridge — stdio JSON 协议桥接
 │   ├── message_managing.ts       # MessageHook — 上下文去重/管理
 │   ├── memory_agent.ts           # composeHooks — hook 组合器
@@ -71,14 +72,7 @@ seek-agent/
 │   ├── preload.cjs               # IPC 桥接
 │   └── renderer/                 # Web UI（React + Vite + TypeScript）
 │
-├── extension/                    # VS Code 扩展
-│   └── src/
-│       ├── activate.ts           # 扩展入口
-│       ├── agentProcess.ts       # agent 进程管理
-│       ├── agentClient.ts        # JSON-RPC 客户端
-│       ├── chatParticipant.ts    # Chat 参与者（流式渲染）
-│       ├── completionProvider.ts # 内联补全
-│       └── codeActionProvider.ts # 灯泡菜单
+├── extension/                    # VS Code 扩展（已搁置，目录移除；历史代码见 git）
 │
 ├── packages/agent-runtime/       # JSON-RPC 运行时（独立包）
 │   └── src/
@@ -174,7 +168,7 @@ MAIN.md / 模式 mainReplacement       ← 核心人格/角色（manager/worker 
 |------|------|------|---------|
 | **TUI** | `src/index.ts` | 终端 | 直接调用 |
 | **Electron** | `electron/main.js` → `src/electron-entry.ts` | Web UI | stdio JSON |
-| **VS Code 扩展** | `extension/src/activate.ts` → `packages/agent-runtime/` | VS Code 原生 | JSON-RPC over stdio |
+| **VS Code 扩展** | 已搁置（目录移除，不再维护） | — | — |
 | **独立运行时** | `packages/agent-runtime/` | 无界面 | JSON-RPC over stdio |
 
 ### 子 Agent 系统
@@ -248,11 +242,11 @@ CLIAAgent.run()
 
 ```bash
 pnpm dev             # TUI 模式
-pnpm dev:webui       # Electron WebUI 开发模式（vite + electron）
-pnpm electron        # Electron 桌面模式
-pnpm build:agent     # 构建 agent-runtime（给 VS Code 扩展用）
+dev-electron.bat     # Electron WebUI（Windows：构建前端 + 编译 agent 后打开）
+pnpm electron        # Electron 桌面模式（需先构建）
+pnpm build:agent     # 构建 agent-runtime（独立运行时 / 打包用）
 pnpm build:renderer  # 构建渲染层
-pnpm build:ext       # 构建 VS Code 扩展
+pnpm build:pack      # 打包 Windows 安装包（electron-builder）
 ```
 
 ### 测试
@@ -263,7 +257,7 @@ pnpm build:ext       # 构建 VS Code 扩展
 pnpm tsx scripts/test-context-compactor.ts
 ```
 
-常用回归：`test-patch-batch`（22）、`test-add-patch-semantics`（8）、`test-patch-integration`（8）、`test-sub-agent`（17）、`test-chat-thread`（13）、`test-mode-system`（25）、`test-mode-integration`（15）、`test-worker-library`（113）、`test-instructor-flow`（25）、`test-exec-decode`（7）、`test-kb-workspace`（7）
+常用回归：`test-patch-batch`（22）、`test-add-patch-semantics`（8）、`test-patch-integration`（8）、`test-sub-agent`（17）、`test-chat-thread`（13）、`test-mode-system`（25）、`test-mode-integration`（15）、`test-worker-library`（113）、`test-instructor-flow`（25）、`test-context-compactor`（36）、`test-exec-decode`（7）、`test-kb-workspace`（7）
 
 ### 创建新 Inner Skill
 
@@ -315,4 +309,10 @@ create_skill(
 - **编辑器**：desk-editor
 
 每个技能有 `enable.json` 控制启停，`SYSTEM_INJECTION.md` 向主 prompt 注入说明。
+
+
+
+
+
+
 
