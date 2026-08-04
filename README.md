@@ -28,6 +28,11 @@
 环境要求：Node.js 20+、pnpm 10+（Python 3 / LibreOffice 是可选依赖，缺了部分功能不可用）。
 
 ```bash
+# 1. 克隆仓库
+git clone https://github.com/Annieawa-Le/seek-agent.git
+cd seek-agent
+
+# 2. 装依赖 + 配置
 pnpm install          # 装依赖
 cp .env.example .env  # 复制配置模板，填上你的 key
 ```
@@ -88,4 +93,5 @@ pnpm tsx scripts/test-patch-batch.ts   # 跑测试（tsx 直跑 scripts/ 下脚�
 ## License
 
 MIT
+
 
