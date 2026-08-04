@@ -1,5 +1,12 @@
 import { spawnSync, spawn } from 'child_process';
 
+/** 禁交互认证环境变量：防止 git 在凭据缺失/失效时弹出终端密码提示或 GCM GUI 窗口 */
+const GIT_NO_INTERACTIVE_ENV = {
+  GIT_TERMINAL_PROMPT: '0',   // 需要终端密码时直接失败，不询问
+  GCM_INTERACTIVE: 'Never',   // Git Credential Manager 不弹 GUI 凭据窗口
+  GCM_GUI_INTERACTIVE: 'Never',
+};
+
 /** 检查 git 是否可用 */
 export function checkGitAvailable(): { ok: boolean; version?: string; error?: string } {
   try {
@@ -23,6 +30,7 @@ export function gitRun(
     const result = spawnSync('git', args, {
       encoding: 'utf-8',
       cwd,
+      env: { ...process.env, ...GIT_NO_INTERACTIVE_ENV },
       timeout: 30000,
       maxBuffer: 10 * 1024 * 1024,
     });
@@ -46,6 +54,7 @@ export async function gitRunAsync(
   return new Promise<{ ok: boolean; stdout: string; stderr: string; error?: string }>((resolve) => {
     const child = spawn('git', args, {
       cwd,
+      env: { ...process.env, ...GIT_NO_INTERACTIVE_ENV },
       timeout: 120000,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -84,6 +93,9 @@ export function safeResolve(base: string, relative: string): string {
   }
   return resolved;
 }
+
+
+
 
 
 

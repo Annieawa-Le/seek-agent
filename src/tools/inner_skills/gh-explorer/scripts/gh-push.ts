@@ -73,8 +73,20 @@ function getRemoteUrlWithAuth(
     return { url: buildAuthUrl(originalUrl, token), authMethod: 'token' };
   }
 
-  // HTTPS 无 token — 可能触发交互式密码提示
-  return { url: originalUrl, authMethod: 'none' };
+  // HTTPS URL 已内嵌凭据（https://user:token@github.com/...），直接用
+  const embedded = originalUrl.match(/^https:\/\/([^@/]+)@/);
+  if (embedded) {
+    return { url: originalUrl, authMethod: 'embedded' };
+  }
+
+  // HTTPS 无任何凭据 — 直接报错，避免触发交互式认证弹窗（GCM/终端密码提示）
+  return {
+    error: [
+      `HTTPS 远程 "${originalUrl}" 没有可用凭据。`,
+      `未设置 GITHUB_TOKEN / GIT_PUSH_TOKEN / GITHUB_PASSWORD，且 URL 未内嵌 token。`,
+      `设置方式: set GITHUB_TOKEN=ghp_your_token（Windows）或 export GITHUB_TOKEN=ghp_your_token（macOS/Linux）`,
+    ].join('\n')
+  };
 }
 
 export const ghPush = tool({
@@ -196,7 +208,7 @@ export const ghPush = tool({
         ``,
         ...lines.map(l => `  ${l}`),
         ``,
-        `认证方式: ${remoteInfo.authMethod === 'token' ? 'Token (GITHUB_TOKEN)' : remoteInfo.authMethod === 'ssh' ? 'SSH Key' : '无认证（可能需交互式密码）'}`,
+        `认证方式: ${remoteInfo.authMethod === 'token' ? 'Token (GITHUB_TOKEN)' : remoteInfo.authMethod === 'ssh' ? 'SSH Key' : remoteInfo.authMethod === 'embedded' ? 'URL 内嵌凭据' : '无认证'}`,
         force ? '⚠️  使用了强制推送 (--force)' : '',
         tags ? '🏷️  同时推送了标签' : '',
       ].filter(Boolean).join('\n');
@@ -207,6 +219,8 @@ export const ghPush = tool({
     }
   },
 });
+
+
 
 
 
