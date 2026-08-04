@@ -30,6 +30,15 @@ export const readFileTool = tool({
   },
 });
 
+
+/** 切分文件内容为行数组：去掉 split 因末尾换行符产生的空元素，得到实际内容行数 */
+function splitContentLines(content: string): string[] {
+  if (content === '') return [];
+  const lines = content.split('\n');
+  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
 export const readCertainLines = tool({
   description: `读取特定行范围的文件内容。
    filePath 是文件的绝对路径或相对当前工作目录的路径。
@@ -43,12 +52,16 @@ export const readCertainLines = tool({
     try {
       const resolved = resolvePath(filePath);
       const content = await fs.readFile(resolved, 'utf-8');
-      const lines: string[] = content.split('\n');
+      const lines = splitContentLines(content);
+      const actualEnd = Math.min(endLine, lines.length);
       let result = '';
-      for (let i = startLine; i <= endLine; i++) {
+      if (endLine > lines.length) {
+        result += `⚠️ 文件共 ${lines.length} 行，已达文件末尾（请求到第 ${endLine} 行，超出部分未返回）\n`;
+      }
+      for (let i = startLine; i <= actualEnd; i++) {
         result += (lines[i - 1] ?? '') + '\n';
       }
-      const bulk: ReadFileBulk = { type: 'read', filePath, content: result, lineCount: endLine - startLine + 1, charCount: result.length, startLine, endLine };
+      const bulk: ReadFileBulk = { type: 'read', filePath, content: result, lineCount: Math.max(0, actualEnd - startLine + 1), charCount: result.length, startLine, endLine };
       return new ToolOutput(bulk, result);
     } catch (error) {
       const errMsg = (error as any).message || '未知错误';
@@ -71,20 +84,22 @@ export const readNumline = tool({
     try {
       const resolved = resolvePath(filePath);
 
-      let lines: string[];
       const content = await fs.readFile(resolved, 'utf-8');
-      lines = content.split('\n');
-
+      const lines = splitContentLines(content);
+      const actualEnd = Math.min(endLine, lines.length);
       let result = '';
-      for (let i = startLine; i <= endLine; i++) {
+      if (endLine > lines.length) {
+        result += `⚠️ 文件共 ${lines.length} 行，已达文件末尾（请求到第 ${endLine} 行，超出部分未返回）\n`;
+      }
+      for (let i = startLine; i <= actualEnd; i++) {
         const lineNum = String(i).padStart(4, ' ');
         result += `${lineNum}: ${lines[i - 1] ?? ''}\n`;
       }
-      const numberedLines = lines.slice(startLine - 1, endLine).map((line, idx) => ({
+      const numberedLines = lines.slice(startLine - 1, actualEnd).map((line, idx) => ({
         lineNum: startLine + idx,
         content: line,
       }));
-      const bulk: ReadFileBulk = { type: 'read', filePath, content: result, lineCount: endLine - startLine + 1, charCount: result.length, startLine, endLine, numberedLines };
+      const bulk: ReadFileBulk = { type: 'read', filePath, content: result, lineCount: Math.max(0, actualEnd - startLine + 1), charCount: result.length, startLine, endLine, numberedLines };
       return new ToolOutput(bulk, result);
     } catch (error) {
       const errMsg = (error as any).message || '未知错误';
@@ -121,6 +136,9 @@ export const scanFileTool = tool({
     }
   },
 });
+
+
+
 
 
 

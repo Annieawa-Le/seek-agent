@@ -169,12 +169,12 @@ function locateDelRanges(
   return { ok: true, merged, description };
 }
 
-/** modify_patch 定位：返回 1-based 闭区间（含智能检测 expandStart/expandEnd） */
+/** modify_patch 定位：返回 1-based 闭区间（上下文模式下替换范围直接包含 pretext/endtext 本身） */
 function locateModifyRange(
   fileLines: string[],
   startLine: number,
   endLine: number,
-  replaceLines: string[],
+  _replaceLines: string[],
   pretext?: string[],
   endtext?: string[],
 ): LocateResult<{ actualStart: number; actualEnd: number; locateMessage: string }> {
@@ -182,7 +182,7 @@ function locateModifyRange(
   let actualEnd = endLine;
   let locateMessage = '';
 
-  // 上下文定位模式
+  // 上下文定位模式：替换范围直接包含 pretext/endtext 全部上下文行
   if ((pretext && pretext.length > 0) || (endtext && endtext.length > 0)) {
     const locateResult = contextLocate(fileLines, pretext, endtext, startLine, endLine, 20);
     if (!locateResult.matched) {
@@ -192,35 +192,17 @@ function locateModifyRange(
         message: '❌ 错误：上下文匹配失败：' + locateResult.message + '。请修正 pretext/endtext 后重试，或改用 startLine/endLine 行号模式。',
       };
     }
-    actualStart = locateResult.pretextEndLine;
-    actualEnd = locateResult.endtextStartLine - 1;
+    const pLen = pretext?.length ?? 0;
+    const eLen = endtext?.length ?? 0;
+    // pretext 直接纳入替换范围：从 pretext 首行开始
+    if (pLen > 0) actualStart = locateResult.pretextEndLine - pLen;
+    // endtext 直接纳入替换范围：到 endtext 末行结束
+    if (eLen > 0) actualEnd = locateResult.endtextStartLine + eLen - 1;
+    // 仅提供一种上下文时，替换该上下文自身所在范围
+    if (pLen > 0 && eLen === 0) actualEnd = locateResult.pretextEndLine - 1;
+    else if (eLen > 0 && pLen === 0) actualStart = locateResult.endtextStartLine - 1;
 
-    // 智能检测：replaceLines 是否已包含 pretext/endtext
-    // 如果 replaceLines 开头几行与 pretext 完全匹配，则替换范围往前扩至包含 pretext
-    let expandedStart = false;
-    if (pretext && pretext.length > 0 && replaceLines.length >= pretext.length) {
-      const replaceHead = replaceLines.slice(0, pretext.length);
-      if (replaceHead.every((line, i) => line === pretext[i])) {
-        actualStart = locateResult.pretextEndLine - pretext.length;
-        expandedStart = true;
-      }
-    }
-    // 如果 replaceLines 末尾几行与 endtext 完全匹配，则替换范围往后扩至包含 endtext
-    let expandedEnd = false;
-    if (endtext && endtext.length > 0 && replaceLines.length >= endtext.length) {
-      const replaceTail = replaceLines.slice(replaceLines.length - endtext.length);
-      if (replaceTail.every((line, i) => line === endtext[i])) {
-        actualEnd = locateResult.endtextStartLine + endtext.length - 1;
-        expandedEnd = true;
-      }
-    }
-
-    if (expandedStart || expandedEnd) {
-      const parts: string[] = [];
-      if (expandedStart) parts.push('起始前扩包含 pretext');
-      if (expandedEnd) parts.push('结尾后扩包含 endtext');
-      locateMessage += '（智能检测到 replaceLines 包含上下文，' + parts.join('、') + '）';
-    }
+    locateMessage = locateResult.message + '（替换范围已包含 pretext/endtext 上下文行）';
 
     if (actualStart > actualEnd) {
       return { ok: false, error: 'pretext 和 endtext 之间没有内容可替换', message: '❌ 错误：pretext 和 endtext 之间没有内容可替换' };
@@ -463,14 +445,14 @@ export const delPatch = tool({
 // 5. modify_patch
 // ============================================================
 export const modifyPatch = tool({
-  description: '直接替换文件中指定行的内容。以 diff 为核心载体。支持行号模式或 pretext/endtext 上下文匹配模式。',
+  description: '直接替换文件中指定行的内容。以 diff 为核心载体。支持行号模式或 pretext/endtext 上下文匹配模式（提供上下文时，替换范围包含 pretext/endtext 本身）。',
   inputSchema: z.object({
     filePath: z.string().describe('文件的绝对路径或相对当前工作目录的路径'),
     startLine: z.number().int().describe('要替换的起始行号（从 1 开始，提供 pretext/endtext 时作为锚点）'),
     endLine: z.number().int().describe('要替换的结束行号（从 1 开始，包含该行，提供 pretext/endtext 时作为锚点）'),
     replaceLines: z.array(z.string()).describe('替换后的新内容行列表'),
-    pretext: z.array(z.string()).optional().describe('上下文前导行列表。替换 pretext 末行后到 endtext 首行前之间的内容（不含 pretext 和 endtext 本身）'),
-    endtext: z.array(z.string()).optional().describe('上下文后续行列表。替换 pretext 末行后到 endtext 首行前之间的内容'),
+    pretext: z.array(z.string()).optional().describe('上下文前导行列表。匹配后，替换范围从 pretext 首行开始（包含 pretext 本身）。与 startLine/endLine 锚定配合使用'),
+    endtext: z.array(z.string()).optional().describe('上下文后续行列表。匹配后，替换范围到 endtext 末行结束（包含 endtext 本身）'),
     force: z.boolean().optional().default(false).describe('跳过语法检查'),
   }),
   execute: async ({ filePath, startLine, endLine, replaceLines, pretext, endtext, force }) => {
@@ -656,6 +638,8 @@ export async function applyPatchesToFile(
 
 // ── 导出 UndoStack 以供外部使用 ──
 export { UndoStack } from './patch-undo.js';
+
+
 
 
 
