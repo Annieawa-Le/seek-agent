@@ -46,7 +46,8 @@ ai-ide/
 test/*.png
 mouse-*-result.json
 
-
 # 工作区私有目录（不提交远程）
 docs/
 test/
+.todo-data/
+
