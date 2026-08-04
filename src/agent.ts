@@ -1,7 +1,7 @@
 import { getMcpManager } from './mcp';
 import { streamText, type TextPart, type ToolCallPart, type ModelMessage, NoOutputGeneratedError } from 'ai';
 import { tools, stripToolExecutes } from './tools';
-import { checkToolGate, getActiveModes, getActiveModeNames } from './modes/registry';
+import { checkToolGate, getActiveModes, getActiveModeNames, filterToolsForActiveModes } from './modes/registry';
 import { drainPendingInjections, hasPendingInjections, subAgentManager, setSubmissionListener } from './tools/inner_skills/sub-agent/manager';
 import type { SubAgentState } from './tools/inner_skills/sub-agent/types';
 import { TerminalUI } from './ui';
@@ -243,7 +243,7 @@ export class CLIAAgent {
     } else if (platform === 'darwin') {
       platformFile = 'MACOS.md';
     } else if (platform === 'linux') {
-      platformFile = 'LUNIX.md';
+      platformFile = 'LINUX.md';
     }
     if (platformFile) {
       const platformPath = path.join(promptsDir, 'platform', platformFile);
@@ -602,7 +602,7 @@ export class CLIAAgent {
             ? `${this.systemPrompt}\n\n${CLIAAgent.buildSessionInstruction()}`
             : this.systemPrompt,
           messages: messagesForModel,
-          tools: stripToolExecutes(tools), // 剥离 execute，避免 AI SDK 内部自动执行工具导致双重执行
+          tools: stripToolExecutes(filterToolsForActiveModes(tools)), // 按激活模式过滤（白名单/黑名单）后剥离 execute，避免 AI SDK 内部自动执行工具导致双重执行
           abortSignal: abortController.signal,
           experimental_context: { __messages: this.messages },
           // 思考模式：向模型透传思考相关参数（按 provider 生效）
@@ -1425,6 +1425,9 @@ export class CLIAAgent {
     worklogStore.setSessionId(id);
   }
 }
+
+
+
 
 
 

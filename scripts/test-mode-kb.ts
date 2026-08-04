@@ -18,7 +18,7 @@ function assert(name: string, cond: boolean, detail?: string) {
 console.log('1) 内置模式注册');
 registerBuiltinModes();
 const names = listModes().map((m) => m.name);
-assert('注册 3 个内置模式', names.join(',') === 'kb,manager,worker', `实际 ${names.join(',')}`);
+assert('注册 4 个内置模式', names.join(',') === 'kb,manager,worker,hallucination', `实际 ${names.join(',')}`);
 assert('kb 有 preProcess', !!listModes().find((m) => m.name === 'kb')?.preProcess);
 assert('kb 有 promptAddon', !!listModes().find((m) => m.name === 'kb')?.promptAddon);
 assert('kb promptAddon 含检索要求', (listModes().find((m) => m.name === 'kb')?.promptAddon ?? '').includes('知识库模式'));
@@ -67,6 +67,7 @@ assert('激活名正确', getActiveModeNames().length === 0);
 
 console.log(`\n结果：${pass} 通过，${fail} 失败`);
 if (fail > 0) process.exit(1);
+
 
 
 

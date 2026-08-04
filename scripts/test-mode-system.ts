@@ -14,6 +14,7 @@ import {
   getActiveModeNames,
   getActiveModes,
   checkToolGate,
+  filterToolsForActiveModes,
   describeActive,
 } from '../src/modes/registry';
 import { composeHooks } from '../src/memory_agent';
@@ -45,12 +46,17 @@ registerMode({
   label: 'Manager 模式',
   description: '子 agent 编排',
   icon: '🧑💼',
+  allowTools: ['read_file', 'read_lines', 'search_all_file', 'spawn_agent', 'agent_task', 'list_workers', 'list_directory', 'memory_add', 'create_todo', 'browser_navigate', 'search_web', 'tavily_search'],
+});
+registerMode({
+  name: 'denytest',
+  label: '黑名单测试',
+  description: 'deny 场景',
   denyTools: ['collab_send'],
 });
-
+assert('listModes 含 3 个', listModes().length === 3, `实际 ${listModes().length}`);
 console.log('1) 注册与查询');
 assert('getMode(kb) 存在', !!getMode('kb'));
-assert('listModes 含 2 个', listModes().length === 2, `实际 ${listModes().length}`);
 assert('getMode(未知) 为 undefined', getMode('nope') === undefined);
 
 console.log('2) 激活/叠加/移除');
@@ -72,8 +78,32 @@ assert('白名单内放行', checkToolGate('kb_query').allowed);
 assert('白名单外拒绝', !checkToolGate('execute_command').allowed);
 assert('拒绝带原因', checkToolGate('execute_command').reason?.includes('白名单') === true);
 setActiveModes(['manager']);
+assert('manager 白名单内放行(读)', checkToolGate('read_file').allowed);
+assert('manager 白名单内放行(搜)', checkToolGate('search_all_file').allowed);
+assert('manager 白名单内放行(编排)', checkToolGate('spawn_agent').allowed);
+assert('manager 白名单内放行(记忆)', checkToolGate('memory_add').allowed);
+assert('manager 白名单内放行(待办)', checkToolGate('create_todo').allowed);
+assert('manager 白名单内放行(浏览器)', checkToolGate('browser_navigate').allowed);
+assert('manager 白名单内放行(联网搜索)', checkToolGate('search_web').allowed);
+assert('manager 白名单内放行(联网搜索tavily)', checkToolGate('tavily_search').allowed);
+assert('manager 白名单外拒绝', !checkToolGate('add_patch').allowed);
+assert('manager 拒绝带原因', checkToolGate('add_patch').reason?.includes('白名单') === true);
+setActiveModes([]);
+setActiveModes(['denytest']);
 assert('黑名单拒绝', !checkToolGate('collab_send').allowed);
 assert('黑名单外放行', checkToolGate('collab_send2').allowed);
+setActiveModes([]);
+
+console.log('6) filterToolsForActiveModes 工具集过滤');
+const toolSet = { read_file: 1, search_all_file: 2, add_patch: 3, spawn_agent: 4, execute_command: 5, collab_send: 6, memory_add: 7, create_todo: 8, browser_navigate: 9 };
+assert('无模式原样返回', filterToolsForActiveModes(toolSet) === toolSet);
+setActiveModes(['manager']);
+const filtered = filterToolsForActiveModes(toolSet);
+assert('manager 过滤后仅白名单', Object.keys(filtered).sort().join(',') === 'browser_navigate,create_todo,memory_add,read_file,search_all_file,spawn_agent', `实际 ${Object.keys(filtered).join(',')}`);
+assert('原对象不变', Object.keys(toolSet).length === 9);
+setActiveModes(['denytest']);
+const denied = filterToolsForActiveModes(toolSet);
+assert('仅黑名单模式剔除黑名单工具', !('collab_send' in denied) && 'execute_command' in denied, `实际 ${Object.keys(denied).join(',')}`);
 setActiveModes([]);
 
 console.log('4) 指令匹配');
@@ -82,7 +112,7 @@ assert('mode list 匹配', ModeCommand.match('mode list'));
 assert('/mode kb 匹配', ModeCommand.match('/mode kb'));
 assert('其他输入不匹配', !ModeCommand.match('/clear'));
 
-console.log('5) async hook 链（composeHooks）');
+console.log('7) async hook 链（composeHooks）');
 const syncHook = (msgs: any[]) => [...msgs, { role: 'user', content: 'sync' }];
 const asyncHook = async (msgs: any[]) => {
   await new Promise((r) => setTimeout(r, 5));
@@ -92,7 +122,7 @@ const composed = composeHooks(syncHook as any, asyncHook as any);
 const out = await composed([]);
 assert('组合结果含 sync+async', out.length === 2 && out[0].content === 'sync' && out[1].content === 'async');
 
-console.log('6) prompt 拼接（withModePrompts 逻辑复现）');
+console.log('8) prompt 拼接（withModePrompts 逻辑复现）');
 setActiveModes(['kb']);
 const base = 'BASE_PROMPT';
 const parts = getActiveModes().map((m) => m.promptAddon).filter(Boolean) as string[];
@@ -105,5 +135,18 @@ assert('无模式时 base 原样', finalEmpty === base);
 
 console.log(`\n结果：${pass} 通过，${fail} 失败`);
 if (fail > 0) process.exit(1);
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

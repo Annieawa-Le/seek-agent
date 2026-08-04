@@ -106,3 +106,24 @@ export function checkToolGate(toolName: string): { allowed: boolean; reason?: st
 
   return { allowed: true };
 }
+
+/**
+ * 按激活模式过滤工具集，返回过滤后的副本（原对象不变）。
+ * 语义与 checkToolGate 一致：无激活模式原样返回；仅黑名单模式剔除黑名单；
+ * 存在白名单模式时只保留白名单并集内的工具（同时剔除黑名单）。
+ * 供 agent 层在 streamText 前过滤模型可见的工具 schema，
+ * 让被禁工具连 prompt 都进不去，而非等执行时才被拦截。
+ */
+export function filterToolsForActiveModes<T extends Record<string, any>>(toolSet: T): T {
+  const actives = getActiveModes();
+  if (actives.length === 0) return toolSet;
+  const out: Record<string, any> = {};
+  for (const [name, t] of Object.entries(toolSet)) {
+    if (checkToolGate(name).allowed) out[name] = t;
+  }
+  return out as T;
+}
+
+
+
+
