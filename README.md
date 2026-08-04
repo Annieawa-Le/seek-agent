@@ -1,4 +1,4 @@
-# Seek Agent — AI 编程助手运行时
+# Seek Agent — 一个能跑的 AI 编程助手（大概）
 
 > **最前提示！非常重要！**
 >
@@ -8,28 +8,30 @@
 >
 > 如果你使用本 Agent，则你应该预料到可能会有数据安全事故的发生！
 
-Seek Agent 是一个**本地运行的 AI 编程助手**：以 `system prompt + 工具系统` 驱动的 AI Agent 为核心，提供终端 TUI 与 Electron WebUI 两种界面。Monorepo（pnpm workspace），TypeScript 全栈。
+这是一个**本地运行的 AI 编程助手**：本质是一个由 `system prompt + 工具系统` 驱动的 Agent 循环，给它套了终端（Ink）和 Electron 两套界面。TypeScript 全栈，pnpm workspace。工程质量嘛……个人项目，能跑就是胜利。
+
+上面那段警告不是开玩笑：这玩意儿没有沙箱、没有危险代码检测，你要是让它放飞自我，它真的可能把工作区搞乱。**用之前想清楚。**
 
 ---
 
-## 特性
+## 有什么
 
-- **完整工具系统**：文件读写、Patch 编辑（带撤销与语法检查）、命令执行、搜索、Todo、双层记忆
-- **32 个可热插拔技能（inner_skills）**：代码分析、GitHub、UI/UX、Office 文档、测试调试、Web 浏览、知识库等，`enable.json` 启停，运行中热加载
-- **Agent 模式**：`kb` 知识库模式、`manager` 管理者模式（拆解委派给子模型下属）、`worker` 打工人模式（开工先请开发引导员、可摇人帮忙）
-- **子 Agent 系统**：clone / mission / listen / instructor 四种模式 + 预制员工库（小码、老审、阿修、测测、小研、文文、小鱼）
-- **记忆系统**：短期工作记忆 + 长期持久知识（向量检索），旧轮次自动压缩归档可召回
-- **MCP 集成**：通过 `@ai-sdk/mcp` 接入 Model Context Protocol 服务
+- **工具系统**：文件读写、Patch 编辑（带撤销和语法检查，至少尽力不让你改崩）、命令执行、搜索、Todo、双层记忆
+- **32 个技能（inner_skills）**：代码分析、GitHub、UI/UX、Office 文档、Web 浏览、知识库……数量不少，质量参差，能用哪个算哪个
+- **Agent 模式**：`kb` 知识库模式、`manager` 管理者模式（指挥子模型干活，自己偷懒）、`worker` 打工人模式（开工先请个开发引导员监工，还能摇人）
+- **子 Agent 系统**：clone / mission / listen / instructor 四种模式 + 预制员工库（小码、老审、阿修、测测、小研、文文、小鱼——人设比代码靠谱）
+- **记忆系统**：短期工作记忆 + 长期持久知识，旧轮次自动压缩归档，想翻旧账还能召回
+- **MCP 集成**：能接 Model Context Protocol 服务
 
 ---
 
 ## 快速开始
 
-环境要求：Node.js 20+、pnpm 10+（Python 3 / LibreOffice 为可选依赖）。
+环境要求：Node.js 20+、pnpm 10+（Python 3 / LibreOffice 是可选依赖，缺了部分功能不可用）。
 
 ```bash
-pnpm install          # 安装依赖
-cp .env.example .env  # 复制配置模板并填写
+pnpm install          # 装依赖
+cp .env.example .env  # 复制配置模板，填上你的 key
 ```
 
 最小配置（主模型）：
@@ -40,7 +42,7 @@ OPENAI_API_KEY = yourkey
 OPENAI_MODEL = deepseek-v4-flash
 ```
 
-其他可选配置见 `.env.example`：轻量模型（`LITE_MODEL_*`）、Tavily 搜索、视觉模型（`IMAGE_*`）、知识库 Embedding（`EMBEDDING_*`）等。
+其他可选配置见 `.env.example` 注释：轻量模型（`LITE_MODEL_*`）、Tavily 搜索、视觉模型（`IMAGE_*`）、知识库 Embedding（`EMBEDDING_*`）等。
 
 ### 启动
 
@@ -81,7 +83,7 @@ pnpm tsx scripts/test-patch-batch.ts   # 跑测试（tsx 直跑 scripts/ 下脚�
 - **新增指令**：`src/command/commands/` 下实现 `Command` 接口，在 `src/command/index.ts` 注册
 - **新增模式**：`src/modes/registry.ts` 注册，在 `src/prompts/addon/` 编写提示词
 
-详细架构说明见 [SEEK.md](./SEEK.md)。
+架构说明见 [SEEK.md](./SEEK.md)——内容可能过时，以代码为准。
 
 ---
 
