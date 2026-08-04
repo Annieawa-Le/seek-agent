@@ -225,6 +225,8 @@ export interface PanelState {
 export interface ToolHistoryEntry {
   paramsHtml: string;
   toolName: string;
+  /** 工具调用参数 JSON（供显示名占位符提取字段） */
+  args?: Record<string, unknown>;
   resultHtml: string | null;
   fullOutput: string | null;
 }
@@ -238,6 +240,7 @@ export interface AgentStatus {
   sessionId?: string;
   code?: number;
 }
+
 
 
 

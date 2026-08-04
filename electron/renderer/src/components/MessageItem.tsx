@@ -2,6 +2,7 @@ import { memo, useState, useEffect, useRef, useMemo } from 'react';
 import type { DisplayMessage } from '@/hooks/useMessages.ts';
 import { renderMarkdown, renderAnsi, escapeHtml } from '@/utils/markdown.ts';
 import type { ToolHistoryEntry } from '@/types/index.ts';
+import { formatToolDisplayName } from '@/utils/tool-display-config.ts';
 
 interface Props {
   msg: DisplayMessage;
@@ -56,7 +57,7 @@ export const MessageItem = memo(function MessageItem({ msg }: Props) {
           <div className="message tool collapsed">
             <div className="content">
               <span className="tool-collapse-icon"></span>
-              <span className="tool-name">{escapeHtml(msg.toolMeta.toolName)}</span>
+              <span className="tool-name">{escapeHtml(formatToolDisplayName(msg.toolMeta.toolName, msg.toolMeta.args))}</span>
               <span className="tool-args">{escapeHtml(argsStr)}</span>
             </div>
           </div>
@@ -167,7 +168,7 @@ const ToolHistoryDisplay = memo(function ToolHistoryDisplay({ history: rawHistor
                   className={`timeline-step-header${hasResult ? ' clickable' : ''}`}
                   onClick={() => hasResult && setExpandedIdx(isExpanded ? null : i)}
                 >
-                  <span className="timeline-tool-name">{escapeHtml(entry.toolName)}</span>
+                  <span className="timeline-tool-name">{escapeHtml(formatToolDisplayName(entry.toolName, entry.args))}</span>
                   {hasResult && (
                     <span className={`timeline-expand-icon${isExpanded ? ' expanded' : ''}`}>
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -298,6 +299,8 @@ const UserMessage = memo(function UserMessage({ content }: { content: string }) 
     </div>
   );
 });
+
+
 
 
 

@@ -153,7 +153,7 @@ export function useMessages() {
         const newMsg: DisplayMessage = {
           id, role: 'agent', content: '', createdAt: Date.now(), streaming: true,
           roundId: roundRef.current,
-          toolHistory: [{ paramsHtml: toolMsg.content || '', toolName: toolMsg.toolMeta?.toolName || '', resultHtml: null, fullOutput: null }],
+          toolHistory: [{ paramsHtml: toolMsg.content || '', toolName: toolMsg.toolMeta?.toolName || '', args: toolMsg.toolMeta?.args, resultHtml: null, fullOutput: null }],
           toolHistoryIndex: 0,
         };
         setStreamingAgentId(id);
@@ -167,6 +167,7 @@ export function useMessages() {
       history.push({
         paramsHtml: toolMsg.toolCallHtml || toolMsg.content || '',
         toolName: toolMsg.toolMeta?.toolName || '',
+        args: toolMsg.toolMeta?.args,
         resultHtml: null, fullOutput: null,
       });
       agent.toolHistory = history;
@@ -260,6 +261,7 @@ export function useMessages() {
             history.push({
               paramsHtml: m.toolCallHtml || m.content || '',
               toolName: m.toolMeta.toolName || '',
+              args: m.toolMeta?.args,
               resultHtml: null,
               fullOutput: null,
             });
@@ -360,6 +362,7 @@ export function useMessages() {
     startThinking, appendThinkingDelta, endThinking, beginNewRound,
   };
 }
+
 
 
 
