@@ -148,11 +148,12 @@ assert('drain 已清空', !hasPendingInjections());
 
 console.log('4) 注入不再依赖工具注册（避免伪造 tool-call）');
 assert('主模型 tools 不含 subagent_submission（注入已改 user 消息）', !('subagent_submission' in tools));
-assert('主模型 tools 含 a_submission', 'a_submission' in tools);
+assert('主模型 tools 不含 a_submission（子模型专用终端工具，由 runner 注入）', !('a_submission' in tools));
 assert('主模型 tools 含 agent_query', 'agent_query' in tools);
 
 console.log(`\n结果：${pass} 通过，${fail} 失败`);
 if (fail > 0) process.exit(1);
+
 
 
 

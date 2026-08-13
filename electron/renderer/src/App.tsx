@@ -1,20 +1,26 @@
 import { useEffect, useCallback, useState, useRef } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
+import { useRemoteConnection } from '@/components/RemoteConnectionContext.tsx';
 import { useAgentStatus } from '@/hooks/useAgentStatus.ts';
 import { useMessages } from '@/hooks/useMessages.ts';
 import { Header } from '@/components/Header.tsx';
+import { SettingsPanel } from '@/components/SettingsPanel.tsx';
 import { LeftSidebar } from '@/components/LeftSidebar.tsx';
 import { MessageList } from '@/components/MessageList.tsx';
 import { ModePicker } from '@/components/ModePicker.tsx';
 import { InputBar } from '@/components/InputBar.tsx';
 import { RightPanel } from '@/components/RightPanel.tsx';
 import { StatusBar } from '@/components/StatusBar.tsx';
+import { RemoteStatusBar } from '@/components/RemoteStatusBar.tsx';
 import type { AgentMessage, SessionInfo, SidebarRuntimeData } from '@/types/index.ts';
 import type { TabItem } from '@/components/Tabs.tsx';
 
 export function App() {
   // 当前活动会话（与主进程 currentSessionId 保持一致）
   const api = useElectronAPI();
+  const apiReady = !!window.electronAPI;
+  // 远程模式（Provider 存在）时不早退：未连接由 main-content 占位接管，侧边栏「连接远程」按钮保持可用
+  const remoteConn = useRemoteConnection();
   const [currentSessionId, setCurrentSessionId] = useState('default');
   /** 会话是否已就绪（切换会话时防 ModePicker 闪现；replace-messages 到达后置 true） */
   const [sessionReady, setSessionReady] = useState(true);
@@ -40,6 +46,9 @@ export function App() {
   const [smartSearchEnabled, setSmartSearchEnabled] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /** 右侧栏开合：桌面默认开、手机（≤900px）默认关，由 Header 的 panel-toggle 按钮切换 */
+  const [rightOpen, setRightOpen] = useState<boolean>(() => window.innerWidth > 900);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillsList, setSkillsList] = useState<Array<{ name: string; description: string }>>([]);
   // 同步主题到 data-theme 属性
   useEffect(() => {
@@ -213,7 +222,7 @@ export function App() {
   useEffect(() => {
     const unsub = api.onSessionError(({ sessionId, error }) => {
       if (sessionId !== currentSessionRef.current) return;
-      appendMessage({ role: 'system', content: `⚠ ${error}（${sessionId}）`, createdAt: Date.now() });
+      appendMessage({ role: 'system', content: `【错误】${error}（${sessionId}）`, createdAt: Date.now() });
       setSessionReady(true);
     });
     return () => unsub();
@@ -369,7 +378,10 @@ export function App() {
   );
 
 
-  if (!api.isAvailable) {
+  // 桌面 Electron 原生环境异常（浏览器误开 main.html / preload 未注入）时早退提示；
+  // 远程模式（Provider 存在）不早退——未连接时 window.electronAPI 未注入，
+  // 由 main-content 的 remote-not-connected 占位接管，保证侧边栏「连接远程」按钮可用。
+  if (!api.isAvailable && !remoteConn) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#666', fontFamily: 'sans-serif' }}>
         <p>未检测到 Electron API，请在 Electron 环境中运行此应用。</p>
@@ -379,7 +391,9 @@ export function App() {
 
   return (
     <div id="app">
-      <Header status={status} ctxTokens={status.ctxTokens} theme={theme} onToggleTheme={toggleTheme} onToggleSidebar={toggleSidebar} sidebarOpen={sidebarOpen} tabs={tabs} activeTabId={currentSessionId} onTabSelect={handleTabSelect} onTabClose={handleTabClose} onTabNew={handleNewSession} />
+      <Header status={status} theme={theme} onToggleTheme={toggleTheme} onOpenSettings={() => setSettingsOpen(true)} onToggleSidebar={toggleSidebar} sidebarOpen={sidebarOpen} panelOpen={rightOpen} onTogglePanel={() => setRightOpen(v => !v)} tabs={tabs} activeTabId={currentSessionId} onTabSelect={handleTabSelect} onTabClose={handleTabClose} onTabNew={handleNewSession} />
+      <RemoteStatusBar />
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       <div id="body-content">
         <div id="body-row">
           <LeftSidebar
@@ -393,32 +407,45 @@ export function App() {
           />
           {sidebarOpen && <div className="sidebar-overlay" onClick={closeSidebar} />}
           <div id="main-content">
-            {/* 切换会话（!sessionReady）时 Agent 在后台拉起/重放，先显示加载占位避免空白“卡住”观感 */}
-            {sessionReady && !hasRealMessage ? ( // 消息列表为空时展示模式选择启动页（新建/切回空会话均适用）
-              <ModePicker api={api} sessionKey={currentSessionId} />
-            ) : !sessionReady ? (
-              <div id="session-loading-area">
-                <div className="session-loading">正在加载会话…</div>
+            {/* 远程模式未连接（window.electronAPI 未注入）：显示引导占位，隐藏 InputBar 避免发送无效 */}
+            {!apiReady ? (
+              <div id="remote-not-connected" style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--text-dim, #8c8c8c)' }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+                </svg>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>未连接到远程 Agent</div>
+                <div style={{ fontSize: 13, opacity: 0.8 }}>点击左侧「连接远程」按钮进行配对</div>
               </div>
             ) : (
-              <MessageList key={currentSessionId} messages={messages} hasEarlier={hasEarlier} onLoadEarlier={loadEarlier} />
+              <>
+                {/* 切换会话（!sessionReady）时 Agent 在后台拉起/重放，先显示加载占位避免空白“卡住”观感 */}
+                {sessionReady && !hasRealMessage ? ( // 消息列表为空时展示模式选择启动页（新建/切回空会话均适用）
+                  <ModePicker api={api} sessionKey={currentSessionId} />
+                ) : !sessionReady ? (
+                  <div id="session-loading-area">
+                    <div className="session-loading">正在加载会话…</div>
+                  </div>
+                ) : (
+                  <MessageList key={currentSessionId} messages={messages} hasEarlier={hasEarlier} onLoadEarlier={loadEarlier} />
+                )}
+                <InputBar
+                  processing={status.processing}
+                  sessionKey={currentSessionId}
+                  kbEnabled={kbEnabled}
+                  thinking={status.thinking}
+                  smartSearchEnabled={smartSearchEnabled}
+                  thinkingEnabled={thinkingEnabled}
+                  skillsList={skillsList}
+                  onSend={handleSend}
+                  onAbort={handleAbort}
+                  onToggleKb={onToggleKb}
+                  onToggleSmartSearch={onToggleSmartSearch}
+                  onToggleThinking={onToggleThinking}
+                />
+              </>
             )}
-            <InputBar
-              processing={status.processing}
-              sessionKey={currentSessionId}
-              kbEnabled={kbEnabled}
-              thinking={status.thinking}
-              smartSearchEnabled={smartSearchEnabled}
-              thinkingEnabled={thinkingEnabled}
-              skillsList={skillsList}
-              onSend={handleSend}
-              onAbort={handleAbort}
-              onToggleKb={onToggleKb}
-              onToggleSmartSearch={onToggleSmartSearch}
-              onToggleThinking={onToggleThinking}
-            />
           </div>
-          <RightPanel runtimeData={runtimeData} />
+          <RightPanel runtimeData={runtimeData} open={rightOpen} />
         </div>
         <StatusBar
           status={status}
@@ -429,6 +456,20 @@ export function App() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

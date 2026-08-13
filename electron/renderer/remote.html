@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--
+    远程模式（浏览器 / Capacitor WebView）入口。
+    CSP 说明：与 index.html（Electron 用）不同，远程模式需连接用户输入的中继 WebSocket 地址，
+    故 connect-src 放宽为 ws:/wss:/http:/https:（覆盖 dev HMR 的 ws://localhost:* 与任意中继）。
+    打包后的 dist/remote.html 由 Vite 构建时自动处理脚本路径。
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: http: https:; img-src 'self' data:;">
+  <title>Seek Agent 远程连接</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="./src/remote-main.tsx"></script>
+</body>
+</html>

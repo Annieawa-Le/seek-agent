@@ -28,7 +28,7 @@ const MANAGER_ALLOW_TOOLS = [
   'memory_remember', 'memory_recall', 'memory_clear', 'memory_stats',
   'memory_focus', 'memory_shorten',
   // 待办（任务拆解与进度跟踪）
-  'create_todo', 'finish_step', 'undo_step', 'reroll_step', 'del_step', 'read_todo', 'del_todo', 'active_todo',
+  'create_todo', 'finish_step', 'finish_to_step', 'undo_step', 'reroll_step', 'del_step', 'read_todo', 'del_todo', 'active_todo',
   'todo_save', 'todo_load', 'todo_list_saved', 'todo_delete_saved',
   // 浏览器（自主调研网页）
   'browser_launch', 'browser_navigate', 'browser_click', 'browser_type', 'browser_press',
@@ -38,8 +38,12 @@ const MANAGER_ALLOW_TOOLS = [
   'search_web', 'fetch_page', 'crawl_site', 'extract_links', 'web-crawler-prompt-get',
   'tavily_search', 'tavily_extract', 'tavily_crawl', 'tavily_map', 'tavily_research', 'web-accessor-prompt-get',
   // 子模型编排（Manager 本职）
-  'spawn_agent', 'agent_task', 'agent_query', 'agent_fire',
+  'spawn_agent', 'agent_task', 'agent_query', 'agent_fire', 'agent_worklog',
   'list_workers', 'get_worker', 'spawn_worker',
+  // 文件池（把子模型读阶段读取的文件片段沉淀为命名池，委派时注入共享背景）
+  'doc_pool', 'doc-pool-prompt-get',
+  // 闹钟（长时间等待提醒，到点注入 user 消息打断）
+  'alarm_set', 'alarm_cancel', 'alarm_list',
 ];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -94,6 +98,11 @@ export function registerBuiltinModes(): void {
     icon: '🪄',
   });
 }
+
+
+
+
+
 
 
 

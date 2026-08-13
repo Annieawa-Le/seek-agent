@@ -6,7 +6,7 @@ import fs from 'fs/promises';
 import { resolvePath } from '../workdir.js';
 
 export const readFileTool = tool({
-  description: '读取文件内容。参数 filePath 是文件的绝对路径或相对当前工作目录的路径。',
+  description: '读取文件内容（带行号）。参数 filePath 是文件的绝对路径或相对当前工作目录的路径。',
   inputSchema: z.object({
     filePath: z.string(),
   }),
@@ -19,9 +19,15 @@ export const readFileTool = tool({
         const bulk: ReadFileBulk = { type: 'read', filePath, content: '', lineCount: 0, charCount: 0, error: errText, truncated: true };
         return new ToolOutput(bulk, errText);
       }
-      const lineCount = content.split('\n').length;
-      const bulk: ReadFileBulk = { type: 'read', filePath, content, lineCount, charCount: content.length };
-      return new ToolOutput(bulk, content);
+      const lines = splitContentLines(content);
+      let result = '';
+      for (let i = 0; i < lines.length; i++) {
+        const lineNum = String(i + 1).padStart(4, ' ');
+        result += `${lineNum}: ${lines[i]}\n`;
+      }
+      const numberedLines = lines.map((line, idx) => ({ lineNum: idx + 1, content: line }));
+      const bulk: ReadFileBulk = { type: 'read', filePath, content: result, lineCount: lines.length, charCount: result.length, numberedLines };
+      return new ToolOutput(bulk, result);
     } catch (error) {
       const errMsg = (error as any).message || '未知错误';
       const bulk: ReadFileBulk = { type: 'read', filePath, content: '', lineCount: 0, charCount: 0, error: errMsg };
@@ -136,6 +142,7 @@ export const scanFileTool = tool({
     }
   },
 });
+
 
 
 

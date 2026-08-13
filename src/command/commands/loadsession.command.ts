@@ -1,29 +1,44 @@
 import { Command } from '../types';
 import type { UIMessage } from '../../ui';
+import { sanitizeToolInput } from '../../tools';
 import path from 'node:path';
 import fs from 'node:fs';
-import { getWorkspaceRoot, setCwd } from '../../workdir';
+import { getWorkspaceRoot, getSessionsRoot, setCwd } from '../../workdir';
 import { friendlyToolCallLabel, friendlyToolResultLabel } from '../../assets/tool-translations';
 import { setActiveModes } from '../../modes/registry';
 import { KB_INJECT_PREFIX } from '../../modes/preprocess';
+import { subAgentManager, notifyTaskDispatched, hasPendingInjections } from '../../tools/inner_skills/sub-agent/manager';
+import { subagentRegistryStore } from '../../tools/subagent-registry-store';
 
 /** 会话保存目录 */
+/** 会话保存目录 */
 function getSessionDir(): string {
-  return path.join(getWorkspaceRoot(), 'sessions');
+  return path.join(getSessionsRoot(), 'sessions');
 }
 
-/** 列出所有保存的会话文件（按修改时间倒序） */
-function listSessionFiles(): { name: string; filePath: string; mtime: Date }[] {
+/** 列出所有保存的会话（按修改时间倒序）。新结构：sessions/{sessionId}/session.json；兼容旧单文件（导出供测试） */
+export function listSessionFiles(): { name: string; filePath: string; mtime: Date }[] {
   const dir = getSessionDir();
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
-    .filter(f => f.endsWith('.json'))
-    .map(f => {
-      const fp = path.join(dir, f);
-      const stat = fs.statSync(fp);
-      return { name: f.replace(/\.json$/, ''), filePath: fp, mtime: stat.mtime };
-    })
-    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+  const result: { name: string; filePath: string; mtime: Date }[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      // 新结构：文件夹名 = sessionId，主会话在 session.json
+      const sp = path.join(dir, entry.name, 'session.json');
+      if (fs.existsSync(sp)) {
+        const stat = fs.statSync(sp);
+        result.push({ name: entry.name, filePath: sp, mtime: stat.mtime });
+      }
+    } else if (entry.name.endsWith('.json')) {
+      // 旧结构：sessions/*.json（迁移前兼容）
+      const fp = path.join(dir, entry.name);
+      try {
+        const stat = fs.statSync(fp);
+        result.push({ name: entry.name.replace(/\.json$/, ''), filePath: fp, mtime: stat.mtime });
+      } catch { /* skip */ }
+    }
+  }
+  return result.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 }
 
 
@@ -68,7 +83,7 @@ export function reconstructUIMessages(data: any): UIMessage[] {
             uiMessages.push({ role: 'agent', content: textBuffer.join('\n') });
             textBuffer = [];
           }
-          const args = (p.input ?? {}) as Record<string, unknown>;
+          const args = sanitizeToolInput(p.input);
           toolCallMap.set(p.toolCallId, { toolName: p.toolName, args });
           uiMessages.push({
             role: 'tool',
@@ -145,14 +160,18 @@ export const LoadSessionCommand: Command = {
     }
 
     // ── 加载指定会话 ──
-    const sessionName = nameMatch[1].trim();
-    const exactPath = path.join(getSessionDir(), sessionName.endsWith('.json') ? sessionName : `${sessionName}.json`);
+    const sessionName = nameMatch[1].trim().replace(/\.json$/, '');
+    // 新结构优先：sessions/{sessionId}/session.json（文件夹）；回退旧单文件 sessions/{name}.json
+    const folderPath = path.join(getSessionDir(), sessionName, 'session.json');
+    const legacyPath = path.join(getSessionDir(), `${sessionName}.json`);
 
     let filePath: string;
-    if (fs.existsSync(exactPath)) {
-      filePath = exactPath;
+    if (fs.existsSync(folderPath)) {
+      filePath = folderPath;
+    } else if (fs.existsSync(legacyPath)) {
+      filePath = legacyPath;
     } else {
-      // 尝试模糊匹配：查找名字中包含输入的第一个文件
+      // 尝试模糊匹配：查找名字中包含输入的第一个会话
       const match = sessions.find(s =>
         s.name.toLowerCase() === sessionName.toLowerCase() ||
         s.name.toLowerCase().includes(sessionName.toLowerCase())
@@ -165,11 +184,20 @@ export const LoadSessionCommand: Command = {
       filePath = match.filePath;
     }
 
-    // ── 读取会话文件 ──
+    // ── 读取会话文件（新结构下 payload 在独立 payload.json，旧单文件内联 payloads 字段） ──
     let data: any;
     try {
       const raw = fs.readFileSync(filePath, 'utf-8');
       data = JSON.parse(raw);
+      if (data.payloads === undefined) {
+        const payloadPath = path.join(path.dirname(filePath), 'payload.json');
+        if (fs.existsSync(payloadPath)) {
+          try {
+            const pp = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
+            data.payloads = Array.isArray(pp.payloads) ? pp.payloads : [];
+          } catch { data.payloads = []; }
+        }
+      }
     } catch (err: any) {
       ctx.ui.addUserMessage(input);
       ctx.ui.addAgentMessage(`❌ 无法读取会话文件: ${err.message}`);
@@ -182,15 +210,35 @@ export const LoadSessionCommand: Command = {
       return;
     }
 
+    // ── 切换会话前：清空当前内存中的子 Agent（不删持久化上下文，切回该会话时可恢复） ──
+    subAgentManager.clearForLoad();
+
     // ── 恢复 agent 消息 ──
     ctx.agent.setMessages(data.agentMessages);
-
+    // ── 恢复发给模型的完整 payload 历史（附加字段，供 WebUI「记忆」面板展示） ──
+    ctx.agent.setPayloadHistory(data.payloads || []);
     // ── 恢复会话 ID（后续自动保存会覆盖同一文件） ──
-    // 会话身份统一以文件内 sessionId 为准（固定形态 new-xxx / xxxx-xxxx-xxxx），
+    // 会话身份统一以文件内 sessionId 为准（固定形态 session-xxxx-xxxx-xxxx / new-xxx / xxxx-xxxx-xxxx），
     // 主进程已在会话列表扫描时一次性迁移历史标题污染文件；此处无条件对齐，
     // 避免恢复会话后身份漂移（worklog 分区 / 自动保存文件随之稳定）。
     if (data.sessionId) {
       ctx.agent.setSessionId(data.sessionId);
+    }
+
+    // ── 恢复子 Agent 注册（loadsession 自动加载活跃子 Agent，接入工具系统） ──
+    // registry 在每次会话保存时随 session.json 同步落盘；此处重新注册进 SubAgentManager，
+    // 派活（agent_task）时自动从 subagentContextStore 加载各自上下文延续。
+    const registryAgents = subagentRegistryStore.load();
+    for (const entry of registryAgents) {
+      subAgentManager.restore(entry);
+    }
+    if (registryAgents.length > 0) {
+      // 通知外部（electron-entry 推送 sidebar:data）：通讯录立即出现恢复的子模型
+      notifyTaskDispatched();
+    }
+    // ── 恢复后排空本会话待注入的提交（跨会话后台任务切回时，结果立即回到对话） ──
+    if (hasPendingInjections()) {
+      ctx.agent.onSubAgentSubmission?.().catch(() => {});
     }
     // ── 恢复工作目录（如果保存的路径在当前工作区内） ──
     if (data.cwd) {
@@ -224,6 +272,17 @@ export const LoadSessionCommand: Command = {
 
   },
 };
+
+
+
+
+
+
+
+
+
+
+
 
 
 

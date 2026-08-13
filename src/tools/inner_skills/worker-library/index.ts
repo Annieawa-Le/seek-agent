@@ -11,7 +11,7 @@
  * 提供三个工具：
  *   list_workers — 列出全部预制员工（名字、角色、性格摘要、工具数）
  *   get_worker   — 读取单个员工的完整资料（名字/性格 + systemPrompt 模板 + 推荐工具组）
- *   spawn_worker — 从员工库一键创建 mission 子模型（身份 + 提示词 + 工具自动装配，name 可省略）
+ *   spawn_worker — 从员工库一键创建 mission 子模型（身份 + 提示词 + 工具自动装配，name 可省略，支持 skills 参数解锁技能工具）
  */
 import { tool } from 'ai';
 import { z } from 'zod';
@@ -49,8 +49,8 @@ interface ParsedWorker {
   scenarios: string;
   systemPrompt: string;
   tools: string[];
+  skills: string[];
 }
-
 /** 解析单个员工 md 文件为结构化数据 */
 function parseWorker(content: string): ParsedWorker {
   const titleMatch = content.match(/^#\s+(.+?)\s*\(([a-z0-9-]+)\)\s*$/m);
@@ -60,6 +60,7 @@ function parseWorker(content: string): ParsedWorker {
   const scenariosMatch = content.match(/##\s*适用场景\s*\n([\s\S]*?)(?=\n##\s|\n----|$)/);
   const spMatch = content.match(/----SYSTEM_PROMPT_START----\s*\n([\s\S]*?)\n----SYSTEM_PROMPT_END----/);
   const toolsMatch = content.match(/----TOOLS_START----\s*\n([\s\S]*?)\n----TOOLS_END----/);
+  const skillsMatch = content.match(/----SKILLS_START----\s*\n([\s\S]*?)\n----SKILLS_END----/);
 
   let tools: string[] = [];
   if (toolsMatch) {
@@ -68,6 +69,16 @@ function parseWorker(content: string): ParsedWorker {
       if (Array.isArray(parsed)) tools = parsed.filter((t): t is string => typeof t === 'string');
     } catch {
       tools = [];
+    }
+  }
+
+  let skills: string[] = [];
+  if (skillsMatch) {
+    try {
+      const parsed = JSON.parse(skillsMatch[1].trim());
+      if (Array.isArray(parsed)) skills = parsed.filter((s): s is string => typeof s === 'string');
+    } catch {
+      skills = [];
     }
   }
 
@@ -80,6 +91,7 @@ function parseWorker(content: string): ParsedWorker {
     scenarios: scenariosMatch?.[1]?.trim() ?? '',
     systemPrompt: spMatch?.[1]?.trim() ?? '',
     tools,
+    skills,
   };
 }
 
@@ -90,6 +102,86 @@ function buildIdentity(w: ParsedWorker): string {
   if (w.personality) parts.push(`性格特点：${w.personality}`);
   return parts.length > 0 ? parts.join('\n') : '';
 }
+
+/** 动态导入 index 模块获取全局工具注册表（避免循环依赖） */
+async function getIndexModule(): Promise<any> {
+  try {
+    return await import('../../index');
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 解析技能名列表，收集每项技能的工具、描述（enable.json）与使用说明（SYSTEM_INJECTION.md）。
+ * 自动激活懒加载技能，确保工具已注册到系统。
+ */
+async function resolveSkillDetails(skillNames: string[]): Promise<{
+  mergedTools: string[];
+  skillSection: string;
+}> {
+  if (!skillNames || skillNames.length === 0) {
+    return { mergedTools: [], skillSection: '' };
+  }
+
+  const mod = await getIndexModule();
+  const ensureSkillActivated = (mod as any)?.ensureSkillActivated;
+  const skillsDir = path.join(__dirname, '..', '..', 'inner_skills');
+
+  const allToolNames: string[] = [];
+  const descLines: string[] = [];
+  const injectionParts: string[] = [];
+
+  for (const skillName of skillNames) {
+    // 1. 确保技能已激活，获取工具名列表
+    let toolNames: string[] = [];
+    if (ensureSkillActivated) {
+      toolNames = ensureSkillActivated(skillName) || [];
+    }
+    if (toolNames.length === 0) {
+      descLines.push(`- **${skillName}**：未找到该技能（可能未启用或不存在）`);
+    } else {
+      allToolNames.push(...toolNames);
+    }
+
+    // 2. 读取 enable.json 获取技能描述
+    const enablePath = path.join(skillsDir, skillName, 'enable.json');
+    try {
+      const enableContent = await fs.readFile(enablePath, 'utf-8');
+      const enableConfig = JSON.parse(enableContent);
+      if (enableConfig.description) {
+        descLines.push(`- **${skillName}**：${enableConfig.description}`);
+      } else {
+        descLines.push(`- **${skillName}**`);
+      }
+    } catch {
+      descLines.push(`- **${skillName}**`);
+    }
+
+    // 3. 读取 SYSTEM_INJECTION.md
+    const injPath = path.join(skillsDir, skillName, 'SYSTEM_INJECTION.md');
+    try {
+      const injContent = await fs.readFile(injPath, 'utf-8');
+      if (injContent.trim()) {
+        injectionParts.push(`### ${skillName} 使用说明`, '', injContent.trim());
+      }
+    } catch {
+      // 没有 SYSTEM_INJECTION.md，跳过
+    }
+  }
+
+  // 构建技能描述段落
+  let skillSection = '';
+  if (descLines.length > 0) {
+    skillSection = `\n\n## 已解锁技能\n\n以下技能已为您解锁全部工具，您可以直接使用它们的所有功能：\n\n${descLines.join('\n')}`;
+    if (injectionParts.length > 0) {
+      skillSection += `\n\n### 相关技能使用说明\n\n${injectionParts.join('\n\n')}`;
+    }
+  }
+
+  return { mergedTools: allToolNames, skillSection };
+}
+
 
 async function loadAllWorkers(): Promise<ParsedWorker[]> {
   const dir = await resolveWorkersDir();
@@ -127,9 +219,10 @@ tools['list_workers'] = tool({
       ];
       for (const w of workers) {
         const toolDesc = w.tools.length > 0 ? `${w.tools.length} 个工具` : '（未配置工具）';
+        const skillDesc = w.skills.length > 0 ? `｜技能(${w.skills.length})：${w.skills.join(', ')}` : '';
         const who = w.name ? `${w.name}（${w.title}）` : w.title;
         const vibe = w.personality ? `｜性格：${w.personality.slice(0, 40)}${w.personality.length > 40 ? '…' : ''}` : '';
-        lines.push(`- ${who} (\`${w.id}\`)：${w.role || '（无定位描述）'}${vibe}｜${toolDesc}`);
+        lines.push(`- ${who} (\`${w.id}\`)：${w.role || '（无定位描述）'}${vibe}${skillDesc}｜${toolDesc}`);
       }
       lines.push('', '用 get_worker(<id>) 获取某位员工的完整资料（含名字/性格）；或用 spawn_worker(worker: "<id>") 一键创建。');
       return lines.join('\n');
@@ -173,7 +266,10 @@ tools['get_worker'] = tool({
       } else {
         lines.push('\n【推荐工具组】未配置');
       }
-      lines.push('\n快速路径：spawn_worker(worker: "' + id + '", name: "<唯一名，省略时用员工默认名字>", contextAndTask: "<任务背景>")');
+      if (w.skills.length > 0) {
+        lines.push(`\n【默认解锁技能（spawn_worker 自动加载）】\n${JSON.stringify(w.skills)}`);
+      }
+      lines.push('\n快速路径：spawn_worker(worker: "' + id + '", name: "<唯一名，省略时用员工默认名字>", contextAndTask: "<任务背景>", skills: ["<额外技能名>"])');
       return lines.join('\n');
     } catch (err: any) {
       return `未找到员工 "${id}"。可用 list_workers 查看全部员工 id。(${err.message})`;
@@ -186,13 +282,14 @@ tools['get_worker'] = tool({
 // ═════════════════════════════════════════════════════
 
 tools['spawn_worker'] = tool({
-  description: `从预制员工库创建子模型（固定 mission 模式）。只传员工 id，systemPrompt 模板、推荐工具组与身份（名字+性格）自动从员工库装配，无需手动编写。name 可省略，省略时用员工的默认名字。创建后仍需 agent_task 派活。`,
+  description: `从预制员工库创建子模型（固定 mission 模式）。只传员工 id，systemPrompt 模板、推荐工具组与身份（名字+性格）自动从员工库装配，无需手动编写。name 可省略，省略时用员工的默认名字。支持 skills 参数传入技能名数组，自动解锁该技能的所有工具并在提示词中注入使用说明。创建后仍需 agent_task 派活。`,
   inputSchema: z.object({
     worker: z.string().describe('预制员工 id（如 code-implementer / researcher，用 list_workers 查看全部）'),
     name: z.string().optional().describe('(可选) 子模型的唯一名称，省略时用员工的默认名字（如小码）；同名已存在会重新创建'),
     contextAndTask: z.string().optional().describe('(可选) 传给子模型的任务背景/额外上下文，会在派活前注入'),
+    skills: z.array(z.string()).optional().describe('(可选) 要解锁的技能名列表，如 ["browser-control", "web-accessor"]；技能的所有工具会自动加入并注入对应使用说明'),
   }),
-  execute: async ({ worker, name, contextAndTask }): Promise<string> => {
+  execute: async ({ worker, name, contextAndTask, skills }): Promise<string> => {
     // 读取预制员工
     let w: ParsedWorker;
     try {
@@ -214,23 +311,58 @@ tools['spawn_worker'] = tool({
     // name 省略时用员工默认名字（昵称）；昵称也未配置则回退 id
     const agentName = name ?? (w.name || w.id);
 
-    // 身份段（名字 + 性格）拼接到 systemPrompt 前
-    const identity = buildIdentity(w);
-    const finalPrompt = identity ? `${identity}\n\n${w.systemPrompt}` : w.systemPrompt;
+    // 合并技能：员工默认技能 + 显式传入的技能（去重）
+    const mergedSkillNames = [...(w.skills || [])];
+    if (skills && skills.length > 0) {
+      const skillSet = new Set(mergedSkillNames);
+      for (const s of skills) {
+        if (!skillSet.has(s)) {
+          mergedSkillNames.push(s);
+          skillSet.add(s);
+        }
+      }
+    }
 
-    // 固定 mission 模式创建（只接受 mission，不接受 clone/instructor）
+    // 解析技能详情，合并工具并生成技能描述段落
+    let mergedTools = [...w.tools];
+    let skillSection = '';
+    if (mergedSkillNames.length > 0) {
+      const details = await resolveSkillDetails(mergedSkillNames);
+      const existingSet = new Set(mergedTools);
+      for (const toolName of details.mergedTools) {
+        if (!existingSet.has(toolName)) {
+          mergedTools.push(toolName);
+          existingSet.add(toolName);
+        }
+      }
+      skillSection = details.skillSection;
+    }
+
+    // 身份段（名字 + 性格）拼接到 systemPrompt 前，技能说明拼接到 systemPrompt 后
+    const identity = buildIdentity(w);
+    const finalPrompt = identity
+      ? `${identity}\n\n${w.systemPrompt}${skillSection}`
+      : `${w.systemPrompt}${skillSection}`;
+
+    // 固定 mission 模式创建
     subAgentManager.spawn({
       mode: 'mission',
       name: agentName,
-      tools: w.tools,
+      tools: mergedTools,
       systemPrompt: finalPrompt,
       context: contextAndTask,
     });
 
-    const toolList = w.tools.join(', ');
+    const toolList = mergedTools.join(', ');
     const who = w.name ? `${w.name}（${w.title}）` : w.title;
     const identityDesc = identity ? identity.replace(/\n/g, ' ') : '（未配置）';
-    return `✅ 已从预制员工库创建 mission 子模型 "${agentName}"（${who}）\n身份：${identityDesc}\n可用工具(${w.tools.length}): ${toolList}\n\n下一步：调用 agent_task(name: "${agentName}", task: "<任务描述>") 派活；可用 agent_query 查状态、agent_fire 销毁。`;
+    // 展示信息：默认技能 + 额外技能
+    const defaultSkillInfo = w.skills && w.skills.length > 0 ? `默认技能(${w.skills.length}): ${w.skills.join(', ')}` : '';
+    const extraSkills = skills && skills.length > 0
+      ? `额外技能(${skills.length}): ${skills.join(', ')}`
+      : '';
+    const skillInfo = [defaultSkillInfo, extraSkills].filter(Boolean).join(' | ');
+    return `✅ 已从预制员工库创建 mission 子模型 "${agentName}"（${who}）\n身份：${identityDesc}\n可用工具(${mergedTools.length}): ${toolList}\n${skillInfo}\n\n下一步：调用 agent_task(name: "${agentName}", task: "<任务描述>") 派活；可用 agent_query 查状态、agent_fire 销毁。`;
   },
 });
 
@@ -252,4 +384,21 @@ tools['worker-library-prompt-get'] = tool({
 });
 
 export default tools;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

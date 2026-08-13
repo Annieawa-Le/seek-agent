@@ -13,6 +13,7 @@
 import { ModelMessage, ToolCallPart, ToolResultPart } from 'ai';
 import { workingMemory } from './tools/memory-core';
 import { formatWorkingMemory } from './tools/memory';
+import { sanitizeToolInput } from './tools';
 import { MessageHook } from './agent';
 
 // ═════════════════════════════════════════════════════
@@ -159,7 +160,23 @@ export function createMessageHook(options?: ContextManagerOptions): MessageHook 
       }
       return messages;
     }
-
+    // ──────── 第四步：修复 tool-call 中 string 类型的 input ────────
+    // AI SDK 在 LLM 生成非法 JSON 工具参数时，会回退为原始字符串。
+    // 这个 string 存入消息后，下一轮发给 provider 会崩溃（期望 object 收到 string）。
+    // 此处兜底修复，确保所有 tool-call 的 input 都是 object。
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (part.type === 'tool-call') {
+            const tcPart = part as ToolCallPart;
+            if (typeof tcPart.input === 'string') {
+              tcPart.input = sanitizeToolInput(tcPart.input);
+            }
+          }
+        }
+      }
+    }
     // ──────── 第三步：过滤消息，移除被标记的 tool-call 和 tool-result ────────
     return messages
       .map((msg) => {

@@ -54,3 +54,11 @@
 ["read_file", "read_lines", "scan_file", "search_all_file", "search_sub_file", "search_content", "execute_command", "browser_launch", "browser_navigate", "browser_click", "browser_type", "browser_press", "browser_scroll", "browser_extract", "browser_screenshot", "browser_execute_js", "browser_wait", "browser_status", "browser_close", "tavily_search", "tavily_extract", "tavily_crawl", "tavily_map", "tavily_research", "search_web", "fetch_page", "crawl_site", "extract_links", "image_info", "extract_image_text", "vision_analyze", "extract_images", "filter_images", "download_images", "desk_add", "desk_list", "desk_remove", "memory_add", "create_file", "replace_file"]
 ----TOOLS_END----
 
+## 可用技能（spawn_worker 自动解锁）
+
+----SKILLS_START----
+["web-accessor"]
+----SKILLS_END----
+
+
+

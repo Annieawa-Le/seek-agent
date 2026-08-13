@@ -1,4 +1,5 @@
 {
   "enable": true,
-  "description": "创建新的 inner_skill，自动生成标准化的目录结构、配置文件和代码骨架"
+  "description": "创建新的 inner_skill，自动生成标准化的目录结构、配置文件和代码骨架",
+  "always_detectable": false
 }

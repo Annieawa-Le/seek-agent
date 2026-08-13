@@ -78,7 +78,7 @@ export interface FileWriteBulk {
 /** Patch 操作结果（直接写入模式） */
 export interface PatchBulk {
   type: 'patch';
-  action: 'add' | 'del' | 'modify' | 'undo' | 'history';
+  action: 'add' | 'del' | 'modify' | 'replace' | 'undo' | 'history';
   filePath?: string;
   description: string;
   /** diff 字符串 */
@@ -100,10 +100,44 @@ export interface DeskBulk {
   error?: string;
 }
 
+/** 后台任务状态 */
+export type TaskStatus = 'running' | 'done' | 'failed' | 'killed';
+
+/** 后台任务管理操作结果 */
+export interface TaskBulk {
+  type: 'task';
+  action: 'execute' | 'switch' | 'list' | 'kill';
+  taskName?: string;
+  command?: string;
+  /** 任务当前状态（execute/switch/kill 时） */
+  status?: TaskStatus;
+  pid?: number;
+  exitCode?: number | null;
+  /** switch 时返回的输出尾部片段 */
+  output?: string;
+  /** 输出是否被截断（超过 tail 限制或缓冲上限） */
+  outputTruncated?: boolean;
+  /** 完整 stdout 字符数 */
+  stdoutChars?: number;
+  /** list 时返回的任务摘要列表 */
+  tasks?: Array<{
+    name: string;
+    command: string;
+    status: TaskStatus;
+    running: boolean;
+    exitCode?: number | null;
+    startedAt: number;
+    durationMs?: number;
+    stdoutChars: number;
+    stderrChars: number;
+  }>;
+  error?: string;
+}
+
 /** 待办事项操作结果 */
 export interface TodoBulk {
   type: 'todo';
-  action: 'create' | 'finish' | 'undo' | 'reroll' | 'del-step' | 'read' | 'del' | 'active';
+  action: 'create' | 'finish' | 'undo' | 'reroll' | 'del-step' | 'read' | 'del' | 'active' | 'finish-to';
   name: string;
   /** 已完成步数 */
   doneCount: number;
@@ -166,6 +200,7 @@ export type RawBulk =
   | FileWriteBulk
   | PatchBulk
   | DeskBulk
+  | TaskBulk
   | TodoBulk
   | MemoryBulk
   | WorklogBulk;
@@ -207,6 +242,11 @@ export interface WorklogBulk {
   size?: number;
   msg: string;
 }
+
+
+
+
+
 
 
 

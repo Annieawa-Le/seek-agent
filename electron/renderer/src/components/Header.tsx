@@ -6,9 +6,11 @@ import { Tabs, type TabItem } from './Tabs.tsx';
 
 interface Props {
   status: AgentStatusState;
-  ctxTokens: number;
+  panelOpen: boolean;
+  onTogglePanel: () => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
+  onOpenSettings: () => void;
   onToggleSidebar: () => void;
   sidebarOpen: boolean;
   /** 标签页数据（对应已打开会话） */
@@ -25,7 +27,7 @@ const dotClass: Record<string, string> = {
   connecting: 'status-dot disconnected',
 };
 
-export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSidebar, sidebarOpen, tabs, activeTabId, onTabSelect, onTabClose, onTabNew }: Props) {
+export function Header({ status, theme, onToggleTheme, onOpenSettings, onToggleSidebar, sidebarOpen, panelOpen, onTogglePanel, tabs, activeTabId, onTabSelect, onTabClose, onTabNew }: Props) {
   const api = useElectronAPI();
   const { minimizeWindow, maximizeWindow, closeWindow, onMaximizedChange, isWindowMaximized } = api;
   const [isMaximized, setIsMaximized] = useState(false);
@@ -37,7 +39,6 @@ export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSideba
   }, [isWindowMaximized, onMaximizedChange]);
 
   const dotCls = dotClass[status.connectionState] || 'status-dot disconnected';
-  const ctxText = ctxTokens > 0 ? `ctx: ${ctxTokens}t` : 'ctx: --';
 
   return (
     <header id="header">
@@ -62,7 +63,12 @@ export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSideba
 
       <div className="header-right">
         <FolderSelector />
-        <span className="header-ctx" title="上下文长度">{ctxText}</span>
+
+        <button className={`panel-toggle${panelOpen ? ' active' : ''}`} onClick={onTogglePanel} title={panelOpen ? '收起右侧栏' : '展开右侧栏'}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/>
+          </svg>
+        </button>
 
         <button className="theme-toggle" onClick={onToggleTheme}
           title={theme === 'dark' ? '切换亮色模式' : '切换暗色模式'}>
@@ -81,6 +87,11 @@ export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSideba
           )}
         </button>
 
+        <button className="settings-toggle" onClick={onOpenSettings} title="设置">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
         <span className={dotCls} title={status.connectionState} />
 
         <div className="window-controls">
@@ -110,6 +121,13 @@ export function Header({ status, ctxTokens, theme, onToggleTheme, onToggleSideba
     </header>
   );
 }
+
+
+
+
+
+
+
 
 
 

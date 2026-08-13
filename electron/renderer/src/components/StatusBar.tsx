@@ -24,8 +24,8 @@ export function StatusBar({ status, toolCallTotal, totalMessages }: Props) {
         <span className="status-text">{text}</span>
         {toolCallTotal > 0 && <span className="tools-badge">工具 {toolCallTotal}</span>}
         {kb.phase === 'building' && <span className="kb-status building">{kbLabel}</span>}
-        {kb.phase === 'done' && <span className="kb-status done">知识库✓</span>}
-        {kb.phase === 'failed' && <span className="kb-status failed">知识库✗</span>}
+        {kb.phase === 'done' && <span className="kb-status done">知识库<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 3, verticalAlign: '-1px' }}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span>}
+        {kb.phase === 'failed' && <span className="kb-status failed">知识库<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 3, verticalAlign: '-1px' }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>}
       </span>
       <span className="ms-right">
         <span className="ms-stat">消息 {totalMessages}</span>
@@ -34,4 +34,5 @@ export function StatusBar({ status, toolCallTotal, totalMessages }: Props) {
     </div>
   );
 }
+
 

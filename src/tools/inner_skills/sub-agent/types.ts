@@ -15,6 +15,8 @@ export interface SubAgentState {
   name: string;
   mode: SubAgentMode;
   status: SubAgentStatus;
+  /** 所属会话（spawn/restore 时的 sessionId；执行/存储/提交均按它路由，切换会话不影响后台任务） */
+  ownerSessionId?: string;
   /** 可调用的工具列表 */
   tools: string[];
   /** 系统提示词（mission 模式专用） */
@@ -40,6 +42,8 @@ export interface SubAgentState {
   instructorMessages?: import('ai').ModelMessage[];
   /** instructor 当前执行的 AbortController（fire/agent 退出时用于中断后台流） */
   instructorAbortController?: AbortController;
+  /** 当前执行（executeChildAgent）的 AbortController（渲染层「停止」按钮中断用） */
+  abortController?: AbortController;
 }
 
 /** 子模型工作提交内容 */
@@ -67,6 +71,8 @@ export interface TaskParams {
   task: string;
   context?: string;
 }
+
+
 
 
 

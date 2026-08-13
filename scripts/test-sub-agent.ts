@@ -59,14 +59,11 @@ const waited = await waitPromise;
 assert('waitForSubmission 收到结果', waited.includes('ok'));
 subAgentManager.fire('waiter');
 
-console.log('4) a_submission 工具行为（安全兜底）');
+console.log('4) a_submission 子模型专用（主模型不可见）');
 const { tools: skillTools } = await import('../src/tools/index');
-const submissionTool = skillTools['a_submission'];
-assert('a_submission 已注册', !!submissionTool);
-if (submissionTool?.execute) {
-  const out = await submissionTool.execute({ summary: 's', details: 'd' });
-  assert('a_submission 返回 JSON 兜底', typeof out === 'string' && out.includes('submission'));
-}
+assert('主模型工具不含 a_submission', !skillTools['a_submission']);
+assert('主模型工具仍含子模型编排 spawn_agent', !!skillTools['spawn_agent']);
 
 console.log(`\n结果：${pass} 通过，${fail} 失败`);
 if (fail > 0) process.exit(1);
+

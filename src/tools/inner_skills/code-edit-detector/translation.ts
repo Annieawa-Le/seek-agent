@@ -39,6 +39,29 @@ const translations: Record<string, {
     },
     collapse: 'after-round',
   },
+  'wrap_by_label': {
+    icon: '■',
+    category: 'exec',
+    callLabel: (args) => {
+      const fp = (args?.filePath ?? '(?)') as string;
+      const start = args?.startLine ?? '?';
+      const end = args?.endLine ?? '?';
+      const tag = (args?.tagName ?? '(?)') as string;
+      return `标签包裹: ${fp} (行 ${start}-${end}, <${tag}>)`;
+    },
+    collapse: 'after-round',
+  },
+  'find_matching_label': {
+    icon: '■',
+    category: 'read',
+    callLabel: (args) => {
+      const fp = (args?.filePath ?? '(?)') as string;
+      const ln = args?.lineNumber ?? '?';
+      const tag = (args?.tagName ?? '') as string;
+      return `匹配标签: ${fp} (行 ${ln}${tag ? `, <${tag}>` : ''})`;
+    },
+    collapse: 'single',
+  },
   'code-edit-detector-prompt-get': {
     icon: '■',
     category: 'read',
@@ -47,3 +70,4 @@ const translations: Record<string, {
   },
 };
 export default translations;
+

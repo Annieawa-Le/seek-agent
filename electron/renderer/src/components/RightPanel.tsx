@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
-import type { ChatThreadData, CollabLogEntry, CollabSession, FileTreeNode, GitChange, IdentityCard, SidebarRuntimeData } from '@/types/index.ts';
+import type { ChatThreadData, CollabLogEntry, FileTreeNode, GitChange, RemoteDeviceInfo, SidebarRuntimeData, SubagentStreamMsg } from '@/types/index.ts';
+import { SubagentNotePanel } from './SubagentNotePanel.tsx';
+import { MemoryPanel } from './MemoryPanel.tsx';
 
 const tagClassMap: Record<string, string> = { js: 'tag-yellow', ts: 'tag-blue', json: 'tag-yellow', npm: 'tag-red', mjs: 'tag-yellow', cjs: 'tag-yellow' };
 const tagLabelMap: Record<string, string> = { json: '{}', npmrc: 'npm' };
@@ -45,18 +47,14 @@ function handleNodeDragStart(e: React.DragEvent, node: FileTreeNode) {
   icon.textContent = node.type === 'folder' ? '📁' : '📄';
   const label = document.createElement('span');
   label.style.cssText = 'overflow: hidden; text-overflow: ellipsis;';
-  label.textContent = node.name;
-  img.appendChild(icon);
-  img.appendChild(label);
-  document.body.appendChild(img);
   dragImageEl = img;
   e.dataTransfer.setDragImage(img, 10, 10);
   window.addEventListener('dragend', cleanupDragImage, { once: true });
 }
 
-type PanelTab = 'files' | 'changes' | 'collab';
+type PanelTab = 'files' | 'changes' | 'collab' | 'devices' | 'memory';
 
-export function RightPanel({ runtimeData }: { runtimeData: SidebarRuntimeData | null }) {
+export function RightPanel({ runtimeData, open }: { runtimeData: SidebarRuntimeData | null; open?: boolean }) {
   const { readFileTree, readGitStatus } = useElectronAPI();
   const [currentTab, setCurrentTab] = useState<PanelTab>('files');
   const [fileTree, setFileTree] = useState<FileTreeNode[]>([]);
@@ -83,11 +81,13 @@ export function RightPanel({ runtimeData }: { runtimeData: SidebarRuntimeData | 
   }, [currentTab, loadFileTree, loadGitChanges]);
 
   return (
-    <aside id="info-panel">
+    <aside id="info-panel" className={open === false ? 'info-panel-closed' : open ? 'info-panel-open' : undefined}>
       <div className="panel-tabs">
         <span className={`panel-tab${currentTab === 'files' ? ' active' : ' inactive'}`} onClick={() => setCurrentTab('files')}>文件</span>
         <span className={`panel-tab${currentTab === 'changes' ? ' active' : ' inactive'}`} onClick={() => setCurrentTab('changes')}>改动</span>
         <span className={`panel-tab${currentTab === 'collab' ? ' active' : ' inactive'}`} onClick={() => setCurrentTab('collab')}>协作</span>
+        <span className={`panel-tab${currentTab === 'devices' ? ' active' : ' inactive'}`} onClick={() => setCurrentTab('devices')}>设备</span>
+        <span className={`panel-tab${currentTab === 'memory' ? ' active' : ' inactive'}`} onClick={() => setCurrentTab('memory')}>记忆</span>
         <div className="panel-tab-actions">
           <button className="panel-tab-btn" title="搜索"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
           <button className="panel-tab-btn" title="面板布局"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button>
@@ -97,6 +97,8 @@ export function RightPanel({ runtimeData }: { runtimeData: SidebarRuntimeData | 
         {currentTab === 'files' && (loading ? <div className="file-tree-loading">加载中…</div> : <FileTreeContent nodes={fileTree} />)}
         {currentTab === 'changes' && (loading ? <div className="file-tree-loading">加载中…</div> : <GitChangesContent changes={gitChanges} />)}
         {currentTab === 'collab' && <CollabContent runtimeData={runtimeData} />}
+        {currentTab === 'devices' && <DevicesContent />}
+        {currentTab === 'memory' && <MemoryPanel runtimeData={runtimeData} />}
       </div>
     </aside>
   );
@@ -168,6 +170,69 @@ function GitChangesContent({ changes }: { changes: GitChange[] }) {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   设备 Tab：信任设备列表（在线状态 + 撤销信任）
+   ═══════════════════════════════════════════════════════════ */
+
+function DevicesContent() {
+  const api = useElectronAPI();
+  const [devices, setDevices] = useState<RemoteDeviceInfo[]>([]);
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api.getRemoteDevices();
+      if (Array.isArray(list)) setDevices(list);
+    } catch { /* 保留旧列表 */ }
+  }, [api]);
+
+  // 首次挂载拉取 + 订阅 remote:devices 实时刷新（trust-updated / trust-list / trust-revoked 都会广播）
+  useEffect(() => {
+    load();
+    const unsub = api.onRemoteDevices((data) => {
+      if (Array.isArray(data?.devices)) setDevices(data.devices);
+    });
+    return () => unsub();
+  }, [api, load]);
+
+  const revoke = async (remoteId: string, label: string) => {
+    if (!window.confirm(`确定撤销对「${label || remoteId}」的信任？\n撤销后该设备需重新配对才能连接。`)) return;
+    try {
+      await api.revokeRemoteDevice(remoteId);
+      // 本地删除由 bridge 广播 remote:devices 驱动；这里再拉一次做兜底
+      load();
+    } catch { /* 撤销失败保留列表 */ }
+  };
+
+  if (devices.length === 0) {
+    return <div className="panel-empty">暂无信任设备，手机端配对成功后自动出现</div>;
+  }
+
+  return (
+    <div className="devices-list">
+      {devices.map(d => (
+        <div key={d.remoteId} className="device-item" title={d.remoteId}>
+          <span className={`device-dot ${d.online ? 'online' : 'offline'}`} title={d.online ? '在线' : '离线'} />
+          <div className="device-body">
+            <div className="device-name">{d.label || d.remoteId}</div>
+            <div className="device-meta">
+              <span className={d.online ? 'device-status online' : 'device-status'}>{d.online ? '在线' : '离线'}</span>
+              {d.trustedAt ? <span> · {formatTrustedAt(d.trustedAt)} 信任</span> : null}
+            </div>
+          </div>
+          <button className="device-revoke-btn" onClick={() => revoke(d.remoteId, d.label || d.remoteId)} title="撤销信任">撤销</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 信任时间展示：ISO 字符串 → 本地日期（解析失败回退原文） */
+function formatTrustedAt(ts: string) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+/* ═══════════════════════════════════════════════════════════
    协作 Tab：会话列表 + 身份卡 + 子 Agent + 协作动态
    ═══════════════════════════════════════════════════════════ */
 
@@ -176,10 +241,7 @@ const subagentStatusLabel: Record<string, string> = { idle: '空闲', running: '
 
 function CollabContent({ runtimeData }: { runtimeData: SidebarRuntimeData | null }) {
   const api = useElectronAPI();
-  const [sessions, setSessions] = useState<CollabSession[]>([]);
   const [log, setLog] = useState<CollabLogEntry[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
   // 协作聊天：当前选中的好友（子模型/worker），null = 通讯录视图
   const [chatPeer, setChatPeer] = useState<string | null>(null);
   const [chatType, setChatType] = useState<'subagent' | 'worker' | null>(null);
@@ -207,13 +269,6 @@ function CollabContent({ runtimeData }: { runtimeData: SidebarRuntimeData | null
   // 选中的 thread（供聊天视图）
   const chatThread = chatPeer ? (runtimeData?.threads ?? []).find(t => t.peerName === chatPeer) : undefined;
 
-  const loadSessions = useCallback(async () => {
-    try {
-      const data = await api.getCollabSessions();
-      if (Array.isArray(data)) setSessions(data);
-    } catch { /* 保留旧列表 */ }
-  }, [api]);
-
   const loadLog = useCallback(async () => {
     try {
       const data = await api.getCollabLog();
@@ -222,44 +277,26 @@ function CollabContent({ runtimeData }: { runtimeData: SidebarRuntimeData | null
   }, [api]);
 
   useEffect(() => {
-    loadSessions();
     loadLog();
-    // 定时刷新会话与协作动态（主进程签名缓存 + 事件推送，开销小）
-    const t = setInterval(() => { loadSessions(); loadLog(); api.sendCommand('sidebar:data'); }, 10000);
+    // 定时刷新协作动态（主进程事件推送，开销小）
+    const t = setInterval(() => { loadLog(); api.sendCommand('sidebar:data'); }, 10000);
     return () => clearInterval(t);
-  }, [loadSessions, loadLog]);
+  }, [loadLog]);
 
   // 协作事件推送：有新的跨会话通信时刷新动态
   useEffect(() => {
     const unsubLog = api.onCollabEvent((ev) => {
       if (ev.type === 'log') loadLog();
     });
-    // 身份卡生成完成：刷新会话列表（preview/identity 变化）
-    const unsubCard = api.onIdentityCard(() => loadSessions());
-    return () => { unsubLog(); unsubCard(); };
-  }, [api, loadLog, loadSessions]);
-
-  const selected = sessions.find(s => s.sessionId === selectedId) || null;
-
-  const handleGenerate = async () => {
-    if (!selected || !selected.active || generating) return;
-    setGenerating(true);
-    try {
-      await api.generateIdentityCard(selected.sessionId);
-      // 身份卡写入由 onIdentityCard 事件驱动刷新，此处轮询兜底
-      setTimeout(loadSessions, 3000);
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  // ── 聊天视图：选中好友时展示与该下属的独立对话 ──
+    return () => { unsubLog(); };
+  }, [api, loadLog]);
   if (chatPeer && chatType) {
     return (
       <ChatView
         peer={chatPeer}
         peerType={chatType}
         thread={chatThread}
+        streams={runtimeData?.subagentStreams}
         api={api}
         onBack={() => { setChatPeer(null); setChatType(null); }}
       />
@@ -268,44 +305,6 @@ function CollabContent({ runtimeData }: { runtimeData: SidebarRuntimeData | null
 
   return (
     <div className="collab-content">
-      <div className="collab-section">
-        <div className="collab-section-title">会话 <span className="collab-count">{sessions.length}</span></div>
-        {sessions.length === 0 ? <div className="panel-empty">暂无会话</div> : (
-          <div className="collab-session-list">
-            {sessions.map(s => (
-              <div key={s.sessionId} className={`collab-session${selectedId === s.sessionId ? ' selected' : ''}`}
-                onClick={() => setSelectedId(s.sessionId)} title={s.sessionId}>
-                <div className="collab-session-head">
-                  <span className="collab-session-name">{s.name}</span>
-                  {s.active && <span className="collab-live-dot" title="活跃会话">●</span>}
-                  {s.identity && <span className="collab-card-badge" title="有身份卡">卡</span>}
-                </div>
-                <div className="collab-session-meta">
-                  {s.messageCount != null && `${s.messageCount} msgs`}
-                  {s.mtime ? ` · ${s.mtime}` : ''}
-                  {s.identity?.generatedAt ? ` · 更新于 ${s.identity.generatedAt.slice(0, 16).replace('T', ' ')}` : ''}
-                </div>
-                {s.preview && <div className="collab-session-preview">{s.preview.slice(0, 80)}</div>}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {selected && (
-        <div className="collab-section">
-          <div className="collab-section-title">
-            身份卡
-            {selected.active && (
-              <button className="collab-gen-btn" onClick={handleGenerate} disabled={generating} title="用轻量模型生成/更新身份卡">
-                {generating ? '生成中…' : '生成/更新'}
-              </button>
-            )}
-          </div>
-          {selected.identity ? <IdentityCardView card={selected.identity} />
-            : <div className="panel-empty">{selected.active ? '该会话暂无身份卡，点击"生成/更新"创建' : '该会话尚未生成身份卡（历史会话需先打开）'}</div>}
-        </div>
-      )}
 
       <div className="collab-section">
         <div className="collab-section-title">
@@ -319,7 +318,21 @@ function CollabContent({ runtimeData }: { runtimeData: SidebarRuntimeData | null
                 <div key={f.name} className="collab-subagent friend"
                   onClick={() => { setChatPeer(f.name); setChatType(f.type); }}
                   title={f.type === 'subagent' ? '子模型：点击进入聊天' : '打工人会话：点击进入聊天'}>
-                  <span className={`collab-friend-avatar ${f.type}`}>{f.type === 'subagent' ? '🤖' : '🧑‍🔧'}</span>
+                  <span className={`collab-friend-avatar ${f.type}`}>
+                    {f.type === 'subagent' ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="4" y="8" width="16" height="12" rx="2"/>
+                        <path d="M12 8V4"/><circle cx="12" cy="2.5" r="1.5" fill="currentColor" stroke="none"/>
+                        <circle cx="9" cy="13" r="1.5" fill="currentColor" stroke="none"/>
+                        <circle cx="15" cy="13" r="1.5" fill="currentColor" stroke="none"/>
+                        <path d="M9 17c1 .8 5 .8 6 0" strokeLinecap="round"/>
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                      </svg>
+                    )}
+                  </span>
                   <div className="collab-friend-body">
                     <div className="collab-subagent-name">{f.name}</div>
                     <div className="collab-friend-last">{f.lastMsg || (f.type === 'subagent' ? (subagentStatusLabel[f.status || ''] || f.status || '空闲') : '打工人')}</div>
@@ -351,24 +364,6 @@ function CollabContent({ runtimeData }: { runtimeData: SidebarRuntimeData | null
   );
 }
 
-function IdentityCardView({ card }: { card: IdentityCard }) {
-  return (
-    <div className="identity-card">
-      {card.focus && <div className="identity-field"><span className="identity-label">焦点</span><div>{card.focus}</div></div>}
-      {card.summary && <div className="identity-field"><span className="identity-label">摘要</span><div>{card.summary}</div></div>}
-      {card.conclusions?.length ? (
-        <div className="identity-field"><span className="identity-label">结论</span>
-          <ul className="identity-list">{card.conclusions.map((c, i) => <li key={i}>{c}</li>)}</ul>
-        </div>
-      ) : null}
-      {card.relatedSkills?.length ? (
-        <div className="identity-field"><span className="identity-label">相关技能</span>
-          <div className="identity-tags">{card.relatedSkills.map((s, i) => <span key={i} className="identity-tag">{s}</span>)}</div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 
 
@@ -383,14 +378,18 @@ function IdentityCardView({ card }: { card: IdentityCard }) {
    协作聊天视图：与某个下属（子模型/worker）的独立对话
    ═══════════════════════════════════════════════════════════ */
 
-function ChatView({ peer, peerType, thread, api, onBack }: {
+function ChatView({ peer, peerType, thread, streams, api, onBack }: {
   peer: string;
   peerType: 'subagent' | 'worker';
   thread?: ChatThreadData;
+  /** 子 Agent 消息流（便条窗体数据源；worker 无流，按钮隐藏） */
+  streams?: Record<string, SubagentStreamMsg[]>;
   api: ReturnType<typeof useElectronAPI>;
   onBack: () => void;
 }) {
   const [text, setText] = useState('');
+  // 便条窗体开关：把子 Agent 消息流渲染到主消息区上方的叠加窗体
+  const [noteOpen, setNoteOpen] = useState(false);
   const send = () => {
     const t = text.trim();
     if (!t) return;
@@ -401,12 +400,20 @@ function ChatView({ peer, peerType, thread, api, onBack }: {
     api.sendCommand('sidebar:data');
   };
   const msgs = thread?.messages ?? [];
+  const hasStream = peerType === 'subagent' && Array.isArray(streams?.[peer]);
   return (
     <div className="chat-view">
       <div className="chat-view-header">
         <button className="chat-back" onClick={onBack} title="返回通讯录">←</button>
         <span className="chat-peer-name">{peer}</span>
         <span className={`chat-peer-type ${peerType}`}>{peerType === 'subagent' ? '子模型' : '打工人'}</span>
+        {hasStream && (
+          <button className="chat-note-btn" onClick={() => setNoteOpen(true)} title="便条：以消息颗粒度追踪该子 Agent 的工作进度">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+            </svg>
+          </button>
+        )}
       </div>
       <div className="chat-messages">
         {msgs.length === 0 && <div className="panel-empty">还没有对话，发条消息开始协作</div>}
@@ -427,9 +434,40 @@ function ChatView({ peer, peerType, thread, api, onBack }: {
         />
         <button className="chat-send-btn" onClick={send} disabled={!text.trim()}>发送</button>
       </div>
+      {noteOpen && hasStream && (
+        <SubagentNotePanel
+          peer={peer}
+          stream={streams?.[peer] ?? []}
+          onClose={() => setNoteOpen(false)}
+        />
+      )}
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

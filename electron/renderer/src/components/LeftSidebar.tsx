@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
-import type { SessionInfo, SidebarStaticData, SidebarRuntimeData } from '@/types/index.ts';
+import type { SessionInfo, SidebarRuntimeData } from '@/types/index.ts';
+import { useRemoteConnection } from './RemoteConnectionContext.tsx';
 
 interface Props {
   open: boolean;
@@ -16,35 +17,14 @@ interface Props {
   onSessionsChanged?: (sessions: SessionInfo[]) => void;
 }
 
-const customItems = [
-  { key: 'agents', label: 'Agents', icon: 'M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4zM2 22v-2a6 6 0 0 1 6-6h8a6 6 0 0 1 6 6v2' },
-  { key: 'skills', label: 'Skills', icon: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5' },
-  { key: 'instructions', label: 'Instructions', icon: 'M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z' },
-  { key: 'hooks', label: 'Hooks', icon: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' },
-  { key: 'mcp', label: 'MCP Servers', icon: 'M8 3v14M12 3v14M4 21h16' },
-  { key: 'plugins', label: 'Plugins', icon: 'M20 12H4M12 4v16' },
-];
-
-const modeLabelMap: Record<string, string> = {
-  clone: '克隆', mission: '任务', listen: '监听', instructor: '指导',
-};
-const statusLabelMap: Record<string, string> = {
-  idle: '空闲', running: '运行中', done: '完成', error: '错误',
-};
-
 export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession, onSwitchSession, onSessionsChanged }: Props) {
   const api = useElectronAPI();
+  const conn = useRemoteConnection();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [staticData, setStaticData] = useState<SidebarStaticData | null>(null);
   /** 正在运行（processing）的会话集合 */
   const [runningSessions, setRunningSessions] = useState<Set<string>>(new Set());
   /** 主进程存活的会话进程 */
   const [activeSessionIds, setActiveSessionIds] = useState<string[]>([]);
-  const [expandedCustom, setExpandedCustom] = useState<string | null>(null);
-  const [customCollapsed, setCustomCollapsed] = useState(false);
-  /** 已展开的 Instruction 内容（key = kind:file） */
-  const [instructionContent, setInstructionContent] = useState<Record<string, string>>({});
-  const [loadingInstruction, setLoadingInstruction] = useState<string | null>(null);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -58,43 +38,19 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
     }
   }, [api, onSessionsChanged]);
 
-  const loadStatic = useCallback(async () => {
-    const data = await api.getSidebarStatic();
-    if (data) setStaticData(data);
-  }, [api]);
-
   const loadActive = useCallback(async () => {
     const data = await api.listActiveSessions();
     if (Array.isArray(data)) setActiveSessionIds(data.map(d => d.sessionId));
   }, [api]);
-  /** 正在生成身份卡的会话集合 */
-  const [cardGenerating, setCardGenerating] = useState<Set<string>>(new Set());
-
-  const handleGenerateCard = useCallback(async (sessionName: string) => {
-    setCardGenerating(prev => new Set(prev).add(sessionName));
-    try {
-      const res = await api.generateIdentityCard(sessionName);
-      if (res?.error) console.warn('[identity-card]', res.error);
-      // 身份卡写入后刷新列表（preview 会更新为 focus）
-      await loadSessions();
-    } finally {
-      setCardGenerating(prev => {
-        const next = new Set(prev);
-        next.delete(sessionName);
-        return next;
-      });
-    }
-  }, [api, loadSessions]);
 
   useEffect(() => {
     loadSessions();
-    loadStatic();
     loadActive();
     // 定时刷新：运行中会话每 5s，历史会话每 10s（主进程有签名缓存，开销小；失败可自愈、新会话自动出现）
     const t = setInterval(() => { loadActive(); loadSessions(); }, 10000);
     const tActive = setInterval(loadActive, 5000);
     return () => { clearInterval(t); clearInterval(tActive); };
-  }, [loadSessions, loadStatic, loadActive]);
+  }, [loadSessions, loadActive]);
 
   // 工作区切换后立即刷新会话列表（不等 10s 轮询，且列表目录已随工作区切换）
   useEffect(() => {
@@ -142,61 +98,6 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
     onSwitchSession(target, s.name);
   };
 
-  /** 展开/收起 Instruction 文件内容 */
-  const toggleInstruction = async (kind: string, file: string) => {
-    const key = `${kind}:${file}`;
-    if (instructionContent[key]) {
-      setInstructionContent(prev => {
-        const { [key]: _removed, ...rest } = prev;
-        return rest;
-      });
-      return;
-    }
-    setLoadingInstruction(key);
-    const res = await api.readInstruction(kind, file);
-    if (res.content) {
-      setInstructionContent(prev => ({ ...prev, [key]: res.content as string }));
-    }
-    setLoadingInstruction(null);
-  };
-
-  // ── Customizations 真实数据组装 ──
-  const enabledSkills = (staticData?.skills || []).filter(s => s.enabled);
-  const agents = [
-    { name: 'seek-agent (主)', desc: '默认主 Agent 循环' },
-    ...(staticData?.addonAgents || []).map(a => ({ name: a.name, desc: '领域 Agent（addon）' })),
-    ...(runtimeData?.subAgents || []).map(a => ({
-      name: a.name,
-      desc: `子 Agent · ${modeLabelMap[a.mode || ''] || a.mode} · ${statusLabelMap[a.status || ''] || a.status}`,
-    })),
-  ];
-  const mcpItems = (staticData?.mcpConfig || []).map(cfg => {
-    const st = (runtimeData?.mcp || []).find(m => m.name === cfg.name);
-    return { name: cfg.name, desc: st ? (st.initialized ? `已连接 · ${cfg.command}` : `未连接 · ${cfg.command}`) : `未连接 · ${cfg.command}` };
-  });
-  const pluginItems = (staticData?.skills || []).map(s => ({
-    name: s.name,
-    desc: s.enabled ? '已启用' : '未启用',
-  }));
-
-  const subItemsMap: Record<string, Array<{ name: string; desc?: string }>> = {
-    agents,
-    skills: enabledSkills.map(s => ({ name: s.name, desc: s.description })),
-    instructions: (staticData?.instructions || []).map(i => ({ name: i.name, desc: i.kind })),
-    hooks: (runtimeData?.hooks || []).map(h => ({ name: h.name, desc: h.description })),
-    mcp: mcpItems,
-    plugins: pluginItems,
-  };
-
-  const badgeCount: Record<string, number> = {
-    agents: agents.length,
-    skills: enabledSkills.length,
-    instructions: staticData?.instructions.length || 0,
-    hooks: runtimeData?.hooks.length || 0,
-    mcp: staticData?.mcpConfig.length || 0,
-    plugins: staticData?.skills.length || 0,
-  };
-
   return (
     <aside id="left-sidebar" className={open ? 'open' : ''}>
       <div className="sidebar-section-header">
@@ -223,9 +124,6 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
             const alive = activeSessionIds.includes(s.sessionId as string) || activeSessionIds.includes(s.name);
             const isActive = currentSessionId === s.sessionId || currentSessionId === s.name;
             const isRunning = runningSessions.has(s.sessionId as string) || runningSessions.has(s.name) || (alive && isActive);
-            // 身份卡按钮仅对已拉起 agent 进程的会话可用（历史会话需先打开）
-            const canGenerate = isActive || alive;
-            const generating = cardGenerating.has(s.name);
             return (
               <div key={s.name} className={`session-item${isActive ? ' active' : ''}`} onClick={() => handleSwitchSession(s)} title={`切换到会话 ${displayName}`}>
                 <div className="session-name">
@@ -234,17 +132,6 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
                 </div>
                 <div className="session-meta-row">
                   <div className="session-meta">{s.messageCount} msgs{timeStr ? ` · ${timeStr}` : ''}</div>
-                  <button
-                    className={`card-btn${generating ? ' generating' : ''}${canGenerate ? '' : ' disabled'}`}
-                    title={canGenerate ? '用轻量模型生成/更新身份卡' : '需先打开该会话才能生成身份卡'}
-                    disabled={!canGenerate || generating}
-                    onClick={(e) => { e.stopPropagation(); handleGenerateCard(s.name); }}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><path d="M6 15h4"/>
-                    </svg>
-                    {generating && <span className="card-btn-spinner" />}
-                  </button>
                 </div>
                 {s.preview && <div className="session-preview">{s.preview.slice(0, 60)}</div>}
               </div>
@@ -265,61 +152,46 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
 
       <div id="sidebar-spacer" />
 
-      <div id="customizations-section">
-        <div className="sidebar-section-header collapsible" onClick={() => setCustomCollapsed(v => !v)}>
-          <span className="section-title">Customizations</span>
-          <span className="collapse-arrow">{customCollapsed ? '▶' : '▼'}</span>
+      {conn && (
+        <div id="remote-connect-btn-wrap" style={{ padding: '10px 12px', borderTop: '1px solid var(--border-color, #e5e7eb)' }}>
+          <button
+            id="remote-connect-btn"
+            onClick={conn.openPanel}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+              background: conn.paired ? 'rgba(56,158,13,0.12)' : 'var(--bg-hover, #f0f1f3)',
+              color: conn.paired ? '#389e0d' : 'var(--text-secondary, #444)',
+              fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+            </svg>
+            {conn.paired ? '已连接' : '连接远程'}
+            {conn.paired && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#389e0d', display: 'inline-block' }} />}
+          </button>
         </div>
+      )}
 
-        {!customCollapsed && (
-          <ul id="custom-list">
-            {customItems.map(item => (
-              <li key={item.key} className="custom-item" data-expandable="true" onClick={(e) => { e.stopPropagation(); setExpandedCustom(prev => prev === item.key ? null : item.key); }}>
-                <svg className="custom-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d={item.icon} /></svg>
-                <span className="custom-label">{item.label}</span>
-                {badgeCount[item.key] > 0 && <span className="custom-badge">{badgeCount[item.key]}</span>}
-                <span className={`custom-expand${expandedCustom === item.key ? ' expanded' : ''}`}>{expandedCustom === item.key ? '▼' : '▶'}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {expandedCustom && !customCollapsed && (
-          <div className="custom-subitems">
-            {expandedCustom === 'instructions'
-              ? (subItemsMap[expandedCustom] || []).map(item => {
-                  const inst = (staticData?.instructions || []).find(i => i.name === item.name && i.kind === item.desc);
-                  const key = inst ? `${inst.kind}:${inst.file}` : item.name;
-                  const content = instructionContent[key];
-                  const loading = loadingInstruction === key;
-                  return (
-                    <div key={key}>
-                      <div className="custom-subitem" onClick={() => inst && toggleInstruction(inst.kind, inst.file)} title={inst ? '点击查看内容' : item.desc}>
-                        <span className="custom-subicon">{inst ? (content ? '▾' : '▸') : '·'}</span>
-                        <span className="custom-subname">{item.name}</span>
-                        <span className="custom-submeta">{item.desc}</span>
-                      </div>
-                      {content && (
-                        <div className="custom-instruction-preview">
-                          {loading ? '加载中…' : content.slice(0, 300) + (content.length > 300 ? '…' : '')}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              : (subItemsMap[expandedCustom] || []).map(item => (
-                  <div key={item.name} className="custom-subitem" title={item.desc || ''}>
-                    <span className="custom-subicon">·</span>
-                    <span className="custom-subname">{item.name}</span>
-                    {item.desc && <span className="custom-submeta">{item.desc.slice(0, 40)}</span>}
-                  </div>
-                ))}
-          </div>
-        )}
-      </div>
     </aside>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

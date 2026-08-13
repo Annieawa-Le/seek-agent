@@ -140,8 +140,8 @@ check('work_recall 命中返回原文', recall3.toString().includes('Worklog'));
 const recall4 = await workRecallTool.execute!({ id: 'W9' } as any, {} as any);
 check('work_recall 未命中有提示', recall4.toString().includes('未找到'));
 
-// ── 8. 磁盘落盘 ──
-const storeFile = path.join(getWorkspaceRoot(), 'sessions', 'worklogs', `${TEST_SESSION}.json`);
+// ── 8. 磁盘落盘（新结构：sessions/{sessionId}/worklog/entries.json） ──
+const storeFile = path.join(getWorkspaceRoot(), 'sessions', TEST_SESSION, 'worklog', 'entries.json');
 check('归档文件落盘', fs.existsSync(storeFile));
 if (fs.existsSync(storeFile)) {
   const raw = JSON.parse(fs.readFileSync(storeFile, 'utf-8'));
@@ -149,7 +149,7 @@ if (fs.existsSync(storeFile)) {
 }
 
 // ── 清理 ──
-try { fs.rmSync(storeFile, { force: true }); } catch { /* 忽略 */ }
+try { fs.rmSync(path.dirname(storeFile), { recursive: true, force: true }); } catch { /* 忽略 */ }
 delete process.env.MAX_CONTEXT_TOKENS;
 if (oldMax !== undefined) process.env.MAX_CONTEXT_TOKENS = oldMax;
 
@@ -160,6 +160,7 @@ for (const a of asserts) {
 }
 console.log(failed === 0 ? `\n全部通过（${asserts.length} 项）` : `\n${failed} 项失败`);
 process.exit(failed === 0 ? 0 : 1);
+
 
 
 

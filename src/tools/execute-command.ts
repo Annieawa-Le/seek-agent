@@ -11,7 +11,7 @@ import { getCwd } from '../workdir.js';
  * 智能解码：Windows 下 cmd 命令输出编码不统一——
  * 原生命令（dir/echo/findstr 等）按系统代码页（GBK）输出，Node/Python 程序多为 UTF-8。
  * 先严格 UTF-8 解码（fatal），成功则采用；失败则去掉末尾不完整序列再试
- * （应对 timeout/中断把输出切在多字节字符中间的情况）；仍失败才回退 GBK。
+ * （应对中断把输出切在多字节字符中间的情况）；仍失败才回退 GBK。
  */
 export function decodeSmart(buf: Buffer): string {
   if (!buf || buf.length === 0) return '';
@@ -40,7 +40,6 @@ export const executeCommandTool = tool({
       const { stdout, stderr } = await execPromise(command, {
         cwd: getCwd(),
         encoding: 'buffer',
-        timeout: 30000,
         // 让 Python 子进程也输出 UTF-8，配合智能解码减少编码误判
         env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
       });
@@ -94,6 +93,8 @@ export const executeCommandTool = tool({
     }
   },
 });
+
+
 
 
 

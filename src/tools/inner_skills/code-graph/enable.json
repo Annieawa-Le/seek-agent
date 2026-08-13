@@ -1,0 +1,5 @@
+{
+  "enable": true,
+  "description": "代码图谱：符号提取/引用查找/调用链/文件依赖/影响面分析。TS 走编译器 API（语义级），Java/C/C++ 走 tree-sitter WASM（语法级）"
+}
+

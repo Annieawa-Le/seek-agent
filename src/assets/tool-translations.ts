@@ -151,6 +151,11 @@ def('undo_patch', 'patch', '↩', () => {
 def('history_patch', 'patch', '■', () => {
   return '查看操作历史';
 }, 'after-round');
+def('replace_str', 'patch', '■', (args) => {
+  const fp = (args?.filePath ?? '(?)') as string;
+  const s = (args?.search ?? '(?)') as string;
+  return `快速替换: ${fp} ("${s}")`;
+}, 'after-round');
 
 
 // ── 桌面管理 ──
@@ -167,6 +172,40 @@ def('desk_remove', 'desk', '■', (args) => {
 }, 'after-round');
 
 def('desk_clear', 'desk', '■', () => '清空桌面', 'after-round');
+
+// ── 后台任务管理 ──
+def('task_execute', 'exec', '■', (args) => {
+  const name = (args?.taskName ?? '(?)') as string;
+  const cmd = (args?.command ?? '(?)') as string;
+  const short = cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd;
+  return `后台执行: ${name} (${short})`;
+}, 'after-round');
+
+def('task_switch', 'exec', '■', (args) => {
+  const name = (args?.taskName ?? '(?)') as string;
+  return `查看任务: ${name}`;
+}, 'after-round');
+
+def('task_list', 'exec', '■', () => '后台任务列表', 'after-round');
+
+def('task_kill', 'exec', '■', (args) => {
+  const name = (args?.taskName ?? '(?)') as string;
+  return `停止任务: ${name}`;
+}, 'after-round');
+
+// ── 闹钟 ──
+def('alarm_set', 'exec', '⏰', (args) => {
+  const dur = args?.duration ?? '?';
+  const label = (args?.label ?? '等待') as string;
+  return `设定闹钟: ${label} (${dur}s)`;
+}, 'after-round');
+
+def('alarm_cancel', 'exec', '⏰', (args) => {
+  const label = (args?.label ?? '(?)') as string;
+  return `取消闹钟: ${label}`;
+}, 'after-round');
+
+def('alarm_list', 'exec', '⏰', () => '闹钟列表', 'after-round');
 
 // ═════════════════════════════════════════════════════
 
@@ -321,6 +360,11 @@ export function registerSkillTranslations(
     registerTool(name, trans);
   }
 }
+
+
+
+
+
 
 
 

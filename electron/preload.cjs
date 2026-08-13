@@ -50,14 +50,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('workdir:changed', handler);
   },
 
-  /** 监听会话身份卡生成完成（agent:identity-card 事件） */
-  onIdentityCard: (callback) => {
-    const handler = (_event, data) => callback(data);
-    ipcRenderer.on('agent:identity-card', handler);
-    return () => ipcRenderer.removeListener('agent:identity-card', handler);
-  },
-
-  /** 监听跨会话协作事件（collab:event） */
   /** 监听会话 Agent 后台拉起失败（session:new / session:switch 异步化后的兜底） */
   onSessionError: (callback) => {
     const handler = (_event, data) => callback(data);
@@ -65,10 +57,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('agent:session-error', handler);
   },
 
+  /** 监听跨会话协作事件（collab:event） */
   onCollabEvent: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('collab:event', handler);
     return () => ipcRenderer.removeListener('collab:event', handler);
+  },
+
+  /** 监听远程配对码（remote:pair-code，RemoteBridge 广播；桌面端显示配对码用） */
+  onRemotePairCode: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('remote:pair-code', handler);
+    return () => ipcRenderer.removeListener('remote:pair-code', handler);
+  },
+
+  /** 监听远程连接状态（remote:status，RemoteBridge 广播） */
+  onRemoteStatus: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('remote:status', handler);
+    return () => ipcRenderer.removeListener('remote:status', handler);
+  },
+
+  /** 监听信任设备列表变化（remote:devices，RemoteBridge 广播；设备面板实时刷新用） */
+  onRemoteDevices: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('remote:devices', handler);
+    return () => ipcRenderer.removeListener('remote:devices', handler);
   },
 
   // ─── 发送 ───
@@ -102,6 +116,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** 查询当前 agent 连接状态 */
   getAgentStatus: async () => {
     return ipcRenderer.invoke('agent:status:request');
+  },
+
+  /** 查询信任设备列表（本地持久化 + 在线状态） */
+  getRemoteDevices: async () => {
+    return ipcRenderer.invoke('remote:getDevices');
+  },
+
+  /** 撤销对某设备的信任（发 trust-revoke + 本地删除） */
+  revokeRemoteDevice: async (remoteId) => {
+    return ipcRenderer.invoke('remote:revokeDevice', remoteId);
   },
 
   // ─── 工作区目录管理 ───
@@ -152,14 +176,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('fs:listSessions');
   },
 
-  /** 生成/更新会话身份卡（轻量模型总结当前对话） */
-  generateIdentityCard: async (sessionId) => {
-    return ipcRenderer.invoke('session:generateIdentityCard', sessionId);
+  /** 读取 .env 配置（设置面板用） */
+  getEnvConfig: async () => {
+    return ipcRenderer.invoke('env:read');
   },
 
-  /** 跨会话协作：会话列表（活跃 + 历史，含身份卡） */
-  getCollabSessions: async () => {
-    return ipcRenderer.invoke('collab:sessions');
+  /** 保存 .env 配置（updates: [{key, value}]，设置面板用） */
+  saveEnvConfig: async (updates) => {
+    return ipcRenderer.invoke('env:write', { updates });
   },
 
   /** 跨会话协作：通信记录（最新在前） */
@@ -167,6 +191,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('collab:log');
   },
 
+  /** 把子 Agent 消息流保存为本地 json-session 文件 */
+  saveSubagentSession: async (data) => {
+    return ipcRenderer.invoke('session:saveSubagent', data);
+  },
   // ─── 多会话控制 ───
 
   /** 切换到指定会话（已保存会话传 name，将自动拉起独立 Agent 进程） */
@@ -235,6 +263,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('window:isMaximized');
   },
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

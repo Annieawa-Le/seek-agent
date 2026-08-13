@@ -21,6 +21,13 @@ import { worklogStore, type WorklogEntry } from './tools/worklog-store';
 const DEFAULT_MAX_TOKENS = 100_000;
 const DEFAULT_TARGET_RATIO = 0.75;
 
+/** Worklog 存储接口（主模型 worklogStore 与子 Agent subagentWorklogStore 均满足） */
+export interface WorklogStoreLike {
+  setSessionId(id: string): void;
+  nextId(): string;
+  add(entry: WorklogEntry): void;
+  get(id: string): WorklogEntry | undefined;
+}
 export interface CompactionPlan {
   /** 需从消息列表头部移除的消息条数（含旧 Worklog 消息） */
   removeCount: number;
@@ -125,7 +132,7 @@ const IDEMPOTENT_TOOLS = new Set([
   // code-reader / code-edit-detector 分析
   'scanning_function', 'scanning_class', 'scanning_tag', 'scanning_script',
   'read_function', 'read_class', 'read_package', 'jump_to_definition',
-  'get_function_range', 'find_matching_brace',
+  'get_function_range', 'find_matching_brace', 'find_matching_label',
   // 召回（可重复取回）
   'worklog_recall', 'work_recall',
 ]);
@@ -279,12 +286,13 @@ export async function compactMessages(
   sessionId: string,
   currentInputTokens: number,
   summarize?: (roundMessages: ModelMessage[]) => Promise<{ title: string; summary: string }>,
+  store: WorklogStoreLike = worklogStore,
 ): Promise<CompactionPlan | null> {
   const trigger = maxContextTokens();
   const target = targetContextTokens();
   if (currentInputTokens <= trigger) return null;
 
-  worklogStore.setSessionId(sessionId);
+  store.setSessionId(sessionId);
 
   const rounds = findRounds(snapshot);
   // 至少保留一轮真实对话
@@ -322,7 +330,7 @@ export async function compactMessages(
   if (oldestFull) {
     const oldText = typeof oldestFull.content === 'string' ? oldestFull.content : '';
     const oldId = extractWorklogId(oldText);
-    const oldEntry = oldId ? worklogStore.get(oldId) : undefined;
+    const oldEntry = oldId ? store.get(oldId) : undefined;
     const oldTitle = oldEntry?.title ?? '工作记录';
     headArchiveLine = {
       role: 'assistant',
@@ -335,10 +343,9 @@ export async function compactMessages(
   const removedMessages = removedAll.filter((m) => !isWorklogMessage(m) && !isSystemInjectMessage(m));
   // 移除范围需覆盖头部扫描到的注入消息 + 全部 Worklog 消息
   removeCount = Math.max(removeCount, wlScan);
-
   // 生成新 Worklog（副模型压缩）
   const { title, summary } = await (summarize ?? summarizeRounds)(removedMessages);
-  const id = worklogStore.nextId();
+  const id = store.nextId();
   const entry: WorklogEntry = {
     id,
     title,
@@ -346,7 +353,7 @@ export async function compactMessages(
     archivedMessages: removedMessages,
     createdAt: new Date().toISOString(),
   };
-  worklogStore.add(entry);
+  store.add(entry);
 
   // 时间线顺序：旧的已归档行（原样）→ 刚降级的归档行 → 新 Worklog
   const insertMessages: ModelMessage[] = [
@@ -364,6 +371,12 @@ export async function compactMessages(
   return { removeCount, insertMessages, roundsRemoved: roundsToRemove, worklog: entry };
 
 }
+
+
+
+
+
+
 
 
 

@@ -10,7 +10,6 @@ src/prompts/
 ├── MAIN.md                 ← 主提示词：核心人格与协作规范
 ├── WORKFLOW.md             ← 工作流规范：todo / patch / 记忆 / 命令准则
 ├── INSTRUCTOR.md           ← Instructor（开发引导员）子 agent 提示词模板
-├── IDENTITY_CARD.md        ← 会话身份卡生成提示词（跨会话协作用）
 ├── ILLUSION_EXECUTOR.md    ← 100% AI 模式的后台执行器提示词
 ├── platform/               ← 平台特定命令准则（按操作系统条件加载一份）
 │   ├── WINDOWS.md
@@ -35,7 +34,6 @@ src/prompts/
 | `MAIN.md` | 主提示词：AI 人格、工程原则、输出格式、协作规范 | `src/agent.ts` `loadDefaultPrompts()` | 每次启动/重载 prompt；**会被 manager/worker 等 mainReplacement 模式整体替换** |
 | `WORKFLOW.md` | 工作流规范：patch 工具用法、todo 系统、记忆工具、命令准则 | `src/agent.ts` | 拼在 MAIN 之后，常驻 |
 | `INSTRUCTOR.md` | instructor（开发引导员）子 agent 的 system prompt 模板 | `src/tools/inner_skills/sub-agent/runner.ts` | 每次 instructor 执行读盘；支持 `{{requirement}}` / `{{extraInstruction}}` 占位符 |
-| `IDENTITY_CARD.md` | 会话身份卡师提示词：把对话压缩成结构化身份卡，供跨会话协作 | `src/tools/identity-card.ts` | 每次生成身份卡读盘 |
 | `ILLUSION_EXECUTOR.md` | 100% AI 模式的后台执行器：替主模型的幻觉工具调用"圆梦" | `src/illusion_agent.ts` | 每次转派幻觉调用时读盘 |
 
 ## platform/（按操作系统加载一份）
@@ -81,3 +79,6 @@ MAIN.md（或激活模式的 mainReplacement）
 - **100% AI 模式的提示词在哪？** 分两处：主模型的"万能工具环境"世界观在 `addon/HALLUCINATION.md`，后台执行器的职责与输出格式在根目录 `ILLUSION_EXECUTOR.md`。两者都可直接编辑、即时生效。
 - **改了 .md 为什么不生效？** 确认改的是上表"谁加载"对应的路径（大小写敏感）；若改的是代码（如注册新模式），需重启 agent 进程。
 - **ALL_HALLUCINATION.md 去哪了？** 它原是 100% AI 模式的设计想法笔记（非生效提示词），已移出本目录至 `docs/ALL_HALLUCINATION.md`。
+
+
+

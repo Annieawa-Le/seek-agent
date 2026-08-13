@@ -35,7 +35,6 @@ export interface BridgeMessage {
 // ═════════════════════════════════════════════════════
 
 /** 子进程 → 主进程 */
-/** 子进程 → 主进程 */
 export type ChildToParent =
   | { type: 'message'; role: BridgeMessage['role']; content: string; subagentName?: string; toolMeta?: BridgeMessage['toolMeta']; toolCallHtml?: string; toolResultHtml?: string; fullOutput?: string; rawBulk?: Record<string, unknown> }
   | { type: 'state'; processing: boolean }
@@ -57,8 +56,7 @@ export type ChildToParent =
   | { type: 'instructor'; name: string; content: string }
   | { type: 'kb-build'; phase: 'building' | 'done' | 'failed'; message: string }
   | { type: 'sidebar-data'; data: Record<string, unknown> }
-  | { type: 'collab-request'; requestId: string; kind: 'sessions' | 'send'; to?: string; content?: string }
-  | { type: 'identity-card'; card: Record<string, unknown>; error?: string }
+  | { type: 'collab-request'; requestId: string; kind: 'send'; to?: string; content?: string }
   | { type: 'input-state'; kbEnabled: boolean; smartSearch: boolean; thinking: boolean; processing: boolean }
   | { type: 'exit' };
 
@@ -168,10 +166,10 @@ export class ElectronUIBridge {
   // ─── 跨会话协作 ───
 
   /**
-   * 向主进程发起跨会话协作请求（sessions=列出会话身份卡 / send=发送协作消息）。
+   * 向主进程发起跨会话协作请求（send=发送协作消息）。
    * 工具在 agent 进程中调用，等待主进程通过 collab-result 返回。
    */
-  requestCollab(kind: 'sessions' | 'send', payload: { to?: string; content?: string } = {}): Promise<any> {
+  requestCollab(kind: 'send', payload: { to?: string; content?: string } = {}): Promise<any> {
     const requestId = `collab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     return new Promise((resolve) => {
       this.collabWaiters.set(requestId, resolve);
@@ -190,11 +188,6 @@ export class ElectronUIBridge {
     const text = `📨 协作消息（来自 ${from}）：\n${content}`;
     this.messages.push({ role: 'system', content: text, createdAt: Date.now() });
     this.send({ type: 'message', role: 'system', content: text });
-  }
-
-  /** 把生成的会话身份卡发送给主进程（由主进程写入附属文件） */
-  sendIdentityCard(card: Record<string, unknown>, error?: string): void {
-    this.send({ type: 'identity-card', card, error });
   }
 
   addSystemMessage(content: string): void {
@@ -448,6 +441,11 @@ function formatToolCallHtml(toolName: string, args: Record<string, unknown>): st
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+
+
+
+
 
 
 

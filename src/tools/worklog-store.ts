@@ -3,13 +3,15 @@
  *
  * 消退路径：活跃消息 → [Worklog] 梗概 → 归档行（worklog_recall 取梗概 / work_recall 取原文）
  *
- * 存储：按 sessionId 分区，落盘到 {workspace}/sessions/worklogs/{sessionId}.json。
+ * 存储：按 sessionId 分区，落盘到 {workspace}/sessions/{sessionId}/worklog/entries.json。
  * 被压缩轮次的原始消息完整保留于此，不作为活跃消息，但可随时召回。
+ *
+ * 兼容：旧结构 {workspace}/sessions/worklogs/{sessionId}.json 首次加载时自动迁移到新位置。
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { getWorkspaceRoot } from '../workdir';
+import { getSessionsRoot } from '../workdir';
 
 export interface WorklogEntry {
   /** 归档 id，形如 W12 */
@@ -23,7 +25,10 @@ export interface WorklogEntry {
   createdAt: string;
 }
 
-const WORKLOGS_SUBDIR = 'sessions/worklogs';
+/** sessionId → 安全文件/文件夹名（非法字符替换为下划线） */
+function safeName(id: string): string {
+  return (id || 'default').replace(/[\\/:*?"<>|]/g, '_');
+}
 
 class WorklogStore {
   private sessionId = '';
@@ -42,22 +47,44 @@ class WorklogStore {
     return this.sessionId;
   }
 
+  /** 新结构路径：sessions/{sessionId}/worklog/entries.json */
   private get filePath(): string {
-    const safe = (this.sessionId || 'default').replace(/[\\/:*?"<>|]/g, '_');
-    return path.join(getWorkspaceRoot(), WORKLOGS_SUBDIR, `${safe}.json`);
+    return path.join(getSessionsRoot(), 'sessions', safeName(this.sessionId), 'worklog', 'entries.json');
+  }
+
+  /** 旧结构路径：sessions/worklogs/{sessionId}.json（迁移用） */
+  private get legacyFilePath(): string {
+    return path.join(getSessionsRoot(), 'sessions', 'worklogs', `${safeName(this.sessionId)}.json`);
   }
 
   private load(): void {
     this.entries = new Map();
     try {
+      let raw: string | null = null;
       if (fs.existsSync(this.filePath)) {
-        const raw = JSON.parse(fs.readFileSync(this.filePath, 'utf-8')) as { entries?: WorklogEntry[] };
-        for (const e of raw.entries ?? []) {
-          if (e?.id) this.entries.set(e.id, e);
-        }
+        raw = fs.readFileSync(this.filePath, 'utf-8');
+      } else if (fs.existsSync(this.legacyFilePath)) {
+        // 旧结构：读取后迁移到新位置（写新 + 删旧），一次性完成
+        raw = fs.readFileSync(this.legacyFilePath, 'utf-8');
+        try {
+          const parsed = JSON.parse(raw) as { entries?: WorklogEntry[] };
+          this.loadEntries(parsed);
+          this.persist();
+          fs.unlinkSync(this.legacyFilePath);
+          raw = null; // 已通过 loadEntries 加载，避免重复
+        } catch { /* 迁移失败则按常规流程读旧文件（下方兜底） */ }
+      }
+      if (raw !== null) {
+        this.loadEntries(JSON.parse(raw) as { entries?: WorklogEntry[] });
       }
     } catch {
       // 归档文件损坏时从空开始，不影响主流程
+    }
+  }
+
+  private loadEntries(data: { entries?: WorklogEntry[] }): void {
+    for (const e of data.entries ?? []) {
+      if (e?.id) this.entries.set(e.id, e);
     }
   }
 
@@ -113,3 +140,5 @@ class WorklogStore {
 
 /** 全局单例（Electron 每会话一个 agent 进程，进程内单例安全） */
 export const worklogStore = new WorklogStore();
+
+

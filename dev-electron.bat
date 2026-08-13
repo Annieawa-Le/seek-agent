@@ -10,7 +10,10 @@ echo [1/3] front end...
 cd electron\renderer
 call npx vite build >nul 2>&1
 if %errorlevel% neq 0 (
-  echo [dev] Frontend build failed.
+  echo [dev] Frontend build failed. Re-running to show errors:
+  call npx vite build
+  echo.
+  echo [dev] Build failed with exit code %errorlevel%
   pause
   exit /b 1
 )
@@ -29,3 +32,4 @@ echo  ReRunning this script after you finished modifying.
 echo.
 set NODE_ENV=development
 npx electron .
+

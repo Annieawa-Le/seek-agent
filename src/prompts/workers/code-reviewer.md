@@ -49,4 +49,12 @@
 ["read_file", "read_lines", "scan_file", "search_all_file", "search_sub_file", "search_content", "execute_command", "desk_add", "desk_list", "desk_remove"]
 ----TOOLS_END----
 
+## 可用技能（spawn_worker 自动解锁）
+
+----SKILLS_START----
+["code-graph", "ts-debug"]
+----SKILLS_END----
+
+
+
 

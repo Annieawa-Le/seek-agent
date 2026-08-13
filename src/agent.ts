@@ -1,6 +1,6 @@
 import { getMcpManager } from './mcp';
 import { streamText, type TextPart, type ToolCallPart, type ModelMessage, NoOutputGeneratedError } from 'ai';
-import { tools, stripToolExecutes } from './tools';
+import { tools, stripToolExecutes, resolveLazyTool, sanitizeToolInput, unwrapToolArgs } from './tools';
 import { checkToolGate, getActiveModes, getActiveModeNames, filterToolsForActiveModes } from './modes/registry';
 import { drainPendingInjections, hasPendingInjections, subAgentManager, setSubmissionListener } from './tools/inner_skills/sub-agent/manager';
 import type { SubAgentState } from './tools/inner_skills/sub-agent/types';
@@ -10,8 +10,9 @@ import * as fs from 'node:fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import path from 'node:path';
-import { getWorkspaceRoot, resolvePath } from './workdir';
+import { getWorkspaceRoot, getSessionsRoot, resolvePath } from './workdir';
 import { deskEditManager, DESK_EDIT_TOOLS } from './tools/desk-edit';
+import { setAlarmListener } from './tools/alarm';
 import { getModel, setSystemPrompt } from './model-provider';
 import {
   friendlyToolCallLabel,
@@ -21,7 +22,7 @@ import {
 import { toolCache } from './tools/tool-cache';
 import { patchBatch, PATCH_TOOL_NAMES } from './tools/patch-batch';
 import { readFileLines } from './tools/file-manipulation';
-import { summarizeSessionTitle, fallbackTitle, sanitizeTitle } from './tools/session-title';
+import { summarizeSessionTitle } from './tools/session-title';
 import { extractBulk } from './tools/tool-output';
 import { IllusionAgent } from './illusion_agent';
 const __filename = fileURLToPath(import.meta.url);
@@ -32,6 +33,9 @@ const INTERNAL_SUBMISSION_TRIGGER = '__internal_submission__';
 
 import { compactMessages, checkBudget, estimateMessagesTokens, slimOldestRound, type CompactionPlan } from './context-compactor';
 import { worklogStore } from './tools/worklog-store';
+import { subagentContextStore } from './tools/subagent-context-store';
+import { subagentRegistryStore } from './tools/subagent-registry-store';
+import { docPoolStore } from './tools/doc-pool-store';
 // 类型定义
 // ═════════════════════════════════════════════════════
 
@@ -40,6 +44,23 @@ import { worklogStore } from './tools/worklog-store';
  */
 export type MessageHook = (messages: ModelMessage[]) => ModelMessage[] | Promise<ModelMessage[]>;
 
+/**
+ * 一次发给模型的完整 payload 记录（session 附加字段，供 WebUI「记忆」面板展示）。
+ * system 为实际注入的系统提示词（含模式/思考指令拼接），
+ * tools 为剥离 execute 后的工具 schema（模型可见定义），
+ * messages 为发送时的完整消息列表。
+ */
+export interface PayloadRecord {
+  ts: string;
+  /** 本次调用是否注入了思考指令（thinkingThisCall） */
+  thinking: boolean;
+  system: string;
+  messages: ModelMessage[];
+  tools: Record<string, any>;
+}
+
+/** payload 历史上限：避免 session 文件因完整工具 schema 重复存储而过度膨胀 */
+const MAX_PAYLOAD_HISTORY = 8;
 /**
  * PostRoundHook: 在每轮 AI 完整处理（含工具调用）结束后调用。
  */
@@ -60,13 +81,13 @@ export class CLIAAgent {
   private modelName: string;
   private tokenizer: TokenizerService;
   private systemPrompt: string;
+  /** 每次发给模型的完整 payload 历史（最近 MAX_PAYLOAD_HISTORY 条，随 session 落盘） */
+  private payloadHistory: PayloadRecord[] = [];
 
   /** 当前会话唯一标识，用于会话文件命名 */
   private sessionId: string;
-  /** 会话标题（由轻量模型总结，用于 session 文件名） */
+  /** 会话标题（由轻量模型总结，用于展示；落盘位置固定为 sessionId 文件夹） */
   private sessionTitle = '';
-  /** 当前实际保存的 session 文件名（用于标题变化时清理旧文件） */
-  private savedSessionFileName = '';
   /** 上次刷新标题的时间戳（节流用） */
   private lastTitleRefreshAt = 0;
   /** 上次刷新标题时的用户消息数（用于检测对话是否有实质进展） */
@@ -76,7 +97,8 @@ export class CLIAAgent {
   private processingPromise: Promise<void> | null = null;
   /** 用户输入队列 —— 可随时入队 */
   private inputQueue: string[] = [];
-  /** 是否已中断（取消本轮及后续处理） */
+  /** 闹钟待注入消息（处理中时暂存，安全点注入；不进 inputQueue，避免被当作新输入打断工具调用） */
+  private pendingAlarmMessages: string[] = [];
   /** 上下文压缩：待应用的压缩计划（下一轮输入的安全点应用） */
   private pendingCompaction: CompactionPlan | null = null;
   /** 上下文压缩：压缩任务是否在飞（防重入，一轮最多一次） */
@@ -94,6 +116,8 @@ export class CLIAAgent {
   /** 「100% AI」幻觉模式专用循环（懒创建，仅 hallucination 模式激活时使用） */
   private illusionAgent: IllusionAgent | null = null;
   private lastSingleCollapse: { msgIndex: number; toolName: string; args: Record<string, unknown> } | null = null;
+  /** Prompt 本地化：开启后不再自动注入动态组装的 system/tools，复用最近一次 payload 快照 */
+  private promptLocalizationEnabled = false;
 
   messageHook: MessageHook | null = null;
   /** 每轮结束后调用的 hook */
@@ -105,15 +129,27 @@ export class CLIAAgent {
     this.sessionId = process.env.AGENT_SESSION_ID || this.generateSessionId();
     // 归档存储绑定当前会话（记忆消退路径的 worklog_recall / work_recall 按会话分区）
     worklogStore.setSessionId(this.sessionId);
+    // 子 Agent 上下文本地化存储同样按会话分区
+    // 子 Agent 上下文本地化存储同样按会话分区
+    subagentContextStore.setSessionId(this.sessionId);
+    // 子 Agent 注册状态存储按会话分区
+    subagentRegistryStore.setSessionId(this.sessionId);
+    // 文件池（doc_pool）落盘位置跟随会话
+    docPoolStore.setSessionId(this.sessionId);
     this.ui = ui;
     this.modelName = process.env.OPENAI_MODEL || 'gpt-4o-mini';
     this.systemPrompt = this.withModePrompts(systemPrompt ?? this.loadDefaultPrompts());
     setSystemPrompt(this.systemPrompt);
+    // Prompt 本地化（PROMPT_LOCALIZATION=true）：会话固定复用最近一次 payload 快照（system+工具），
+    // 不再随技能启停/工作区切换/文件变化自动重组系统 Prompt。需重启 seek-agent 生效。
+    this.promptLocalizationEnabled = /^(true|1|yes)$/i.test(process.env.PROMPT_LOCALIZATION ?? '');
     this.tokenizer = new TokenizerService();
     this.tokenizer.start().catch(() => {});
 
     // 子模型提交监听：入队后注入 tool 消息对（空闲时触发新一轮）
     setSubmissionListener(() => { this.onSubAgentSubmission().catch(() => {}); });
+    // 闹钟监听：到点把 "[闹钟]XX计时器已归零！" 作为 user 消息提交（同注入机制）
+    setAlarmListener((msg) => { this.onAlarmFire(msg).catch(() => {}); });
 
     // 注册进程退出时的 MCP 清理与 instructor 后台流中断
     const cleanup = () => {
@@ -437,6 +473,8 @@ export class CLIAAgent {
     } catch {
       // 排空失败不影响主流程
     }
+    // ── 注入暂存的闹钟消息（安全点，不打断工具调用） ──
+    this.injectPendingAlarms();
     this.ui.setProcessing(true);
     toolCache.reset();
     this.roundActualToolCalls = 0;
@@ -514,6 +552,8 @@ export class CLIAAgent {
       try {
         this.injectSubmissionsToMessages();
       } catch { /* 排空失败不影响 */ }
+      // ── 注入暂存的闹钟消息（安全点，不打断工具调用） ──
+      this.injectPendingAlarms();
 
       // ── 消费 AI 处理期间积累的用户输入 ──
       if (this.inputQueue.length > 0) {
@@ -595,16 +635,38 @@ export class CLIAAgent {
       };
       try {
         const abortController = this.ui.createAbortController();
+        // 思考指令仅在本轮第一次调用时注入，工具循环中间使用纯净 system prompt
+        let payloadSystem = thinkingThisCall
+          ? `${this.systemPrompt}\n\n${CLIAAgent.buildSessionInstruction()}`
+          : this.systemPrompt;
+        // 按激活模式过滤（白名单/黑名单）后剥离 execute，避免 AI SDK 内部自动执行工具导致双重执行
+        let payloadTools = stripToolExecutes(filterToolsForActiveModes(tools));
+        // Prompt 本地化：system 直接复用最近一次实际发送的 payload 快照
+        // （system 内含工作区信息，固定后不随技能启停/工作区切换/文件变化漂移），
+        // 首轮无快照时仍动态组装一次作为种子，recordPayload 后后续轮次自动固定。
+        // 注意：tools 不直接复用 payload 快照——loadsession 恢复的 payload 经 JSON
+        // round-trip 会丢失 AI SDK 的 Schema 包装（symbol/getter 不可序列化），直接传给
+        // streamText 会触发 asSchema 崩溃（TypeError: schema is not a function）。
+        // 工具集始终使用当前动态 schema（stripToolExecutes 后的内存对象）。
+        if (this.promptLocalizationEnabled) {
+          const snap = this.payloadHistory[this.payloadHistory.length - 1];
+          if (snap && typeof snap.system === 'string' && snap.system.length > 0) {
+            payloadSystem = snap.system;
+          }
+        }
+        // messages 深拷贝快照：与 this.messages 同引用，后续 push 会污染历史记录
+        this.recordPayload({
+          system: payloadSystem,
+          messages: JSON.parse(JSON.stringify(messagesForModel)) as ModelMessage[],
+          tools: payloadTools,
+          thinking: thinkingThisCall,
+        });
         const result = await streamText({
           model: getModel(this.modelName),
-          // 思考指令仅在本轮第一次调用时注入，工具循环中间使用纯净 system prompt
-          system: thinkingThisCall
-            ? `${this.systemPrompt}\n\n${CLIAAgent.buildSessionInstruction()}`
-            : this.systemPrompt,
+          system: payloadSystem,
           messages: messagesForModel,
-          tools: stripToolExecutes(filterToolsForActiveModes(tools)), // 按激活模式过滤（白名单/黑名单）后剥离 execute，避免 AI SDK 内部自动执行工具导致双重执行
+          tools: payloadTools,
           abortSignal: abortController.signal,
-          experimental_context: { __messages: this.messages },
           // 思考模式：向模型透传思考相关参数（按 provider 生效）
           ...(thinkingThisCall ? {
             providerOptions: {
@@ -693,6 +755,10 @@ export class CLIAAgent {
         if (finalResult.toolCalls) {
           const tl = await finalResult.toolCalls;
           for (const tc of tl) {
+            // 修复工具调用参数：AI SDK 解析非法 JSON 时会回退为原始字符串，
+            // 导致消息数组损坏（下一轮 provider 400）。
+            // 同时解包 _raw/input 等包装参数（模型格式漂移），让后续消息记录与执行都用扁平参数。
+            tc.input = sanitizeToolInput(unwrapToolArgs(tc.input));
             collectedToolCalls.push(tc);
           }
         }
@@ -828,19 +894,25 @@ export class CLIAAgent {
       }
 
 
-      const toolImpl = tools[toolName as keyof typeof tools];
+      let toolImpl = tools[toolName as keyof typeof tools];
       if (!toolImpl?.execute) {
-        this.ui.addToolMessage(`❌ 错误: 未找到工具 ${toolName}`);
-        this.messages.push({
-          role: 'tool',
-          content: [{
-            type: 'tool-result',
-            toolCallId: toolCall.toolCallId,
-            toolName: toolCall.toolName,
-            output: { type: 'text', value: `错误: 未找到工具 ${toolName}` },
-          }],
-        });
-        continue;
+        // 工具不在 toolsContainer 中 → 尝试懒加载激活
+        const resolved = resolveLazyTool(toolName);
+        if (resolved?.execute) {
+          toolImpl = resolved;
+        } else {
+          this.ui.addToolMessage(`❌ 错误: 未找到工具 ${toolName}`);
+          this.messages.push({
+            role: 'tool',
+            content: [{
+              type: 'tool-result',
+              toolCallId: toolCall.toolCallId,
+              toolName: toolCall.toolName,
+              output: { type: 'text', value: `错误: 未找到工具 ${toolName}` },
+            }],
+          });
+          continue;
+        }
       }
 
       // ── 编辑模式拦截 ──
@@ -957,6 +1029,8 @@ export class CLIAAgent {
     try {
       this.injectSubmissionsToMessages();
     } catch { /* 排空失败不影响 */ }
+    // ── 注入暂存的闹钟消息（正常退出时） ──
+    this.injectPendingAlarms();
 
     return false;
   }
@@ -1115,6 +1189,30 @@ export class CLIAAgent {
     }
   }
 
+  /**
+   * 闹钟到点回调：把 "[闹钟]XX计时器已归零！" 作为 user 消息注入。
+   * 空闲时直接 run 启动新一轮；处理中则暂存 pendingAlarmMessages，
+   * 由安全点（processRound 开头 / aiInteractionLoop 顶部 / executeToolCalls 末尾）注入——
+   * 不进 inputQueue，避免被 executeToolCalls 当作新输入打断正在进行的工具调用（与子 agent 提交同机制）。
+   */
+  async onAlarmFire(msg: string): Promise<void> {
+    if (!this.processingPromise) {
+      await this.run(msg);
+    } else {
+      this.pendingAlarmMessages.push(msg);
+    }
+  }
+
+  /** 排空暂存的闹钟消息，注入为 user 消息（安全点调用；不打断正在进行的工具调用） */
+  private injectPendingAlarms(): number {
+    if (this.pendingAlarmMessages.length === 0) return 0;
+    const msgs = this.pendingAlarmMessages;
+    this.pendingAlarmMessages = [];
+    for (const msg of msgs) {
+      this.registerUserInput(msg);
+    }
+    return msgs.length;
+  }
   // ────────────────────────────────────────────────
 
   // ────────────────────────────────────────────────
@@ -1296,9 +1394,14 @@ export class CLIAAgent {
   clear(): void {
     this.messages = [];
     this.inputQueue = [];
+    this.pendingAlarmMessages = [];
     this.sessionTitle = '';
-    this.savedSessionFileName = '';
+    this.payloadHistory = [];
     this.sessionId = this.generateSessionId();
+    // 新会话：归档与子 Agent 上下文分区跟随新 id
+    worklogStore.setSessionId(this.sessionId);
+    subagentContextStore.setSessionId(this.sessionId);
+    docPoolStore.setSessionId(this.sessionId);
     this.ui.clearMessages();
   }
 
@@ -1316,39 +1419,69 @@ export class CLIAAgent {
     this.messages = msgs;
   }
 
+  /** 获取发给模型的完整 payload 历史（用于保存会话 / WebUI 记忆面板） */
+  getPayloadHistory(): PayloadRecord[] {
+    return this.payloadHistory;
+  }
+
+  /** Prompt 本地化是否开启（WebUI「记忆」面板可用性判断） */
+  isPromptLocalizationEnabled(): boolean {
+    return this.promptLocalizationEnabled;
+  }
+
+  /**
+   * Prompt 本地化写回：应用编辑后的 system prompt 快照（WebUI「记忆」面板）。
+   * 更新 payloadHistory 最近一条的 system，后续轮次本地化快照即用新值，
+   * 并立即保存会话（payload.json）持久化，进程重启后编辑仍保留。
+   * 返回是否应用成功（需开启本地化且已有快照）。
+   */
+  applyLocalizedSystem(system: string): boolean {
+    if (!this.promptLocalizationEnabled) return false;
+    if (!system || !system.trim()) return false;
+    const last = this.payloadHistory[this.payloadHistory.length - 1];
+    if (!last) return false;
+    last.system = system;
+    try { this.saveSessionToDisk(); } catch { /* 保存失败不影响内存生效 */ }
+    return true;
+  }
+
+  /** 设置 payload 历史（用于从文件恢复会话，超限截断） */
+  setPayloadHistory(records: PayloadRecord[]): void {
+    this.payloadHistory = Array.isArray(records)
+      ? records.slice(-MAX_PAYLOAD_HISTORY)
+      : [];
+  }
+
+  /** 记录一次发给模型的完整 payload（自动打时间戳，保留最近 MAX_PAYLOAD_HISTORY 条） */
+  private recordPayload(rec: Omit<PayloadRecord, 'ts'>): void {
+    this.payloadHistory.push({ ...rec, ts: new Date().toISOString() });
+    if (this.payloadHistory.length > MAX_PAYLOAD_HISTORY) {
+      this.payloadHistory.splice(0, this.payloadHistory.length - MAX_PAYLOAD_HISTORY);
+    }
+  }
+
   // ────────────────────────────────────────────────
   // 自动保存
   // ────────────────────────────────────────────────
 
   /**
-   * 每轮结束后自动保存当前会话到 sessions/ 目录。
-   * 文件名使用轻量模型总结的会话标题：session-{标题}.json；
-   * 标题未生成前回退到首条用户输入；标题变化时清理旧文件。
+   * 把当前会话保存到 sessions/{sessionId}/ 文件夹（文件夹名 = 稳定 sessionId）：
+   *   session.json — 主会话（agentMessages + 元数据，不含 payloads）
+   *   payload.json — 发给模型的完整 payload 历史（独立文件，供 WebUI「记忆」面板）
+   * 文件夹落点固定，标题变化不影响存储位置。返回文件夹路径；无消息时不创建。
    */
-  private autoSaveSession(): void {
+  saveSessionToDisk(): string | null {
     const messages = this.messages;
-    if (messages.length === 0) return;
+    if (messages.length === 0) return null;
 
-    const sessionDir = path.join(getWorkspaceRoot(), 'sessions');
+    const safeId = this.sessionId.replace(/[\\\/:*?"<>|]/g, '_');
+    const sessionDir = path.join(getSessionsRoot(), 'sessions', safeId);
     if (!fs.existsSync(sessionDir)) {
       fs.mkdirSync(sessionDir, { recursive: true });
     }
 
-    const title = this.sessionTitle || fallbackTitle(messages);
-    const fileName = `session-${sanitizeTitle(title)}.json`;
-    const filePath = path.join(sessionDir, fileName);
-
-    // 标题变化：清理旧文件，避免同一会话产生多个文件
-    if (this.savedSessionFileName && this.savedSessionFileName !== fileName) {
-      try {
-        fs.unlinkSync(path.join(sessionDir, this.savedSessionFileName));
-      } catch {
-        // 旧文件不存在则忽略
-      }
-    }
-
-    const data = {
-      version: 1,
+    const sessionData = {
+      version: 2,
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
       title: this.sessionTitle,
@@ -1356,13 +1489,40 @@ export class CLIAAgent {
       mode: getActiveModeNames(), // 模式随会话持久化（切回时恢复）
       agentMessages: messages,
     };
+    const payloadData = {
+      version: 1,
+      sessionId: this.sessionId,
+      payloads: this.payloadHistory,
+    };
 
     try {
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-      this.savedSessionFileName = fileName;
+      fs.writeFileSync(path.join(sessionDir, 'session.json'), JSON.stringify(sessionData, null, 2), 'utf-8');
+      fs.writeFileSync(path.join(sessionDir, 'payload.json'), JSON.stringify(payloadData, null, 2), 'utf-8');
+      // 子 Agent 注册状态持久化（loadsession 切换会话时据此恢复子 Agent 并接入工具系统）
+      // 只存属于当前会话的子 Agent——跨会话后台任务（owner 是其他会话）不进本会话 registry
+      subagentRegistryStore.save(subAgentManager.getAll()
+        .filter((a) => !a.ownerSessionId || a.ownerSessionId === this.sessionId)
+        .map((a) => ({
+          name: a.name,
+          mode: a.mode,
+          tools: a.tools ?? [],
+          systemPrompt: a.systemPrompt,
+          context: a.context,
+          requirement: a.requirement,
+          maxRounds: a.maxRounds,
+          createdAt: a.createdAt,
+          instructorRoundCount: a.instructorRoundCount,
+          instructorMessages: a.instructorMessages,
+        })));
+      return sessionDir;
     } catch {
-      // 自动保存失败不影响主流程
+      return null; // 自动保存失败不影响主流程
     }
+  }
+
+  /** 每轮结束后自动保存当前会话（文件夹化：session.json + payload.json） */
+  private autoSaveSession(): void {
+    this.saveSessionToDisk();
   }
 
   /**
@@ -1384,7 +1544,7 @@ export class CLIAAgent {
     const title = await summarizeSessionTitle(this.messages);
     if (title && title !== this.sessionTitle) {
       this.sessionTitle = title;
-      // 立即用新标题重存（旧文件由 autoSaveSession 清理）
+      // 立即重存（落点固定为 sessionId 文件夹，无需清理旧文件）
       this.autoSaveSession();
     }
     return this.sessionTitle;
@@ -1413,18 +1573,86 @@ export class CLIAAgent {
     return this.sessionTitle;
   }
 
-  /** 生成新的会话 ID */
+  /** 生成新的会话 ID（统一 session-xxxx-xxxx-xxxx 形态；TUI/clear 等无 AGENT_SESSION_ID 场景） */
   private generateSessionId(): string {
     const rand = () => Math.random().toString(36).substring(2, 6);
-    return `${rand()}-${rand()}-${rand()}`;
+    return `session-${rand()}-${rand()}-${rand()}`;
   }
 
-  /** 设置会话 ID（用于从文件恢复会话时指定），并同步 worklog 归档分区 */
+  /** 设置会话 ID（用于从文件恢复会话时指定），并同步 worklog 归档与子 Agent 上下文分区 */
+  /** 设置会话 ID（用于从文件恢复会话时指定），并同步 worklog 归档与子 Agent 上下文分区 */
   setSessionId(id: string): void {
     this.sessionId = id;
     worklogStore.setSessionId(id);
+    subagentContextStore.setSessionId(id);
+    subagentRegistryStore.setSessionId(id);
+    docPoolStore.setSessionId(id);
+  }
+
+  /** 获取当前会话 ID（用于保存/定位 session 文件夹） */
+  getSessionId(): string {
+    return this.sessionId;
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

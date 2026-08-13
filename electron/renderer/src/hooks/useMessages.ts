@@ -128,22 +128,18 @@ export function useMessages() {
     });
   }, []);
 
-  const addToolToAgent = useCallback((toolMsg: AgentMessage) => {
+const addToolToAgent = useCallback((toolMsg: AgentMessage) => {
     setMessages(prev => {
-      // 找最后一个属于当前轮次的 agent 气泡（不限 streaming），并入工具历史
+      // 找最后一个属于当前轮次的气泡（agent 或 thinking），并入工具历史
+      // 优先找 thinking 气泡（思考中调用工具应归属思考气泡而非前面的 agent 文本）
       let agentIdx = -1;
       for (let i = prev.length - 1; i >= 0; i--) {
         const m = prev[i];
-        if (m.role === 'agent' && m.roundId === roundRef.current) { agentIdx = i; break; }
-      }
-
-      // 没有 agent 气泡时：若当前轮次存在 thinking 气泡（思考中调用工具），并入其中
-      if (agentIdx === -1) {
-        for (let i = prev.length - 1; i >= 0; i--) {
-          const m = prev[i];
-          if (m.role === 'thinking' && m.roundId === roundRef.current) { agentIdx = i; break; }
+        if ((m.role === 'agent' || m.role === 'thinking') && m.roundId === roundRef.current) {
+          agentIdx = i; break;
         }
       }
+
 
       // 当前轮次还没有可承载的气泡，新建 agent 气泡
       if (agentIdx === -1) {
@@ -362,6 +358,8 @@ export function useMessages() {
     startThinking, appendThinkingDelta, endThinking, beginNewRound,
   };
 }
+
+
 
 
 

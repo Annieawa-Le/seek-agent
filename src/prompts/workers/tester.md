@@ -55,3 +55,11 @@
 ["read_file", "read_lines", "search_all_file", "search_sub_file", "search_content", "execute_command", "create_file", "replace_file", "add_patch", "del_patch", "modify_patch", "undo_patch", "create_todo", "finish_step", "read_todo"]
 ----TOOLS_END----
 
+## 可用技能（spawn_worker 自动解锁）
+
+----SKILLS_START----
+["ts-debug", "browser-control", "code-graph"]
+----SKILLS_END----
+
+
+

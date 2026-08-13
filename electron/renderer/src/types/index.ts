@@ -20,19 +20,24 @@ export interface ElectronAPI {
   readFileTree: (dirPath: string) => Promise<FileTreeNode[]>;
   readGitStatus: () => Promise<GitChange[]>;
   listSessions: () => Promise<SessionInfo[]>;
-  /** 生成/更新会话身份卡（轻量模型总结当前对话） */
-  generateIdentityCard: (sessionId?: string) => Promise<{ success?: boolean; error?: string }>;
 
-  /** 监听会话身份卡生成完成 */
-  onIdentityCard: (callback: (data: { sessionId: string; card?: IdentityCard; error?: string }) => void) => () => void;
   /** 监听跨会话协作事件（collab:event） */
   onCollabEvent: (callback: (data: { type: string }) => void) => () => void;
-  /** 跨会话协作：会话列表（活跃 + 历史，含身份卡） */
-  getCollabSessions: () => Promise<CollabSession[]>;
   /** 跨会话协作：通信记录（最新在前） */
   getCollabLog: () => Promise<CollabLogEntry[]>;
+  /** 监听远程配对码（remote:pair-code，RemoteBridge 广播；桌面端显示配对码用） */
+  onRemotePairCode?: (callback: (data: RemotePairCode) => void) => () => void;
+  /** 监听远程连接状态（remote:status，RemoteBridge 广播） */
+  onRemoteStatus?: (callback: (data: RemoteStatus) => void) => () => void;
+  /** 查询信任设备列表（本地持久化 + 在线状态） */
+  getRemoteDevices: () => Promise<RemoteDeviceInfo[] | { error?: string; devices?: RemoteDeviceInfo[] }>;
+  /** 撤销对某设备的信任（发 trust-revoke + 本地删除） */
+  revokeRemoteDevice: (remoteId: string) => Promise<{ ok?: boolean; sent?: boolean; error?: string }>;
+  /** 监听信任设备列表变化（remote:devices 事件，设备面板实时刷新用） */
+  onRemoteDevices?: (callback: (data: { devices: RemoteDeviceInfo[] }) => void) => () => void;
   getSkillsList: () => Promise<Array<{ name: string; description: string }>>;
-  /** 切换到指定会话（已保存会话传 name，将自动拉起独立 Agent 进程） */
+  /** 把子 Agent 消息流保存为本地 json-session 文件（未完成的工具调用自动补 toolResult） */
+  saveSubagentSession: (data: Record<string, unknown>) => Promise<{ ok: boolean; path?: string; error?: string }>;
   switchSession: (sessionId: string, name?: string) => Promise<{ success?: boolean; error?: string; sessionId?: string; name?: string | null; created?: boolean }>;
   /** 新建会话（拉起全新 Agent 进程并切换过去） */
   newSession: () => Promise<{ success?: boolean; error?: string; sessionId?: string }>;
@@ -47,6 +52,10 @@ export interface ElectronAPI {
   /** 读取 Instruction / Agent 描述文件内容 */
   readInstruction: (kind: string, file: string) => Promise<{ content?: string; error?: string }>;
   minimizeWindow: () => void;
+  /** 读取 .env 配置（设置面板用）：items 为解析后的配置项数组 [{ key, value, line }] */
+  getEnvConfig: () => Promise<{ ok: boolean; path: string; items: Array<{ key: string; value: string; line: number }>; error?: string }>;
+  /** 保存 .env 配置（updates: [{ key, value }] 数组，设置面板用） */
+  saveEnvConfig: (updates: Array<{ key: string; value: string }>) => Promise<{ ok: boolean; path: string; written: string[]; error?: string }>;
   maximizeWindow: () => void;
   closeWindow: () => void;
   onMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void;
@@ -124,6 +133,7 @@ export interface SidebarStaticData {
 }
 
 /** Agent 进程返回的运行时数据（hooks / 子 agent / MCP 状态） */
+/** Agent 进程返回的运行时数据（hooks / 子 agent / MCP 状态） */
 export interface SidebarRuntimeData {
   sessionId: string;
   hooks: Array<{ name: string; description?: string }>;
@@ -134,7 +144,23 @@ export interface SidebarRuntimeData {
   mode?: string[];
   /** 协作聊天 thread（通讯录 + 聊天视图数据源） */
   threads?: ChatThreadData[];
+  /** 子 Agent 消息流（便条窗体数据源：以消息颗粒度追踪工作进度） */
+  subagentStreams?: Record<string, SubagentStreamMsg[]>;
+  /** Prompt 本地化开关（WebUI「记忆」面板可用性判断） */
+  promptLocalization?: boolean;
+  /** 最近一次 payload 快照（「记忆」面板数据源：system + 完整消息） */
+  memory?: { system: string; messages: MemoryPayloadMsg[]; ts: string };
 }
+
+/** payload 中的模型消息（宽松结构：content 可为字符串或 parts 数组，tool 消息带调用信息） */
+export interface MemoryPayloadMsg {
+  role: string;
+  content?: unknown;
+  toolCallId?: string;
+  toolName?: string;
+  name?: string;
+}
+
 
 /** 协作聊天：消息 */
 export interface ChatMessageData {
@@ -149,6 +175,17 @@ export interface ChatThreadData {
   peerType: 'subagent' | 'worker';
   messages: ChatMessageData[];
   lastActiveAt: number;
+}
+
+/** 子 Agent 消息流：单条消息（便条窗体数据源，与 src/modes/subagent-stream.ts 对应） */
+export interface SubagentStreamMsg {
+  role: 'user' | 'assistant' | 'tool' | 'system';
+  content: string;
+  toolName?: string;
+  toolCallId?: string;
+  toolInput?: Record<string, unknown>;
+  fullOutput?: string;
+  ts: number;
 }
 
 export interface FileTreeNode {
@@ -178,26 +215,6 @@ export interface SessionInfo {
   preview: string;
 }
 
-export interface IdentityCard {
-  name?: string;
-  focus?: string;
-  summary?: string;
-  conclusions?: string[];
-  relatedSkills?: string[];
-  generatedAt?: string;
-  [key: string]: unknown;
-}
-
-/** 跨会话协作：会话条目（活跃 + 历史，含身份卡） */
-export interface CollabSession {
-  sessionId: string;
-  name: string;
-  active: boolean;
-  messageCount?: number;
-  preview?: string;
-  mtime?: string;
-  identity?: IdentityCard | null;
-}
 
 /** 跨会话协作：通信记录条目 */
 export interface CollabLogEntry {
@@ -240,6 +257,46 @@ export interface AgentStatus {
   sessionId?: string;
   code?: number;
 }
+
+/* ─── 远程配对（RemoteBridge 广播，桌面端显示配对码/连接状态用） ─── */
+
+/** 远程配对码（remote:pair-code 事件载荷） */
+export interface RemotePairCode {
+  code: string;
+  expiresIn: number;
+}
+
+/** 远程连接状态（remote:status 事件载荷） */
+export interface RemoteStatus {
+  connected: boolean;
+}
+
+/** 远程信任设备（remote:devices 事件载荷 / remote:getDevices 返回条目；不含 token，避免凭证泄漏到渲染层） */
+export interface RemoteDeviceInfo {
+  remoteId: string;
+  label: string;
+  /** 在线状态（来自最近 trust-list 的 items 合并；未收到 trust-list 时默认离线） */
+  online: boolean;
+  /** 信任时间（ISO 字符串） */
+  trustedAt?: string | null;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -6,7 +6,7 @@
  *   toTUIText → 终端显示（带 ANSI 颜色、摘要、省略）
  *   toWebUI   → Electron 结构化数据
  */
-import type { RawBulk, ReadFileBulk, SearchBulk, SearchContentBulk, ExecBulk, FileWriteBulk, PatchBulk, DeskBulk, TodoBulk, MemoryBulk } from './raw-bulk-types';
+import type { RawBulk, ReadFileBulk, SearchBulk, SearchContentBulk, ExecBulk, FileWriteBulk, PatchBulk, DeskBulk, TaskBulk, TodoBulk, MemoryBulk } from './raw-bulk-types';
 
 
 // ═════════════════════════════════════════════════════
@@ -22,6 +22,7 @@ export function toAIText(bulk: RawBulk): string {
     case 'file-write': return formatFileWriteAIText(bulk);
     case 'patch': return formatPatchAIText(bulk);
     case 'desk': return formatDeskAIText(bulk);
+    case 'task': return formatTaskAIText(bulk);
     case 'todo': return formatTodoAIText(bulk);
     case 'memory': return formatMemoryAIText(bulk);
     default: return JSON.stringify(bulk);
@@ -89,6 +90,31 @@ function formatDeskAIText(bulk: DeskBulk): string {
   }
 }
 
+function formatTaskAIText(bulk: TaskBulk): string {
+  if (bulk.error) return `❌ ${bulk.error}`;
+  switch (bulk.action) {
+    case 'list': {
+      if (!bulk.tasks || bulk.tasks.length === 0) return '📭 当前没有任何后台任务。';
+      return `📋 后台任务（共 ${bulk.tasks.length} 个）：\n` +
+        bulk.tasks.map((t, i) => {
+          const icon = t.running ? '🔄' : t.status === 'done' ? '✅' : t.status === 'killed' ? '⏹' : '❌';
+          return `${i + 1}. ${icon} ${t.name} [${t.status}]（${t.durationMs != null ? (t.durationMs / 1000).toFixed(1) : '?'}s${t.exitCode != null ? `，退出码 ${t.exitCode}` : ''}，输出 ${t.stdoutChars + t.stderrChars} 字符）\n    ↳ ${t.command}`;
+        }).join('\n');
+    }
+    case 'execute':
+      return `🚀 后台任务已启动：${bulk.taskName}（${bulk.status}${bulk.pid != null ? `，PID ${bulk.pid}` : ''}）\n命令：${bulk.command}`;
+    case 'switch': {
+      const head = `📡 任务 "${bulk.taskName}"：${bulk.status}${bulk.exitCode != null ? `（退出码 ${bulk.exitCode}）` : ''}，stdout ${bulk.stdoutChars ?? 0} 字符`;
+      return bulk.output ? `${head}\n--- 输出（${bulk.outputTruncated ? '尾部截断' : '全部'}）---\n${bulk.output}` : head;
+    }
+    case 'kill':
+      return `⏹ 已发送终止信号给任务 "${bulk.taskName}"。`;
+    default:
+      return JSON.stringify(bulk);
+  }
+}
+
+
 function formatTodoAIText(bulk: TodoBulk): string {
   if (bulk.error) return `❌ 错误：${bulk.error}`;
   const stepsText = (bulk.steps || []).map((s, i) => {
@@ -105,6 +131,7 @@ function formatTodoAIText(bulk: TodoBulk): string {
     case 'read': head = `📋 "${bulk.name}"（${bulk.doneCount}/${bulk.totalCount} 步完成）：`; break;
     case 'del': head = `■ 已删除 todo "${bulk.name}"。`; break;
     case 'active': head = bulk.active ? `🎯 当前活跃 todo："${bulk.active}"` : '■ 当前没有设置活跃 todo。'; break;
+    case 'finish-to': head = `🎯 完成到指定步骤：${bulk.stepInfo || ''}`; break;
   }
   return stepsText ? `${head}\n${stepsText}` : head;
 }
@@ -140,8 +167,8 @@ export function toTUIText(bulk: RawBulk): string {
     case 'file-write': return bulk.error
       ? `❌ ${bulk.action === 'create' ? '创建' : '写入'}失败：${bulk.error}`
       : `● ${bulk.action === 'create' ? '创建文件' : '覆写文件'}: ${bulk.filePath}`;
-    case 'patch': return bulk.description;
     case 'desk': return `● ${bulk.action === 'add' ? '添加到桌面' : bulk.action === 'remove' ? '从桌面移除' : bulk.action === 'clear' ? '清空桌面' : '查看桌面'}: ${bulk.totalCount} 项`;
+    case 'task': return formatTaskTUI(bulk);
     case 'todo': return formatTodoTUI(bulk);
     case 'memory': return formatMemoryTUI(bulk);
     default: return JSON.stringify(bulk);
@@ -190,13 +217,32 @@ function formatExecTUI(bulk: ExecBulk): string {
   return `●  输出 ${PURPLE}${lines.length}\x1b[0m 行 / ${PURPLE}${text.length}\x1b[0m 字符\n${head}\n${BLUE_GRAY}  ... 剩余 ${lines.length - 8} 行省略 ...\x1b[0m`;
 }
 
+function formatTaskTUI(bulk: TaskBulk): string {
+  if (bulk.error) return `● 错误: ${bulk.error}`;
+  if (bulk.action === 'list') {
+    const running = (bulk.tasks || []).filter(t => t.running).length;
+    return `● 后台任务: ${PURPLE}${bulk.tasks?.length ?? 0}\x1b[0m 个（运行中 ${PURPLE}${running}\x1b[0m）`;
+  }
+  if (bulk.action === 'kill') return `● 停止任务: ${bulk.taskName}`;
+  if (bulk.action === 'execute') return `● 后台启动: ${bulk.taskName}${bulk.pid != null ? ` (PID ${bulk.pid})` : ''}`;
+  // switch
+  const status = bulk.status ?? '?';
+  const head = `● 任务 ${bulk.taskName}: ${status}${bulk.exitCode != null ? ` (码 ${bulk.exitCode})` : ''}`;
+  if (!bulk.output) return head;
+  const lines = bulk.output.split('\n');
+  const headLines = lines.slice(0, 6).map(l => `  ${l}`).join('\n');
+  const more = lines.length > 6 ? `\n${BLUE_GRAY}  ... 尾部共 ${bulk.stdoutChars ?? lines.join('\n').length} 字符，已截断 ...\x1b[0m` : '';
+  return `${head}\n${headLines}${more}`;
+}
+
+
 function formatTodoTUI(bulk: TodoBulk): string {
   if (bulk.error) return `● 错误: ${bulk.error}`;
   const done = bulk.doneCount;
   const total = bulk.totalCount;
   const actionLabel: Record<string, string> = {
     create: '创建 todo', finish: '完成步骤', undo: '撤销步骤', reroll: '重置 todo',
-    'del-step': '删除步骤', read: '查看 todo', del: '删除 todo', active: '活跃 todo',
+    'del-step': '删除步骤', read: '查看 todo', del: '删除 todo', active: '活跃 todo', 'finish-to': '跳转进度',
   };
   const label = actionLabel[bulk.action] || bulk.action;
   return `● ${label}: ${PURPLE}${bulk.name}\x1b[0m（${done}/${total} 步）`;
@@ -236,6 +282,7 @@ function esc(s: string): string {
 export function toWebUI(bulk: RawBulk): Record<string, unknown> {
   switch (bulk.type) {
     case 'read': return formatReadWebUI(bulk);
+    case 'task': return formatTaskWebUI(bulk);
     case 'search': return formatSearchWebUI(bulk);
     case 'search-content': return formatSearchContentWebUI(bulk);
     case 'exec': return formatExecWebUI(bulk);
@@ -345,12 +392,37 @@ function formatDeskWebUI(bulk: DeskBulk): Record<string, unknown> {
   }
 }
 
+// ── TaskBulk ──
+function formatTaskWebUI(bulk: TaskBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  if (bulk.action === 'list') {
+    if (!bulk.tasks || bulk.tasks.length === 0) return { html: '<div class="empty">当前没有任何后台任务</div>' };
+    const rows = bulk.tasks.map(t => {
+      const icon = t.running ? '🔄' : t.status === 'done' ? '✅' : t.status === 'killed' ? '⏹' : '❌';
+      const dur = t.durationMs != null ? (t.durationMs / 1000).toFixed(1) + 's' : '?';
+      return `<div class="task-row"><span class="task-status">${icon}</span><code>${esc(t.name)}</code><span class="task-meta">${t.status} · ${dur}${t.exitCode != null ? ` · 退出码 ${t.exitCode}` : ''} · 输出 ${t.stdoutChars + t.stderrChars} 字符</span><div class="task-cmd">${esc(t.command)}</div></div>`;
+    }).join('');
+    return { html: `<div class="task-result"><span class="label">后台任务（共 ${bulk.tasks.length} 个）</span>${rows}</div>` };
+  }
+  if (bulk.action === 'kill') {
+    return { html: `<div class="task-result"><span class="label">停止任务</span><code>${esc(bulk.taskName || '')}</code></div>` };
+  }
+  if (bulk.action === 'execute') {
+    return { html: `<div class="task-result"><span class="label">后台启动</span><code>${esc(bulk.taskName || '')}</code><span class="meta">${esc(bulk.command || '')}</span></div>` };
+  }
+  // switch
+  const statusHtml = `<span class="task-status">${bulk.status ?? '?'}${bulk.exitCode != null ? `（退出码 ${bulk.exitCode}）` : ''}</span>`;
+  const out = bulk.output ? `<pre class="exec-output">${esc(bulk.output)}</pre>` : '<div class="empty">暂无输出</div>';
+  return { html: `<div class="task-result"><span class="label">任务 ${esc(bulk.taskName || '')}</span>${statusHtml}<span class="meta">stdout ${bulk.stdoutChars ?? 0} 字符${bulk.outputTruncated ? '（尾部截断）' : ''}</span>${out}</div>` };
+}
+
+
 // ── TodoBulk ──
 function formatTodoWebUI(bulk: TodoBulk): Record<string, unknown> {
   if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
   const actionLabel: Record<string, string> = {
     create: '创建 todo', finish: '完成步骤', undo: '撤销步骤', reroll: '重置 todo',
-    'del-step': '删除步骤', read: '查看 todo', del: '删除 todo', active: '活跃 todo',
+    'del-step': '删除步骤', read: '查看 todo', del: '删除 todo', active: '活跃 todo', 'finish-to': '跳转进度',
   };
   const label = actionLabel[bulk.action] || bulk.action;
   let head = `<span class="label">${label}</span><span class="meta">${bulk.doneCount}/${bulk.totalCount} 步完成</span>`;
@@ -387,6 +459,18 @@ function formatMemoryWebUI(bulk: MemoryBulk): Record<string, unknown> {
   }
   return { html: `<div class="memory-result"><span class="label">${label}</span><span class="meta">${bulk.itemCount != null ? `${bulk.itemCount} 条` : ''}</span>${body}</div>` };
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -68,6 +68,23 @@
 
 > **注意**：`create_file` 和 `replace_file` 也经过 diff 持久化，可通过 `undo_patch` 撤销。
 
+### 快速替换工具（replace_str）
+
+编辑器式字符串替换：查找普通字符串（非正则）并替换，适合变量改名、常量值替换、删除特定字符串等场景。
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `filePath` | — | 目标文件 |
+| `search` | — | 要被替换的字符串（普通字符串，非正则表达式） |
+| `replace` | `''` | 要替换成的字符串（空串即删除匹配内容） |
+| `caseSensitive` | `false` | 大小写敏感（默认不敏感，与编辑器默认一致） |
+| `wholeWord` | `false` | 整词匹配：边界前后不能是字母/数字/下划线 |
+| `replaceAll` | `true` | 全部替换；`false` 只替换第一处 |
+| `force` | `false` | 跳过语法检查 |
+
+与 patch 工具一致：语法检查 + diff 持久化，可用 `undo_patch()` 撤销。
+
+
 ---
 
 ## 三、项目管理
@@ -79,6 +96,7 @@
 **会话工具：**
 - `create_todo(name, steps)` — 创建任务
 - `finish_step(name)` — 推进到下一步
+- `finish_to_step(name, step)` — 把进度直接跳到指定 step：第 1..N 步（含 N）全部标记为完成
 - `undo_step(name)` — 回退一步
 - `reroll_step(name)` — 重置所有步骤
 - `del_step(name, step)` — 删除指定步骤
@@ -96,6 +114,7 @@
 ```
 create_todo(name="我的任务", steps=["步骤1", "步骤2", "步骤3"])
 finish_step("我的任务")  → 每完成一步标记一次
+finish_to_step("我的任务", 3)  → 实际进度跳跃/回溯时批量标记（1..3 全部完成）
 del_todo("我的任务")     → 确认完成后删除
 ```
 
@@ -152,6 +171,52 @@ del_todo("我的任务")     → 确认完成后删除
 
 ---
 
+## 五、后台任务管理
+
+后台执行长耗时命令、并行跑多个独立任务，并随时监测运行输出。与 `execute_command`（同步等待结果）互补——需要立即返回、边跑边看输出的场景用这套。
+
+| 工具 | 用途 |
+|------|------|
+| `task_execute` | 后台启动一条命令并立即返回（参数：`command` + `taskName`） |
+| `task_switch` | 查看指定任务的最新运行状态与输出尾部（参数：`taskName`，可选 `tail` 调整返回字符数，默认 3000） |
+| `task_list` | 列出所有后台任务（运行中/已结束、状态、时长、退出码、输出量） |
+| `task_kill` | 终止运行中的任务（Windows 下连子进程树一起杀，参数：`taskName`） |
+
+**典型流程：**
+```
+task_execute(command="pnpm dev", taskName="dev-server")   # 立即返回，不阻塞
+task_list()                                                # 看有哪些任务在跑
+task_switch(taskName="dev-server")                        # 轮询输出 / 确认状态
+task_kill(taskName="dev-server")                          # 用完停掉常驻命令
+```
+
+**注意事项：**
+- 任务名唯一：同名任务会被拒绝（先 `task_kill` 或换名）
+- 后台任务**没有超时限制**——常驻命令（dev server、watch 等）用完必须 `task_kill`，否则进程会一直占用
+- 输出缓冲每个流保留最近 20000 字符，超长自动丢弃最旧部分；`task_switch` 默认返回尾部 3000 字符
+- 适合场景：长编译、批量跑脚本、启动服务器后轮询就绪、并行执行多个独立命令
+
+### 闹钟提醒（alarm）
+
+需要长时间等待（等后台任务跑完、轮询外部状态、等子任务返回）时，用闹钟设定提醒：立即返回不阻塞，到点后自动注入一条 `[闹钟]XX计时器已归零！` 的 user 消息打断当前处理并驱动新一轮（与子 agent 提交同机制）。
+
+| 工具 | 用途 |
+|------|------|
+| `alarm_set(duration, label?)` | 设定闹钟：`duration` 秒后注入闹钟消息；`label` 是闹钟名（默认"等待"），同 label 重复设定会覆盖前一个 |
+| `alarm_cancel(label)` | 取消尚未到点的闹钟（提前完成时用） |
+| `alarm_list()` | 列出所有未到点的闹钟及剩余时间 |
+
+**典型流程：**
+```
+task_execute(command="pnpm build", taskName="build")   # 后台跑长命令
+alarm_set(duration=120, label="构建")                  # 设定 2 分钟后提醒，不阻塞
+task_switch(taskName="build")                          # 期间继续做别的/轮询
+# ... 到点自动注入 "[闹钟]构建计时器已归零！" 打断并提醒
+alarm_cancel(label="构建")                            # 若提前完成，记得取消
+```
+
+---
+
 ## 六、子模型技能
 
 系统支持动态创建子 AI 模型来并行处理任务。
@@ -171,7 +236,7 @@ del_todo("我的任务")     → 确认完成后删除
 |------|------|
 | `spawn_agent` | 创建子模型（选模式、配工具、设参数） |
 | `agent_task` | 给子模型委派任务 |
-| `agent_query` | 查询状态或提问（支持 `waitForCompletion`） |
+| `agent_query` | 查询状态或提问（派活后无需等待，提交会自动回到对话） |
 | `agent_fire` | 销毁子模型 |
 
 ### Listen 模式（call / result）
@@ -236,6 +301,14 @@ spawn_agent(
 每当完成一组文件修改后，执行编译检查，
 
 如果环境不允许，告知用户。
+
+
+
+
+
+
+
+
 
 
 

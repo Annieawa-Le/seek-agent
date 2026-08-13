@@ -56,4 +56,12 @@
 ["read_file", "read_lines", "scan_file", "search_all_file", "search_sub_file", "search_content", "create_file", "replace_file", "add_patch", "del_patch", "modify_patch", "undo_patch", "history_patch", "execute_command", "create_todo", "finish_step", "read_todo", "memory_add"]
 ----TOOLS_END----
 
+## 可用技能（spawn_worker 自动解锁）
+
+----SKILLS_START----
+["code-graph", "ts-debug"]
+----SKILLS_END----
+
+
+
 

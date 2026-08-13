@@ -15,10 +15,16 @@ import { z } from 'zod';
 import { getModel } from '../../../model-provider';
 import { subAgentManager } from './manager';
 import { appendChatMessage } from '../../../modes/chat-thread';
+import { subagentContextStore, slimMessages, cleanPersistedMessages } from '../../../tools/subagent-context-store';
+import { docPoolStore } from '../../doc-pool-store';
+import { unwrapToolArgs } from '../../unwrap-args';
+import { recordTask, recordAssistant, recordToolCall, recordToolResult, recordSystem } from '../../../modes/subagent-stream';
 import type { SubAgentState, SubmissionPayload } from './types';
 import * as fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compactMessages, maxContextTokens, estimateMessagesTokens, findRounds } from '../../../context-compactor';
+import { subagentWorklogStore } from '../../../tools/subagent-worklog-store';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -136,6 +142,54 @@ async function getStripToolExecutes(): Promise<(t: Record<string, any>) => Recor
 
 // ── 执行引擎 ──
 
+// ── 子 Agent 上下文中途折叠 ──
+
+/**
+ * 判断子 Agent 上下文是否需要折叠（估算 token 超触发线且至少两轮真实对话）。
+ * 纯函数，供工具结果累积时实时检查——不等当前轮次结束。
+ */
+export function shouldCompactChildContext(messages: ModelMessage[]): boolean {
+  if (findRounds(messages).length <= 1) return false; // 至少保留一轮真实对话
+  return estimateMessagesTokens(messages) > maxContextTokens();
+}
+
+/**
+ * 子 Agent 上下文折叠：对话进行中（工具结果累积）或轮末实时压缩，
+ * 超触发线时把最旧一轮折叠为 Worklog（仅一轮时跳过）。
+ * @param realInputTokens 轮末传入真实 usage.inputTokens（更准）；中途估算不传
+ * @param summarize 可选自定义压缩函数（测试注入 mock，生产走副模型）
+ * @returns 是否发生了折叠
+ */
+export async function maybeCompactChildContext(
+  agent: SubAgentState,
+  childMessages: ModelMessage[],
+  realInputTokens?: number,
+  summarize?: (roundMessages: ModelMessage[]) => Promise<{ title: string; summary: string }>,
+): Promise<boolean> {
+  const tokens = realInputTokens ?? estimateMessagesTokens(childMessages);
+  if (tokens <= maxContextTokens()) return false;
+  try {
+    const ownerSid = agent.ownerSessionId || subagentContextStore.getSessionId();
+    subagentWorklogStore.setSessionId(ownerSid);
+    subagentWorklogStore.setActiveAgent(agent.name);
+    const plan = await compactMessages(
+      childMessages,
+      ownerSid,
+      tokens,
+      summarize,
+      subagentWorklogStore,
+    );
+    if (plan) {
+      childMessages.splice(0, plan.removeCount, ...plan.insertMessages);
+      recordSystem(agent.name, `🧠 上下文已压缩：移除 ${plan.roundsRemoved} 轮，归档为 ${plan.worklog.id}（${plan.worklog.title}）`);
+      return true;
+    }
+  } catch (e: any) {
+    recordSystem(agent.name, `⚠ 上下文压缩失败: ${e?.message || e}`);
+  }
+  return false;
+}
+
 /**
  * 执行一个子 agent 的完整工作循环
  *
@@ -155,10 +209,21 @@ export async function executeChildAgent(
 ): Promise<string> {
   subAgentManager.updateStatus(agent.name, 'running');
 
-  try {
-    // ── 构建子模型消息列表 ──
-    const childMessages: ModelMessage[] = [];
+  // 所属会话绑定：执行期间上下文读写/压缩/提交均按 owner 分区，
+  // 切换会话不影响后台任务（结果最终归原会话）
+  const ownerSid = agent.ownerSessionId || subagentContextStore.getSessionId();
 
+  // 中断控制：渲染层便条窗体「停止」按钮通过 agent:stop 触发 agent.abortController.abort()
+  agent.abortController?.abort(); // 上一次执行遗留的 controller 作废
+  const abortController = new AbortController();
+  agent.abortController = abortController;
+  // 任务写入消息流（便条窗体数据源）
+  recordTask(agent.name, task);
+
+  // 子模型对话历史（try 外声明，finally 统一落盘）
+  const childMessages: ModelMessage[] = [];
+
+  try {
     const toolDesc = await buildToolIdentityDesc(agent.tools ?? []);
 
     if (agent.mode === 'clone') {
@@ -168,6 +233,15 @@ export async function executeChildAgent(
       childMessages.push({ role: 'user', content: task });
     } else if (agent.mode === 'mission') {
       // mission：自定义系统提示（含身份描述）+ 上下文和任务
+      // 上下文延续：若该子 Agent 有持久化历史（上次派活的对话），加载作为初始上下文
+      const persisted = subagentContextStore.load(agent.name, ownerSid);
+      if (persisted && Array.isArray(persisted.messages) && persisted.messages.length > 0) {
+        const cleaned = cleanPersistedMessages(persisted.messages);
+        if (cleaned.length > 0) {
+          childMessages.push(...(cleaned as ModelMessage[]));
+          recordSystem(agent.name, `📎 已延续上次上下文（${cleaned.length} 条历史消息）`);
+        }
+      }
       if (extraContext) {
         childMessages.push({ role: 'user', content: extraContext });
       }
@@ -191,21 +265,21 @@ export async function executeChildAgent(
       submission = payload;
       // 子模型提交写入协作聊天 thread（peer 角色）
       appendChatMessage(agent.name, 'subagent', 'peer', `【提交】概要: ${payload.summary}\n详情: ${payload.details}`);
+      // 提交也写入消息流（便条窗体可看到最终结果）
+      recordSystem(agent.name, `📤 已提交：${payload.summary}`);
     });
     // 供 streamText 的只读 schema 版本（剥离 execute，避免 AI SDK 内部自动执行工具）
     const modelChildTools = (await getStripToolExecutes())(childTools);
     // ── LLM 循环 ──
-    let loopCount = 0;
-    const MAX_LOOPS = 20; // 防止无限循环
-
-    while (!submission && loopCount < MAX_LOOPS) {
-      loopCount++;
+    // 子模型持续运行直到调用 a_submission 提交结果（被 agent_fire 销毁或停止按钮中断时自然退出）
+    while (!submission && subAgentManager.get(agent.name) && !abortController.signal.aborted) {
 
       const result = await streamText({
         model: getModel(),
         system: childSystemPrompt,
         messages: childMessages,
         tools: modelChildTools, // 剥离 execute，避免 AI SDK 内部自动执行工具导致双重执行
+        abortSignal: abortController.signal, // 支持「停止」按钮中断
       });
 
       // 收集文本
@@ -218,10 +292,30 @@ export async function executeChildAgent(
       const finalResult = await result;
       const calls = await finalResult.toolCalls ?? [];
 
+      // 收集 reasoning（thinking 模式：回传时必须带 reasoning_content，否则上游 400）
+      let reasoningParts: { type: 'reasoning'; text: string }[] = [];
+      try {
+        reasoningParts = (await result.reasoning) as { type: 'reasoning'; text: string }[];
+      } catch { /* reasoning 获取失败不影响主流程 */ }
+
+      // 文本写入消息流（便条窗体实时追踪）
+      if (fullText) recordAssistant(agent.name, fullText);
+
+      // ── 子 Agent 上下文压缩（轮末：基于真实 usage.inputTokens 精确触发） ──
+      const usageTokens = (finalResult as any).usage?.inputTokens as number | undefined;
+      if (typeof usageTokens === 'number') {
+        await maybeCompactChildContext(agent, childMessages, usageTokens);
+      }
+
       if (calls.length === 0) {
-        // 纯文本回复——没有工具调用，视为最终输出
-        if (fullText) {
-          childMessages.push({ role: 'assistant', content: fullText });
+        // 纯文本回复——没有工具调用，视为最终输出（带 reasoning part，thinking 模式回传必需）
+        const textOnlyContent: any[] = [];
+        if (reasoningParts.length > 0) {
+          for (const r of reasoningParts) textOnlyContent.push({ type: 'reasoning', text: r.text });
+        }
+        if (fullText) textOnlyContent.push({ type: 'text', text: fullText });
+        if (textOnlyContent.length > 0) {
+          childMessages.push({ role: 'assistant', content: textOnlyContent });
         }
         // 没有调用 a_submission，但可能是 LLM 直接回复了
         submission = {
@@ -231,16 +325,23 @@ export async function executeChildAgent(
         break;
       }
 
-      // 构建 assistant 消息
+      // 构建 assistant 消息（含 reasoning part，thinking 模式回传必需）
       const assistantContent: any[] = [];
+      if (reasoningParts.length > 0) {
+        for (const r of reasoningParts) assistantContent.push({ type: 'reasoning', text: r.text });
+      }
       if (fullText) assistantContent.push({ type: 'text', text: fullText });
       for (const tc of calls) {
+        // 解包 _raw/input 等包装参数（模型格式漂移），让消息记录与执行都用扁平参数
+        tc.input = unwrapToolArgs(tc.input);
         assistantContent.push({
           type: 'tool-call',
           toolCallId: tc.toolCallId,
           toolName: tc.toolName,
           input: tc.input,
         });
+        // 工具调用写入消息流
+        recordToolCall(agent.name, tc.toolName, tc.toolCallId, (tc.input ?? {}) as Record<string, unknown>);
       }
       childMessages.push({ role: 'assistant', content: assistantContent });
 
@@ -250,18 +351,21 @@ export async function executeChildAgent(
 
         const impl = childTools[tc.toolName];
         if (!impl?.execute) {
+          const errText = `❌ 错误: 未找到工具 ${tc.toolName}`;
+          recordToolResult(agent.name, tc.toolName, tc.toolCallId, errText);
           childMessages.push({
             role: 'tool',
             content: [{
               type: 'tool-result',
               toolCallId: tc.toolCallId,
               toolName: tc.toolName,
-              output: { type: 'text', value: `❌ 错误: 未找到工具 ${tc.toolName}` },
+              output: { type: 'text', value: errText },
             }],
           });
+          // 中途折叠：工具结果累积后实时检查，不等当前轮次结束
+          await maybeCompactChildContext(agent, childMessages);
           continue;
         }
-
         try {
           const output = await impl.execute(
             tc.input as any,
@@ -269,8 +373,18 @@ export async function executeChildAgent(
           );
           const outputStr = String(output ?? '');
 
+          // doc_pool 挂钩：读阶段记录 / 被修改文件移除（子模型关联了文件池时生效）
+          docPoolStore.onToolResult(agent.name, tc.toolName, tc.input, outputStr, tc.toolCallId);
+
           // 重要：检查 a_submission 是否在 execute 中触发了回调
           if (submission) break;
+
+          // 重要：检查 a_submission 是否在 execute 中触发了回调
+          // 重要：检查 a_submission 是否在 execute 中触发了回调
+          if (submission) break;
+
+          // 工具结果写入消息流
+          recordToolResult(agent.name, tc.toolName, tc.toolCallId, outputStr);
 
           childMessages.push({
             role: 'tool',
@@ -281,26 +395,31 @@ export async function executeChildAgent(
               output: { type: 'text', value: outputStr },
             }],
           });
+          // 中途折叠：工具结果累积后实时检查，不等当前轮次结束
+          await maybeCompactChildContext(agent, childMessages);
         } catch (err: any) {
           if (submission) break;
+          const errMsg = `执行错误: ${err.message}`;
+          recordToolResult(agent.name, tc.toolName, tc.toolCallId, errMsg);
           childMessages.push({
             role: 'tool',
             content: [{
               type: 'tool-result',
               toolCallId: tc.toolCallId,
               toolName: tc.toolName,
-              output: { type: 'text', value: `执行错误: ${err.message}` },
+              output: { type: 'text', value: errMsg },
             }],
           });
+          // 中途折叠：工具结果累积后实时检查，不等当前轮次结束
+          await maybeCompactChildContext(agent, childMessages);
         }
       }
     }
-
-    if (loopCount >= MAX_LOOPS && !submission) {
-      submission = {
-        summary: '子模型执行达到最大循环次数',
-        details: '子模型未能及时调用 a_submission 提交结果，已强制终止。',
-      };
+    // 中断时补充 system 消息（便条窗体可看到停止原因）
+    if (abortController.signal.aborted) {
+      recordSystem(agent.name, '⏹ 已停止（用户中断）');
+    } else if (submission) {
+      recordSystem(agent.name, `📤 子模型「${agent.name}」完成：${submission.summary}`);
     }
 
     // ── 记录结果 ──
@@ -309,9 +428,35 @@ export async function executeChildAgent(
     return resultStr;
 
   } catch (err: any) {
+    // 用户停止（abort）视为正常结束：状态标记为 error（UI 显示「已停止」）并写入消息流
+    if (abortController.signal.aborted || err?.name === 'AbortError' || String(err?.message || '').includes('abort')) {
+      recordSystem(agent.name, '⏹ 已停止（用户中断）');
+      subAgentManager.setError(agent.name, '已停止（用户中断）');
+      return JSON.stringify({ summary: '已停止', details: '子模型执行被用户中断' });
+    }
     const errorMsg = `子模型执行出错: ${err.message}`;
+    recordSystem(agent.name, `❌ ${errorMsg}`);
     subAgentManager.setError(agent.name, errorMsg);
     return JSON.stringify({ summary: '执行失败', details: errorMsg });
+  } finally {
+    // 执行结束，清掉 controller 引用（防止 agent_fire 误 abort 已结束的执行）
+    if (agent.abortController === abortController) {
+      agent.abortController = undefined;
+    }
+    // 上下文本地化：无论提交 / 中断 / 出错，都把对话历史落盘（按 owner 会话分区），供下次派活延续
+    if (agent.mode === 'mission' && childMessages.length > 0) {
+      subagentContextStore.save(agent.name, {
+        name: agent.name,
+        mode: agent.mode,
+        tools: agent.tools ?? [],
+        systemPrompt: agent.systemPrompt,
+        context: agent.context,
+        requirement: agent.requirement,
+        maxRounds: agent.maxRounds,
+        createdAt: agent.createdAt,
+        messages: slimMessages(childMessages),
+      }, ownerSid);
+    }
   }
 }
 
@@ -416,10 +561,21 @@ ${lastAssistantOutput}` },
       return null;
     }
 
+    // 收集 reasoning（thinking 模式：历史回传时必须带 reasoning_content，否则上游 400）
+    let reasoningParts: { type: 'reasoning'; text: string }[] = [];
+    try {
+      reasoningParts = (await result.reasoning) as { type: 'reasoning'; text: string }[];
+    } catch { /* reasoning 获取失败不影响主流程 */ }
+
     // 保存到 instructor 自己的历史（截断到最近 6 条 = 3 轮对话，防止上下文被旧轮次淹没）
+    const assistantContent: any[] = [];
+    if (reasoningParts.length > 0) {
+      for (const r of reasoningParts) assistantContent.push({ type: 'reasoning', text: r.text });
+    }
+    assistantContent.push({ type: 'text', text: fullText });
     const newHistory = [
       ...msgs,
-      { role: 'assistant' as const, content: fullText },
+      { role: 'assistant' as const, content: assistantContent },
     ];
     agent.instructorMessages = newHistory.length > 6
       ? newHistory.slice(-6)
@@ -448,6 +604,43 @@ ${lastAssistantOutput}` },
 }
 
 /**
+ * 构建 agent_query 提问时的子模型消息列表。
+ * 与 executeChildAgent 对齐：提问时携带子模型自身的工作上下文，而非从零开始——
+ *   clone 模式：主模型完整消息
+ *   mission 模式：持久化对话历史（subagentContextStore 落盘的上次派活上下文），无历史时回退 spawn 时的 context
+ *   instructor 模式：instructor 独立消息历史
+ * 最后追加主模型的 question。
+ */
+export function buildQueryChildMessages(
+  agent: SubAgentState,
+  mainMessages: ModelMessage[],
+  question: string,
+): ModelMessage[] {
+  const childMessages: ModelMessage[] = [];
+  if (agent.mode === 'clone') {
+    childMessages.push(...mainMessages);
+  } else if (agent.mode === 'mission') {
+    // 上下文延续：加载持久化历史（上次派活对话），让提问基于子模型自己的工作背景
+    const persisted = subagentContextStore.load(agent.name, agent.ownerSessionId || subagentContextStore.getSessionId());
+    if (persisted && Array.isArray(persisted.messages) && persisted.messages.length > 0) {
+      const cleaned = cleanPersistedMessages(persisted.messages);
+      if (cleaned.length > 0) {
+        childMessages.push(...(cleaned as ModelMessage[]));
+      }
+    }
+    // 首次提问（尚未派过活）：回退到 spawn 时的原始上下文，避免空上下文提问
+    if (childMessages.length === 0 && agent.context) {
+      childMessages.push({ role: 'user', content: agent.context });
+    }
+  } else if (agent.mode === 'instructor') {
+    const hist = agent.instructorMessages || [];
+    if (hist.length > 0) childMessages.push(...hist);
+  }
+  childMessages.push({ role: 'user', content: question });
+  return childMessages;
+}
+
+/**
  * 向子模型发起轻量查询（不调工具，只回答问题）
  * 返回子模型的文本回答
  */
@@ -459,11 +652,8 @@ export async function queryChildAgent(
 ): Promise<string> {
   const toolDesc = await buildToolIdentityDesc(agent.tools ?? []);
 
-  // 构建上下文
-  const childMessages: ModelMessage[] = [];
-  if (agent.mode === 'clone') {
-    childMessages.push(...mainMessages);
-  }
+  // 构建上下文（与 executeChildAgent 对齐：携带子模型自身的工作上下文）
+  const childMessages = buildQueryChildMessages(agent, mainMessages, question);
 
   let systemPrompt: string;
   if (agent.mode === 'mission' && agent.systemPrompt) {
@@ -471,8 +661,6 @@ export async function queryChildAgent(
   } else {
     systemPrompt = `${toolDesc}\n\n${mainSystemPrompt}`;
   }
-
-  childMessages.push({ role: 'user', content: question });
 
   try {
     const { streamText } = await import('ai');
@@ -491,6 +679,48 @@ export async function queryChildAgent(
     return `查询出错: ${err.message}`;
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

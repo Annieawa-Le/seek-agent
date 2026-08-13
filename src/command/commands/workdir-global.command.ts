@@ -1,7 +1,7 @@
 import { Command } from '../types';
 import path from 'node:path';
 import fs from 'node:fs';
-import { setCwd, getWorkspaceRoot, setWorkspaceRoot, resetWorkspaceRoot } from '../../workdir';
+import { setCwd, getWorkspaceRoot, setWorkspaceRootOnly, resetWorkspaceRoot } from '../../workdir';
 import {
   setExplorerRoot,
   getExplorerRoot,
@@ -73,7 +73,7 @@ export const WorkdirGlobalCommand: Command = {
         setExplorerRoot(resolved);
         resetExplorerPath();
         setCwd(resolved);
-        setWorkspaceRoot(resolved);
+        setWorkspaceRootOnly(resolved);
         if (!silent) {
           ctx.ui.addUserMessage(`/workdir-global ${pathArg}`);
           ctx.ui.addAgentMessage(
@@ -96,6 +96,7 @@ export const WorkdirGlobalCommand: Command = {
     }
   },
 };
+
 
 
 

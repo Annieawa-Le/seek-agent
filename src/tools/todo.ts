@@ -245,3 +245,42 @@ export const activeTodo = tool({
   },
 });
 
+
+
+export const finishToStep = tool({
+  description: [
+    '将 todo 的进度直接跳到指定 step：把第 1..N 步（含传入的 step 本身）全部标记为已完成。',
+    '适合任务实际进度超前/回溯时批量标记，相当于连续多次 finish_step。',
+    'step 序号从 1 开始，越界时报错。',
+  ].join(' '),
+  inputSchema: z.object({
+    name: z.string().describe('todo 的名称'),
+    step: z.number().describe('要跳到并完成的步骤序号（从 1 开始，第 1..N 步都会被标记为完成）'),
+  }),
+  execute: async ({ name, step }) => {
+    const todos = getTodos();
+    const found = findTodo(todos, name);
+    if (typeof found === 'string') return todoError(found, name);
+
+    const { todo, index } = found;
+    if (step < 1 || step > todo.steps.length) {
+      return todoError(`❌ 序号无效：${step}，该 todo 共有 ${todo.steps.length} 步（序号 1-${todo.steps.length}）。`, name);
+    }
+
+    // 将 1..step（含 step 本身）全部标记为完成
+    let changed = 0;
+    for (let i = 0; i < step; i++) {
+      if (!todo.steps[i].completed) {
+        todo.steps[i].completed = true;
+        changed++;
+      }
+    }
+    todos[index] = todo;
+    setTodos(todos);
+
+    const done = todo.steps.filter(s => s.completed).length;
+    const note = changed === 0 ? '，本就如此' : `，本次标记 ${changed} 步`;
+    const msg = `🎯 已将 "${name}" 完成到 Step ${step}（前 ${step} 步已完成${note}）：\n\n${formatSteps(todo)}`;
+    return todoOutput('finish-to', name, msg, todo, `Step ${step}（共完成 ${done}/${todo.steps.length} 步）`);
+  },
+});

@@ -9,6 +9,13 @@
  *   .html/.htm → 标签平衡检测
  *   .css/.scss → 大括号平衡检测
  *   其他      → 通用大括号/方括号/圆括号/尖括号平衡检测
+ *
+ * Python 例外：.py/.pyw 一律跳过语法检查（含替换块预检）。原因：通用括号平衡检查
+ * 不认识 Python 的 # 注释与三引号字符串，注释/docstring 中的括号会被误报为未闭合，
+ * 导致正常写入被拦截；而 Python 靠缩进表达块结构，括号平衡检查对它的保护价值很低。
+ * 若需真实检查应接入 `python -m py_compile` / ast.parse。
+ *
+ * 全局开关：设置环境变量 SEEK_DISABLE_SYNTAX_CHECK=1 时，所有文件类型跳过语法检查。
  */
 
 import ts from 'typescript';
@@ -16,6 +23,7 @@ import ts from 'typescript';
 // ============================================================
 // 主入口
 // ============================================================
+
 
 export interface SyntaxCheckResult {
   ok: boolean;
@@ -34,8 +42,12 @@ export interface SyntaxError {
  * content 是修改后的完整文件内容。
  */
 export function checkSyntax(filePath: string, content: string): SyntaxCheckResult {
-  const ext = getExtension(filePath).toLowerCase();
+  // Python 文件跳过语法检查：通用括号检查不识别 # 注释/三引号，会误报拦截正常写入
+  if (isPythonFile(filePath)) return { ok: true, errors: [] };
+  // 全局开关：SEEK_DISABLE_SYNTAX_CHECK=1 时所有文件类型跳过语法检查
+  if (process.env.SEEK_DISABLE_SYNTAX_CHECK === '1') return { ok: true, errors: [] };
 
+  const ext = getExtension(filePath).toLowerCase();
   switch (ext) {
     case '.ts':
     case '.tsx':
@@ -288,6 +300,11 @@ function getExtension(filePath: string): string {
   return ext;
 }
 
+function isPythonFile(filePath: string): boolean {
+  const ext = getExtension(filePath).toLowerCase();
+  return ext === '.py' || ext === '.pyw';
+}
+
 /**
  * 移除字符串和注释内容，避免其中的括号干扰平衡检测。
  * 处理：单行注释 //，多行注释 /* * /，单引号/双引号/模板字符串。
@@ -346,22 +363,65 @@ function stripStringsAndComments(content: string): string {
  * 将 SyntaxCheckResult 格式化为用户可读的错误消息。
  * 如果校验通过返回空字符串。
  * 传入 newLines（修改后内容）时，额外追加"修改后模拟状态"预览：
- * 错误位置附近的上下文 + 更改行标记（+ 为相对旧文件的新增/修改行，⚠ 为语法错误位置）。
+ * 错误位置附近的上下文 + 替换区域标记（+ 为替换区域行，⚠ 为语法错误位置）。
+ * replaceRange 标注替换块在 newLines 中的 1-based 行号范围：
+ *   提供时只逐条展示替换区域内的错误，区域外错误（多为级联误报）折叠为一行汇总提示；
+ *   preview 也仅基于区域内错误行生成。
+ * precheck 为替换块自身的结构预检结果（P0）。
  */
 export function formatSyntaxErrors(
   result: SyntaxCheckResult,
-  options?: { oldLines?: string[]; newLines?: string[] },
+  options?: {
+    oldLines?: string[];
+    newLines?: string[];
+    /** 替换块在 newLines 中的 1-based 行号范围（用于错误定位映射） */
+    replaceRange?: { start: number; end: number };
+    /** 替换块结构预检结果（P0），非 null 且不通过时在最前给出修正方向 */
+    precheck?: ReplacementPrecheck;
+  },
 ): string {
   if (result.ok) return '';
 
   const lines: string[] = ['插入未成功！本次操作已回滚，因为语法检查发现以下可能问题：'];
-  for (const err of result.errors) {
+
+  // 替换块预检提示（最可能的根因放最前，避免模型陷入"怀疑语法检查器/行号"的猜测螺旋）
+  if (options?.precheck && !options.precheck.ok) {
+    lines.push('', '── 替换块结构预检（仅检查你提交的替换块自身） ──');
+    for (const issue of options.precheck.issues) {
+      lines.push(`  ⚠ 替换块第 ${issue.line} 行：${issue.message}`);
+    }
+    lines.push('  提示：替换块自身括号/标签不平衡是整文件级联报错的最常见根因，优先修正替换块再重试。');
+  }
+
+  // 区域过滤：提供 replaceRange 时只展示替换区域内的错误。
+  // 区域外错误多为替换块不平衡引发的级联误报（错误全跑文件末尾），逐条列出只会误导，折叠为一行汇总。
+  let filteredErrors = result.errors;
+  let outsideCount = 0;
+  if (options?.replaceRange) {
+    const { start, end } = options.replaceRange;
+    filteredErrors = [];
+    for (const err of result.errors) {
+      if (err.line && err.line >= start && err.line <= end) filteredErrors.push(err);
+      else outsideCount++;
+    }
+  }
+
+  for (const err of filteredErrors) {
     const pos = err.line ? `第 ${err.line} 行` : '';
     const col = err.column ? `:${err.column}` : '';
-    lines.push(`  ${pos}${col}  ${err.message}`);
+    let region = '';
+    if (options?.replaceRange && err.line) {
+      const { start } = options.replaceRange;
+      region = ` [替换区域内·相对替换块第 ${err.line - start + 1} 行]`;
+    }
+    lines.push(`  ${pos}${col}  ${err.message}${region}`);
+  }
+
+  if (outsideCount > 0) {
+    lines.push(`  ...另有 ${outsideCount} 条错误位于替换区域外，已省略（替换块不平衡常引发区域外级联报错；若预检通过，请检查替换范围边界是否切断了原有结构）`);
   }
   if (options?.newLines && options.newLines.length > 0) {
-    const preview = buildSyntaxPreview(options.newLines, options.oldLines, result.errors);
+    const preview = buildSyntaxPreview(options.newLines, filteredErrors, options.replaceRange);
     if (preview) lines.push('', preview);
   }
   lines.push('💡 如果你确认修改无误，可以添加 force: true 参数跳过检查');
@@ -370,13 +430,13 @@ export function formatSyntaxErrors(
 
 /**
  * 生成"修改后模拟状态"预览：错误行附近的上下文（带行号），
- * 标记相对旧文件发生变化的行（+）与语法错误所在行（⚠）。
+ * 标记替换区域行（+，基于 replaceRange）与语法错误所在行（⚠）。
  * 行号与内容均基于修改后的 newLines。
  */
 function buildSyntaxPreview(
   newLines: string[],
-  oldLines: string[] | undefined,
   errors: SyntaxError[],
+  replaceRange?: { start: number; end: number },
 ): string {
   const WINDOW = 4; // 错误行前后展示的行数
   const errorLines = errors
@@ -395,21 +455,133 @@ function buildSyntaxPreview(
     else merged.push([s, e]);
   }
 
-  // 旧文件行集合：内容在旧文件中存在 → 视为保留行；否则为本次更改行
-  const oldSet = new Set(oldLines ?? []);
   const errorSet = new Set(errorLines);
-
-  const out: string[] = ['── 修改后模拟状态（+ 更改行，⚠ 语法错误位置） ──'];
+  const out: string[] = ['── 修改后模拟状态（应用修改后的文件预览；+ 替换区域行，⚠ 语法错误位置） ──'];
   for (const [s, e] of merged) {
     for (let i = s; i <= e; i++) {
       const content = newLines[i - 1] ?? '';
-      const marker = errorSet.has(i) ? '⚠' : oldSet.has(content) ? ' ' : '+';
+      const inRange = replaceRange ? i >= replaceRange.start && i <= replaceRange.end : false;
+      const marker = errorSet.has(i) ? '⚠' : inRange ? '+' : ' ';
       out.push(`  ${marker}${String(i).padStart(4)} │ ${content}`);
     }
     if (merged.length > 1 && e !== merged[merged.length - 1][1]) out.push('  ...');
   }
   return out.join('\n');
 }
+
+
+
+
+
+
+
+// ============================================================
+// 替换块结构预检（P0：级联报错根因定位）
+// ============================================================
+
+export interface ReplacementIssue {
+  message: string;
+  /** 替换块内 1-based 行号 */
+  line: number;
+}
+
+export interface ReplacementPrecheck {
+  ok: boolean;
+  issues: ReplacementIssue[];
+}
+
+/**
+ * 对"将要插入/替换的代码块"单独做括号与标签平衡预检。
+ * 替换块自身的括号/标签不平衡，是整文件语法检查出现级联报错（错误全跑文件末尾）的最常见根因。
+ * 该预检是提示性的：不通过也不会拦截（合法的不完整块存在），但会给模型明确的修正方向。
+ */
+export function precheckReplacement(filePath: string, lines: string[]): ReplacementPrecheck {
+  // Python 文件跳过预检（与 checkSyntax 保持一致，避免 # 注释/三引号误报）
+  if (isPythonFile(filePath)) return { ok: true, issues: [] };
+  if (process.env.SEEK_DISABLE_SYNTAX_CHECK === '1') return { ok: true, issues: [] };
+
+  const ext = getExtension(filePath).toLowerCase();
+  const issues: ReplacementIssue[] = scanBracketBalance(lines);
+  if (ext === '.tsx' || ext === '.jsx' || ext === '.html' || ext === '.htm') {
+    issues.push(...scanTagBalance(lines));
+  }
+  return { ok: issues.length === 0, issues };
+}
+
+/** 括号平衡扫描：跳过字符串/注释/模板字符串，定位不匹配的具体行 */
+function scanBracketBalance(lines: string[]): ReplacementIssue[] {
+  const issues: ReplacementIssue[] = [];
+  const stack: Array<{ char: string; line: number }> = [];
+  const pairs: Record<string, string> = { '{': '}', '[': ']', '(': ')' };
+  const openSet = new Set(['{', '[', '(']);
+  const closeSet = new Set(['}', ']', ')']);
+
+  for (let li = 0; li < lines.length; li++) {
+    const cleaned = stripStringsAndComments(lines[li]);
+    for (const ch of cleaned) {
+      if (openSet.has(ch)) {
+        stack.push({ char: ch, line: li + 1 });
+      } else if (closeSet.has(ch)) {
+        if (stack.length === 0) {
+          issues.push({ message: `多余的闭括号 ${ch}`, line: li + 1 });
+        } else {
+          const last = stack[stack.length - 1];
+          if (pairs[last.char] !== ch) {
+            issues.push({ message: `括号不匹配：期望 ${pairs[last.char]}，实际 ${ch}（打开于第 ${last.line} 行）`, line: li + 1 });
+          } else {
+            stack.pop();
+          }
+        }
+      }
+    }
+  }
+  for (const item of stack) {
+    issues.push({ message: `未闭合的括号 ${item.char}（打开于第 ${item.line} 行）`, line: item.line });
+  }
+  return issues;
+}
+
+/** JSX/HTML 标签配对扫描：定位未闭合/多余的标签及其行号 */
+function scanTagBalance(lines: string[]): ReplacementIssue[] {
+  const issues: ReplacementIssue[] = [];
+  const stack: Array<{ tag: string; line: number }> = [];
+  const tagRegex = /<\/?([A-Za-z][A-Za-z0-9._-]*)\b[^>]*>/g;
+
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+    tagRegex.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = tagRegex.exec(line)) !== null) {
+      const full = m[0];
+      const tag = m[1];
+      if (full.startsWith('<!--')) continue;
+      if (SELF_CLOSING_TAGS.has(tag.toLowerCase())) continue;
+      if (full.trimEnd().endsWith('/>')) continue; // JSX/XML 自闭合
+      if (full.startsWith('</')) {
+        if (stack.length === 0) {
+          issues.push({ message: `多余的闭合标签 </${tag}>`, line: li + 1 });
+        } else {
+          const last = stack[stack.length - 1];
+          if (last.tag !== tag) {
+            issues.push({ message: `标签不匹配：</${tag}> 期望闭合 <${last.tag}>（打开于第 ${last.line} 行）`, line: li + 1 });
+          } else {
+            stack.pop();
+          }
+        }
+      } else {
+        stack.push({ tag, line: li + 1 });
+      }
+    }
+  }
+  for (const item of stack) {
+    issues.push({ message: `未闭合的标签 <${item.tag}>（打开于第 ${item.line} 行）`, line: item.line });
+  }
+  return issues;
+}
+
+
+
+
 
 
 

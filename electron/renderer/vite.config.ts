@@ -18,7 +18,11 @@ export default defineConfig({
     outDir: path.resolve(dirname, 'dist'),
     emptyOutDir: true,
     rollupOptions: {
-      input: path.resolve(dirname, 'index.html'),
+      input: {
+        index: path.resolve(dirname, 'index.html'), // Electron 主入口（行为不变）
+        remote: path.resolve(dirname, 'remote.html'), // 远程模式入口（浏览器 / WebView）
+      },
     },
   },
 });
+

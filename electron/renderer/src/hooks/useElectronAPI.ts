@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentStatus, CollabLogEntry, CollabSession, FileTreeNode, GitChange, IdentityCard, SessionInfo } from '@/types/index.ts';
+import type { AgentMessage, AgentStatus, CollabLogEntry, FileTreeNode, GitChange, RemoteDeviceInfo, RemotePairCode, RemoteStatus, SessionInfo } from '@/types/index.ts';
 import { useEffect, useRef, useCallback, useMemo } from 'react';
 
 export function isElectron(): boolean {
@@ -110,17 +110,6 @@ export function useElectronAPI() {
     return api.listSessions();
   }, [api]);
 
-  const generateIdentityCard = useCallback(async (sessionId?: string) => {
-    if (!api) return { error: 'API 不可用' };
-    return api.generateIdentityCard(sessionId);
-  }, [api]);
-
-  const onIdentityCard = useCallback((cb: (data: { sessionId: string; card?: IdentityCard; error?: string }) => void) => {
-    if (!api) return () => {};
-    const unsub = api.onIdentityCard(cb);
-    listenersRef.current.push(unsub);
-    return unsub;
-  }, [api]);
 
   const onCollabEvent = useCallback((cb: (data: { type: string }) => void) => {
     if (!api) return () => {};
@@ -136,10 +125,39 @@ export function useElectronAPI() {
     return unsub;
   }, [api]);
 
+  const onRemotePairCode = useCallback((cb: (data: RemotePairCode) => void) => {
+    if (!api) return () => {};
+    const unsub = api.onRemotePairCode?.(cb);
+    if (!unsub) return () => {};
+    listenersRef.current.push(unsub);
+    return unsub;
+  }, [api]);
 
-  const getCollabSessions = useCallback(async () => {
+  const onRemoteStatus = useCallback((cb: (data: RemoteStatus) => void) => {
+    if (!api) return () => {};
+    const unsub = api.onRemoteStatus?.(cb);
+    if (!unsub) return () => {};
+    listenersRef.current.push(unsub);
+    return unsub;
+  }, [api]);
+
+  const onRemoteDevices = useCallback((cb: (data: { devices: RemoteDeviceInfo[] }) => void) => {
+    if (!api) return () => {};
+    const unsub = api.onRemoteDevices?.(cb);
+    if (!unsub) return () => {};
+    listenersRef.current.push(unsub);
+    return unsub;
+  }, [api]);
+
+  const getRemoteDevices = useCallback(async (): Promise<RemoteDeviceInfo[]> => {
     if (!api) return [];
-    return api.getCollabSessions();
+    const res = await api.getRemoteDevices();
+    return Array.isArray(res) ? res : (res?.devices ?? []);
+  }, [api]);
+
+  const revokeRemoteDevice = useCallback(async (remoteId: string) => {
+    if (!api) return { error: 'API 不可用' };
+    return api.revokeRemoteDevice(remoteId);
   }, [api]);
 
   const getCollabLog = useCallback(async () => {
@@ -147,8 +165,10 @@ export function useElectronAPI() {
     return api.getCollabLog();
   }, [api]);
 
-
-
+  const saveSubagentSession = useCallback(async (data: Record<string, unknown>) => {
+    if (!api) return { ok: false, error: 'API 不可用' };
+    return api.saveSubagentSession(data);
+  }, [api]);
   // ─── 多会话控制 ───
 
   const switchSession = useCallback(async (sessionId: string, name?: string) => {
@@ -186,6 +206,16 @@ export function useElectronAPI() {
   const readInstruction = useCallback(async (kind: string, file: string) => {
     if (!api) return { error: 'API 不可用' };
     return api.readInstruction(kind, file);
+  }, [api]);
+
+  const getEnvConfig = useCallback(async () => {
+    if (!api) return { ok: false, path: '', items: [] };
+    return api.getEnvConfig();
+  }, [api]);
+
+  const saveEnvConfig = useCallback(async (updates: Array<{ key: string; value: string }>) => {
+    if (!api) return { ok: false, path: '', written: [] };
+    return api.saveEnvConfig(updates);
   }, [api]);
 
   const onMaximizedChange = useCallback((cb: (isMaximized: boolean) => void) => {
@@ -233,12 +263,15 @@ export function useElectronAPI() {
     readFileTree,
     readGitStatus,
     listSessions,
-    generateIdentityCard,
-    onIdentityCard,
     onCollabEvent,
     onSessionError,
-    getCollabSessions,
+    onRemotePairCode,
+    onRemoteStatus,
+    onRemoteDevices,
+    getRemoteDevices,
+    revokeRemoteDevice,
     getCollabLog,
+    saveSubagentSession,
     getSkillsList,
     switchSession,
     newSession,
@@ -247,6 +280,8 @@ export function useElectronAPI() {
     listActiveSessions,
     getSidebarStatic,
     readInstruction,
+    getEnvConfig,
+    saveEnvConfig,
     minimizeWindow,
     maximizeWindow,
     closeWindow,
@@ -254,6 +289,20 @@ export function useElectronAPI() {
     onMaximizedChange,
   }), [api]);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

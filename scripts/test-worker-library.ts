@@ -123,13 +123,14 @@ async function main() {
     );
 
     const listOut = await tools['list_workers'].execute({});
-    assert(typeof listOut === 'string' && listOut.includes('7 名员工'), 'list_workers 列出 7 名员工');
+    assert(typeof listOut === 'string' && listOut.includes('9 名员工'), 'list_workers 列出 9 名员工');
 
     const getOut = await tools['get_worker'].execute({ id: 'researcher' });
     assert(typeof getOut === 'string' && getOut.includes('调研分析员'), 'get_worker(researcher) 返回调研分析员资料');
     assert(getOut.includes('【systemPrompt'), 'get_worker 含 systemPrompt 段落');
     assert(getOut.includes('【推荐工具组'), 'get_worker 含推荐工具组段落');
     assert(getOut.includes('search_web'), 'get_worker 工具组含 web 检索工具');
+    assert(getOut.includes('【默认解锁技能'), 'get_worker 含默认技能信息');
 
     const missingOut = await tools['get_worker'].execute({ id: 'no-such-worker' });
     assert(typeof missingOut === 'string' && missingOut.includes('未找到员工'), 'get_worker 未知 id 友好报错');
@@ -159,11 +160,13 @@ async function main() {
     assert(!!agent, '子模型已注册到 subAgentManager');
     assert(agent?.mode === 'mission', `固定 mission 模式（实际: ${agent?.mode}）`);
 
-    // 与员工文件工具组一致
+    // 工具包含员工文件推荐工具组（技能工具会额外合并）
     const workerContent = fs.readFileSync(path.join(workersDir, 'tester.md'), 'utf-8');
     const tm = workerContent.match(/----TOOLS_START----\s*\n([\s\S]*?)\n----TOOLS_END----/);
-    const fileTools = tm ? JSON.parse(tm[1].trim()) : [];
-    assert(JSON.stringify(agent?.tools) === JSON.stringify(fileTools), 'tools 与员工文件推荐工具组一致');
+    const fileTools: string[] = tm ? JSON.parse(tm[1].trim()) : [];
+    const allInFile = fileTools.every((t: string) => agent?.tools.includes(t));
+    assert(allInFile, 'tools 包含员工文件推荐工具组（技能工具自动合并）');
+    assert(agent!.tools.length > fileTools.length, 'tools 因技能注入多于文件推荐工具组');
     assert(!!agent?.systemPrompt && agent.systemPrompt.includes('测试工程师'), 'systemPrompt 从员工库自动装配');
     assert(agent?.systemPrompt.includes('你的名字叫「测测」'), '身份段（名字）已注入 systemPrompt');
     assert(agent?.systemPrompt.includes('天生较真'), '身份段（性格）已注入 systemPrompt');
@@ -202,6 +205,9 @@ main().catch((err) => {
   console.error('测试脚本异常:', err);
   process.exit(1);
 });
+
+
+
 
 
 

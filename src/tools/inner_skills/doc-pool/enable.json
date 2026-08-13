@@ -1,0 +1,6 @@
+{
+  "enable": true,
+  "description": "文件池工具：把子模型读阶段读取的文件片段沉淀为命名文件池，委派员工时可注入池上下文共享背景文件（Manager 模式编排）。",
+  "always_detectable": true
+}
+

@@ -309,10 +309,3 @@ create_skill(
 - **编辑器**：desk-editor
 
 每个技能有 `enable.json` 控制启停，`SYSTEM_INJECTION.md` 向主 prompt 注入说明。
-
-
-
-
-
-
-

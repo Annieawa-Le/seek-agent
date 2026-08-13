@@ -14,7 +14,7 @@
 import 'dotenv/config';
 import * as fs from 'node:fs';
 import path from 'node:path';
-import { getWorkspaceRoot } from './workdir';
+import { getSessionsRoot } from './workdir';
 import { CLIAAgent } from './agent';
 import { ElectronUIBridge } from './electron-bridge';
 import { createMessageHook } from './message_managing';
@@ -27,6 +27,7 @@ import { registerBuiltinModes } from './modes';
 import { registerManagerDashboard } from './modes/panel';
 import { isActiveMode, getActiveModeNames } from './modes/registry';
 import { appendChatMessage, getChatThreads } from './modes/chat-thread';
+import { getSubagentStreams } from './modes/subagent-stream';
 
 // ── 创建 Bridge ──
 const bridge = new ElectronUIBridge();
@@ -38,13 +39,35 @@ const agent = new CLIAAgent(bridge as any);
 registerBuiltinModes();
 registerManagerDashboard();
 
-// ── 启动时恢复会话模式（模式随会话持久化：进程重启后切回仍生效） ──
+// ── 子 Agent 派活通知：spawn_agent / agent_task 被调用时推送 sidebar:data，通讯录立即刷新 ──
+// （动态 import 避免与 sub-agent 系统循环依赖；collectSidebarData 为函数提升，可安全引用）
+import('./tools/inner_skills/sub-agent/manager').then(({ setTaskListener }) => {
+  setTaskListener(() => {
+    collectSidebarData().then(d => bridge.sendSidebarData(d)).catch(() => {});
+  });
+}).catch(() => {});
+
+// ── 启动时恢复会话模式与子 Agent（模式/子 Agent 随会话持久化：进程重启后切回仍生效） ──
 try {
   const sessionId = process.env.AGENT_SESSION_ID;
   if (sessionId) {
     const { setActiveModes } = await import('./modes/registry');
-    const sessionsDir = path.join(getWorkspaceRoot(), 'sessions');
-    if (fs.existsSync(sessionsDir)) {
+    const sessionsDir = path.join(getSessionsRoot(), 'sessions');
+    let restoredMode = false;
+    // 新结构优先：sessions/{sessionId}/session.json（文件夹）
+    const folderSession = path.join(sessionsDir, sessionId, 'session.json');
+    if (fs.existsSync(folderSession)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(folderSession, 'utf-8'));
+        if (Array.isArray(data.mode) && data.mode.length > 0) {
+          const res = setActiveModes(data.mode);
+          if (res.ok) agent.reloadPrompt();
+        }
+        restoredMode = true;
+      } catch { /* 单个会话解析失败跳过 */ }
+    }
+    // 旧结构回退：sessions/*.json 扫描（迁移前兼容）
+    if (!restoredMode && fs.existsSync(sessionsDir)) {
       for (const f of fs.readdirSync(sessionsDir)) {
         if (!f.endsWith('.json')) continue;
         try {
@@ -57,6 +80,15 @@ try {
         } catch { /* 单个文件解析失败跳过 */ }
       }
     }
+    // 恢复子 Agent 注册（registry 在会话保存时同步落盘；恢复后 agent_task 可直接派活）
+    try {
+      const { subAgentManager, notifyTaskDispatched } = await import('./tools/inner_skills/sub-agent/manager');
+      const { subagentRegistryStore } = await import('./tools/subagent-registry-store');
+      subagentRegistryStore.setSessionId(sessionId);
+      const entries = subagentRegistryStore.load();
+      for (const e of entries) subAgentManager.restore(e);
+      if (entries.length > 0) notifyTaskDispatched();
+    } catch { /* 子 Agent 系统不可用时忽略 */ }
   }
 } catch { /* 恢复失败不影响启动 */ }
 
@@ -108,11 +140,15 @@ async function collectSidebarData() {
   let subAgents: Array<{ name: string; mode?: string; status?: string }> = [];
   try {
     const { subAgentManager } = await import('./tools/inner_skills/sub-agent/manager');
-    subAgents = subAgentManager.getAll().map((a) => ({
-      name: a.name,
-      mode: a.mode,
-      status: a.status,
-    }));
+    // 只展示属于当前会话的子 Agent（跨会话后台任务不串进通讯录）
+    const currentSid = agent.getSessionId() || process.env.AGENT_SESSION_ID || 'default';
+    subAgents = subAgentManager.getAll()
+      .filter((a) => !a.ownerSessionId || a.ownerSessionId === currentSid)
+      .map((a) => ({
+        name: a.name,
+        mode: a.mode,
+        status: a.status,
+      }));
   } catch { /* 子 agent 系统不可用时忽略 */ }
 
   let mcp: Array<{ name: string; initialized: boolean; error?: string }> = [];
@@ -120,6 +156,18 @@ async function collectSidebarData() {
     const { getMcpManager } = await import('./mcp');
     mcp = getMcpManager()?.getStatus() ?? [];
   } catch { /* MCP 未初始化时忽略 */ }
+
+  // Prompt 本地化状态与最近 payload 快照（WebUI「记忆」面板数据源：system + 完整消息）
+  let promptLocalization = false;
+  let memory: { system: string; messages: unknown[]; ts: string } | undefined;
+  try {
+    promptLocalization = agent.isPromptLocalizationEnabled();
+    const payloads = agent.getPayloadHistory();
+    const last = payloads[payloads.length - 1];
+    if (last) {
+      memory = { system: last.system, messages: last.messages as unknown[], ts: last.ts };
+    }
+  } catch { /* payload 数据不可用时忽略 */ }
 
   return {
     sessionId: process.env.AGENT_SESSION_ID || 'default',
@@ -131,6 +179,11 @@ async function collectSidebarData() {
     mode: getActiveModeNames(),
     // 协作聊天 thread（右侧面板通讯录 + 聊天视图数据源）
     threads: getChatThreads(),
+    // 子 Agent 消息流（便条窗体：以消息颗粒度追踪工作进度）
+    subagentStreams: getSubagentStreams(),
+    // Prompt 本地化开关与最近 payload 快照（「记忆」面板）
+    promptLocalization,
+    memory,
   };
 }
 
@@ -233,6 +286,33 @@ bridge.onCommand = async (cmd: string) => {
     }
     return;
   }
+  // ── 停止子 Agent（便条窗体「停止」按钮）：中断当前执行，不销毁状态 ──
+  if (cmd.startsWith('agent:stop ')) {
+    const name = cmd.slice('agent:stop '.length).trim();
+    if (!name) return;
+    const { subAgentManager } = await import('./tools/inner_skills/sub-agent/manager');
+    const ok = subAgentManager.abort(name);
+    bridge.addToolMessage(ok ? `⏹ 已停止子模型「${name}」` : `❓ 未找到子模型「${name}」`);
+    // 推送最新运行时数据（含停止后的消息流）
+    const data = await collectSidebarData();
+    bridge.sendSidebarData(data);
+    return;
+  }
+  // ── Prompt 本地化快照写回（WebUI「记忆」面板「应用修改」）：memory:save <json:{system}> ──
+  if (cmd.startsWith('memory:save ')) {
+    const raw = cmd.slice('memory:save '.length).trim();
+    try {
+      const parsed = JSON.parse(raw);
+      const ok = agent.applyLocalizedSystem(typeof parsed?.system === 'string' ? parsed.system : '');
+      bridge.addToolMessage(ok ? '🧠 已应用 Prompt 本地化快照修改（后续轮次生效）' : '⚠ 应用失败：未开启 Prompt 本地化或无可用快照');
+      // 推送最新运行时数据（面板内容刷新为编辑后状态）
+      const data = await collectSidebarData();
+      bridge.sendSidebarData(data);
+    } catch {
+      bridge.addToolMessage('⚠ memory:save 参数解析失败');
+    }
+    return;
+  }
   switch (cmd) {
     case 'memory_shorten': {
       const { memoryShorten } = await import('./tools/memory');
@@ -243,25 +323,6 @@ bridge.onCommand = async (cmd: string) => {
     }
     case 'save_session': {
       await agent.run('/save');
-      break;
-    }
-    case 'identity-card:generate': {
-      try {
-        const { generateIdentityCard } = await import('./tools/identity-card');
-        const card = await generateIdentityCard(agent.getMessages());
-        const meta = {
-          name: agent.getSessionTitle() || '未命名会话',
-          messageCount: agent.getMessages().length,
-          mode: getActiveModeNames(), // 模式随身份卡暴露（供跨会话识别，如打工人模式）
-        };
-        if (card) {
-          bridge.sendIdentityCard({ ...card, ...meta });
-        } else {
-          bridge.sendIdentityCard({ ...meta }, '对话内容不足或总结失败');
-        }
-      } catch (e: any) {
-        bridge.sendIdentityCard({}, e.message || '身份卡生成失败');
-      }
       break;
     }
     case 'memory_focus': {
@@ -366,6 +427,18 @@ bridge.emitReady();
 
 // 进程就绪后推送一次输入栏状态，渲染层据此恢复发送/停止按钮与胶囊比对基准
 pushInputState();
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
