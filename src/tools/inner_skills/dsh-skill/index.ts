@@ -15,6 +15,7 @@
 
 import { tool } from 'ai'
 import { z } from 'zod'
+import { statSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
@@ -60,23 +61,6 @@ export interface DshSkillRoot {
 /** dsh 规范的 kebab-case 名称校验。 */
 export function isDshSkillName(name: string): boolean {
   return SKILL_NAME_RE.test(name)
-}
-
-/**
- * 极简 YAML 标量解析（frontmatter 字段均为标量或一层对象，如 metadata）。
- * 优先动态加载 'yaml' 包；未安装时用本解析器兜底，保证零依赖可用。
- */
-async function parseYamlLoose(yaml: string): Promise<Record<string, unknown> | undefined> {
-  try {
-    const mod = await import('yaml')
-    const parsed = mod.parse(yaml) as unknown
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>
-    }
-    return undefined
-  } catch {
-    return parseSimpleYaml(yaml)
-  }
 }
 
 function parseSimpleYaml(yaml: string): Record<string, unknown> {
@@ -272,7 +256,7 @@ function findGitRootSync(start: string): string | undefined {
   let current = path.resolve(start)
   for (;;) {
     try {
-      fs.statSync(path.join(current, '.git'))
+      statSync(path.join(current, '.git'))
       return current
     } catch {
       const parent = path.dirname(current)
@@ -404,3 +388,6 @@ async function getCatalog(): Promise<DshSkillSummary[]> {
   }
   return catalogCache
 }
+
+
+
