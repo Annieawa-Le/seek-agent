@@ -128,7 +128,7 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
               <div key={s.name} className={`session-item${isActive ? ' active' : ''}`} onClick={() => handleSwitchSession(s)} title={`切换到会话 ${displayName}`}>
                 <div className="session-name">
                   {displayName}
-                  {isRunning && <span className="session-dot" title="该会话正在运行">●</span>}
+                  {isRunning && <span className="session-dot" title="该会话正在运行" />}
                 </div>
                 <div className="session-meta-row">
                   <div className="session-meta">{s.messageCount} msgs{timeStr ? ` · ${timeStr}` : ''}</div>
@@ -142,7 +142,7 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
             <div key={id} className={`session-item${currentSessionId === id ? ' active' : ''}`} onClick={() => onSwitchSession(id)} title={`切换到运行中会话 ${id}`}>
               <div className="session-name">
                 {id}
-                <span className="session-dot running" title="该会话正在运行">●</span>
+                <span className="session-dot running" title="该会话正在运行" />
               </div>
               <div className="session-meta">运行中（未保存）</div>
             </div>
@@ -177,6 +177,8 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
     </aside>
   );
 }
+
+
 
 
 

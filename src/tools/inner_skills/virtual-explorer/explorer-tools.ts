@@ -118,10 +118,11 @@ export const explorerSearchContent = tool({
 // explorer-create-file
 // ═════════════════════════════════════════════════════
 export const explorerCreateFile = tool({
-  description: '相对于 virtual-explorer 当前目录创建新文件。filePath 相对 explorer 当前目录。',
+  description: '相对于 virtual-explorer 当前目录创建新文件。filePath 是目录（相对 explorer 当前目录），fileName 是文件名。',
   inputSchema: z.object({ filePath: z.string(), fileName: z.string(), fileContent: z.string() }),
   execute: async ({ filePath, fileName, fileContent }) => {
-    return callExecute(createFile, { filePath: resolveExplorerPath(filePath), fileName, fileContent });
+    const targetPath = path.join(resolveExplorerPath(filePath), fileName);
+    return callExecute(createFile, { filePath: targetPath, fileContent });
   },
 });
 
@@ -179,5 +180,6 @@ export const explorerExecuteCommand = tool({
     return callExecute(executeCommandTool, { command: `cd /d "${explorerPath}" && ${command}` });
   },
 });
+
 
 

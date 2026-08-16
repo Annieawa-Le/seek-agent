@@ -50,7 +50,7 @@ assert(isWriteTool('add_patch') && isWriteTool('modify_patch') && isWriteTool('c
 assert(isTodoTool('create_todo') && isTodoTool('finish_step'), 'TODO 工具识别');
 assert(!isWriteTool('read_file'), 'read_file 不是写入工具');
 assert(extractFilePath('read_file', { filePath: 'src/a.ts' }) === 'src/a.ts', 'read_file 路径提取');
-assert(extractFilePath('create_file', { filePath: 'src', fileName: 'b.ts' }) === 'src/b.ts', 'create_file 目录+文件名合并');
+assert(extractFilePath('create_file', { filePath: 'src/b.ts' }) === 'src/b.ts', 'create_file 完整路径提取');
 assert(extractFilePath('read_file', {}) === undefined, '无路径返回 undefined');
 assert(extractResultText('hello') === 'hello', '字符串结果');
 assert(extractResultText({ type: 'text', value: '内容' }) === '内容', 'text 对象结果');
@@ -206,6 +206,7 @@ try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
 
 console.log(`\n${passed} 通过 / ${failed} 失败`);
 process.exit(failed ? 1 : 0);
+
 
 
 

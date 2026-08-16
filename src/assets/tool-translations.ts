@@ -119,8 +119,7 @@ def('execute_command', 'exec', '■', (args) => {
 // ── 文件操作 ──
 def('create_file', 'file', '■', (args) => {
   const fp = (args?.filePath ?? '(?)') as string;
-  const fn = (args?.fileName ?? '(?)') as string;
-  return `创建文件: ${fp}/${fn}`;
+  return `创建文件: ${fp}`;
 }, 'after-round');
 
 def('replace_file', 'file', '■', (args) => {
@@ -360,6 +359,7 @@ export function registerSkillTranslations(
     registerTool(name, trans);
   }
 }
+
 
 
 

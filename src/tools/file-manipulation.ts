@@ -220,32 +220,31 @@ function locateModifyRange(
 // ============================================================
 export const createFile = tool({
   description: `创建一个新文件，并写入 fileContent。
-  filePath 是目录的绝对路径或相对当前工作目录的路径，fileName 是需要创建的文件名（包括扩展名）。
+  filePath 是要创建的文件的完整路径（绝对路径或相对当前工作目录的路径）。
   这是独占的写入方式（文件已存在会报错）。注意：此工具直接执行，不会进入暂存区。`,
   inputSchema: z.object({
-    filePath: z.string().describe('目录的绝对路径或相对当前工作目录的路径'),
-    fileName: z.string().describe('需要创建的文件名（包括扩展名）'),
+    filePath: z.string().describe('要创建的文件的完整路径（绝对或相对当前工作目录的路径）'),
     fileContent: z.string().describe('要写入的文件内容'),
   }),
-  execute: async ({ filePath, fileName, fileContent }) => {
+  execute: async ({ filePath, fileContent }) => {
     try {
-      const targetPath = path.join(resolvePath(filePath), fileName);
+      const targetPath = resolvePath(filePath);
       assertPathInWorkspace(targetPath);
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
       const fileHandle = await fs.open(targetPath, 'wx');
       await fileHandle.writeFile(fileContent, 'utf8');
       await fileHandle.close();
       const msg = `✅ 文件创建成功：${targetPath}\n📝 写入内容长度：${fileContent.length} 字符`;
-      const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: targetPath, fileName, charCount: fileContent.length };
+      const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: targetPath, charCount: fileContent.length };
       return new ToolOutput(bulk, msg);
     } catch (error: any) {
       if (error.code === 'EEXIST') {
-        const msg = `文件已存在：${path.join(resolvePath(filePath), fileName)}`;
-        const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: path.join(resolvePath(filePath), fileName), fileName, charCount: 0, error: msg };
+        const msg = `文件已存在：${resolvePath(filePath)}`;
+        const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: resolvePath(filePath), charCount: 0, error: msg };
         return new ToolOutput(bulk, msg);
       }
       const errMsg = `❌ 创建失败：${error.message}`;
-      const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: path.join(resolvePath(filePath), fileName), fileName, charCount: 0, error: errMsg };
+      const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: resolvePath(filePath), charCount: 0, error: errMsg };
       return new ToolOutput(bulk, errMsg);
     }
   },
@@ -655,6 +654,7 @@ export async function applyPatchesToFile(
 
 // ── 导出 UndoStack 以供外部使用 ──
 export { UndoStack } from './patch-undo.js';
+
 
 
 

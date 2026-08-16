@@ -23,7 +23,7 @@ export const TOOL_DISPLAY_CONFIG: Record<string, ToolDisplayRule> = {
   read_file: { template: '读取： {filePath}' },
   read_lines: { template: '读取： {filePath}:{startLine}-{endLine}' },
   scan_file: { template: '扫描文件： {filePath}' },
-  create_file: { template: '创建文件： {filePath}/{fileName}' },
+  create_file: { template: '创建文件： {filePath}' },
   replace_file: { template: '覆写文件： {filePath}' },
 
   // ── Patch ──
@@ -66,7 +66,7 @@ export const TOOL_DISPLAY_CONFIG: Record<string, ToolDisplayRule> = {
   // ── 子模型编排 ──
   spawn_agent: { template: 'spawn_agent {name}' },
   agent_task: { template: 'agent_task {name}' },
-  agent_query: { template: 'agent_query {name}' },
+  agent_query: { template: 'agent_query {name}： {question}' },
   agent_fire: { template: 'agent_fire {name}' },
 
   // ── 万能工具 ──
@@ -103,3 +103,5 @@ export function formatToolDisplayName(toolName: string, args?: Record<string, un
     .replace(/\s+/g, ' ');
   return rendered || toolName;
 }
+
+

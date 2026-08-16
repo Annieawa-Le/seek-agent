@@ -291,21 +291,4 @@ create_skill(
 
 在 `src/prompts/workers/` 下新建 `.md`，包含 `## 名字`、`## 性格人设`、`----SYSTEM_PROMPT_START/END----` 包裹的 systemPrompt 模板、`----TOOLS_START/END----` 包裹的工具组 JSON，然后在 worker-library 的 `known` 集合登记。
 
----
 
-## 技能清单（已启用的 inner_skills，32 个）
-
-- **代码分析**：code-reader, code-edit-detector
-- **GitHub**：gh-explorer, github-commit-helper, github-pr-description
-- **UI/UX**：github-ui-ux-pro-max（含 6 个子模块）, frontend-helper, icon-lib, html-toolkit
-- **Office**：github-docx-official, github-pdf-official, github-pptx-official, github-xlsx-official
-- **测试/调试**：github-testing-patterns, github-debugging-strategies, ts-debug
-- **API 设计**：github-api-design
-- **文档/图片**：pdf-reader, image-identifier, image-crawler
-- **Web**：web-accessor, web-crawler, browser-control（真实浏览器驱动）
-- **知识库**：kb-query（按工作区隔离的向量索引）
-- **系统**：sub-agent, skill-creator, skill-manager, ref-reader, todo-manager, virtual-explorer, worker-library
-- **Minecraft 模组**：mc-mod-helper
-- **编辑器**：desk-editor
-
-每个技能有 `enable.json` 控制启停，`SYSTEM_INJECTION.md` 向主 prompt 注入说明。

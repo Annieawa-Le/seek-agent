@@ -44,6 +44,8 @@ export interface SubAgentState {
   instructorAbortController?: AbortController;
   /** 当前执行（executeChildAgent）的 AbortController（渲染层「停止」按钮中断用） */
   abortController?: AbortController;
+  /** 当前执行（executeChildAgent）的 Promise（agent_query 截停时 await 等待其完全结束，含 finally 的上下文本地化落盘） */
+  executionPromise?: Promise<unknown>;
 }
 
 /** 子模型工作提交内容 */
@@ -71,6 +73,8 @@ export interface TaskParams {
   task: string;
   context?: string;
 }
+
+
 
 
 

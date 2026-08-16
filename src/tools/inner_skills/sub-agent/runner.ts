@@ -207,6 +207,27 @@ export async function executeChildAgent(
   task: string,
   extraContext?: string,
 ): Promise<string> {
+  // 记录执行 Promise：agent_query 截停时 await 等待其完全结束（含 finally 的上下文本地化落盘），
+  // 避免截停后立即启动查询循环与旧执行并发写上下文
+  const ref: { current?: Promise<unknown> } = {};
+  const p = doExecuteChildAgent(agent, mainMessages, mainSystemPrompt, task, extraContext, ref);
+  ref.current = p;
+  agent.executionPromise = p;
+  return p;
+}
+
+/**
+ * executeChildAgent 的实际实现（内部函数，不直接导出）。
+ * 由 executeChildAgent 包装后设置 agent.executionPromise，供 agent_query 安全截停时等待。
+ */
+async function doExecuteChildAgent(
+  agent: SubAgentState,
+  mainMessages: ModelMessage[],
+  mainSystemPrompt: string,
+  task: string,
+  extraContext?: string,
+  ref?: { current?: Promise<unknown> },
+): Promise<string> {
   subAgentManager.updateStatus(agent.name, 'running');
 
   // 所属会话绑定：执行期间上下文读写/压缩/提交均按 owner 分区，
@@ -443,6 +464,10 @@ export async function executeChildAgent(
     if (agent.abortController === abortController) {
       agent.abortController = undefined;
     }
+    // 执行结束，清掉 executionPromise 引用（agent_query 截停等待已完成，避免误等旧 promise）
+    if (ref?.current && agent.executionPromise === ref.current) {
+      agent.executionPromise = undefined;
+    }
     // 上下文本地化：无论提交 / 中断 / 出错，都把对话历史落盘（按 owner 会话分区），供下次派活延续
     if (agent.mode === 'mission' && childMessages.length > 0) {
       subagentContextStore.save(agent.name, {
@@ -604,6 +629,20 @@ ${lastAssistantOutput}` },
 }
 
 /**
+ * 安全截停子模型的当前执行：abort 正在运行的流（mission/clone 走 abortController、
+ * instructor 走 instructorAbortController），并等待 executionPromise 完全结束——
+ * 旧执行在 finally 里保存上下文本地化，避免与新循环并发写。
+ * 纯逻辑函数，供 agent_query 与测试直接使用。
+ */
+export async function abortAndWaitChildExecution(agent: SubAgentState): Promise<void> {
+  agent.abortController?.abort();
+  agent.instructorAbortController?.abort();
+  if (agent.executionPromise) {
+    try { await agent.executionPromise; } catch { /* 忽略结束状态 */ }
+  }
+}
+
+/**
  * 构建 agent_query 提问时的子模型消息列表。
  * 与 executeChildAgent 对齐：提问时携带子模型自身的工作上下文，而非从零开始——
  *   clone 模式：主模型完整消息
@@ -641,8 +680,13 @@ export function buildQueryChildMessages(
 }
 
 /**
- * 向子模型发起轻量查询（不调工具，只回答问题）
- * 返回子模型的文本回答
+ * 向子模型发起查询（agent_query 核心）：
+ * 1. 安全截停正在运行的执行（abort + 等待 executionPromise 完全结束，含 finally 的上下文本地化落盘，
+ *    避免截停后立即启动查询循环与旧执行并发写上下文）
+ * 2. 把 question 以 user 消息注入子模型对话流（buildQueryChildMessages 已把 question 追加为末条 user 消息）
+ * 3. 运行带工具的短循环，取子模型返回的第一条文本作为结果（纯工具调用轮会继续直到出现文本，
+ *    最多 MAX_QUERY_ROUNDS 轮防失控）
+ * @returns 子模型的第一条文本回答
  */
 export async function queryChildAgent(
   agent: SubAgentState,
@@ -650,9 +694,14 @@ export async function queryChildAgent(
   mainSystemPrompt: string,
   question: string,
 ): Promise<string> {
+  const ownerSid = agent.ownerSessionId || subagentContextStore.getSessionId();
+
+  // ── 1. 安全截停正在运行的执行（abort + 等待收尾保存上下文，避免并发写） ──
+  await abortAndWaitChildExecution(agent);
+
   const toolDesc = await buildToolIdentityDesc(agent.tools ?? []);
 
-  // 构建上下文（与 executeChildAgent 对齐：携带子模型自身的工作上下文）
+  // ── 2. 以 user 消息注入 question（携带子模型自身工作上下文） ──
   const childMessages = buildQueryChildMessages(agent, mainMessages, question);
 
   let systemPrompt: string;
@@ -662,23 +711,136 @@ export async function queryChildAgent(
     systemPrompt = `${toolDesc}\n\n${mainSystemPrompt}`;
   }
 
-  try {
-    const { streamText } = await import('ai');
-    const result = await streamText({
-      model: getModel(),
-      system: systemPrompt,
-      messages: childMessages,
-    });
+  // 截停会令旧执行标记 error（已停止），查询开始前清掉，状态置 running
+  agent.error = undefined;
+  subAgentManager.updateStatus(agent.name, 'running');
 
-    let fullText = '';
-    for await (const chunk of result.textStream) {
-      fullText += chunk;
+  try {
+    // ── 3. 带工具短循环：收集第一条文本 ──
+    const childTools = await buildChildTools(agent.tools ?? [], () => {});
+    const modelChildTools = (await getStripToolExecutes())(childTools);
+
+    let firstText = '';
+    const MAX_QUERY_ROUNDS = 5; // 子模型可能为回答问题先读文件/搜索，但最多 N 轮防失控
+    for (let round = 0; round < MAX_QUERY_ROUNDS && !firstText; round++) {
+      const result = await streamText({
+        model: getModel(),
+        system: systemPrompt,
+        messages: childMessages,
+        tools: modelChildTools, // 剥离 execute，避免 AI SDK 内部自动执行工具导致双重执行
+      });
+
+      // 收集文本
+      let fullText = '';
+      for await (const chunk of result.textStream) {
+        fullText += chunk;
+      }
+
+      // 收集工具调用
+      const finalResult = await result;
+      const calls = (await finalResult.toolCalls) ?? [];
+
+      // 收集 reasoning（thinking 模式：历史回传时必须带 reasoning_content，否则上游 400）
+      let reasoningParts: { type: 'reasoning'; text: string }[] = [];
+      try {
+        reasoningParts = (await result.reasoning) as { type: 'reasoning'; text: string }[];
+      } catch { /* reasoning 获取失败不影响主流程 */ }
+
+      if (fullText) {
+        firstText = fullText; // 第一条文本即答案
+        recordAssistant(agent.name, fullText);
+      }
+
+      // 构建 assistant 消息（含 reasoning + 工具调用），push 进对话流（问答保持连贯）
+      const assistantContent: any[] = [];
+      if (reasoningParts.length > 0) {
+        for (const r of reasoningParts) assistantContent.push({ type: 'reasoning', text: r.text });
+      }
+      if (fullText) assistantContent.push({ type: 'text', text: fullText });
+      for (const tc of calls) {
+        // 解包 _raw/input 等包装参数（模型格式漂移），让消息记录与执行都用扁平参数
+        tc.input = unwrapToolArgs(tc.input);
+        assistantContent.push({
+          type: 'tool-call',
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          input: tc.input,
+        });
+        recordToolCall(agent.name, tc.toolName, tc.toolCallId, (tc.input ?? {}) as Record<string, unknown>);
+      }
+      if (assistantContent.length > 0) childMessages.push({ role: 'assistant', content: assistantContent });
+
+      // 执行工具调用（子模型可能为回答问题先读文件/搜索）
+      for (const tc of calls) {
+        const impl = childTools[tc.toolName];
+        if (!impl?.execute) {
+          const errText = `❌ 错误: 未找到工具 ${tc.toolName}`;
+          recordToolResult(agent.name, tc.toolName, tc.toolCallId, errText);
+          childMessages.push({
+            role: 'tool',
+            content: [{ type: 'tool-result', toolCallId: tc.toolCallId, toolName: tc.toolName, output: { type: 'text', value: errText } }],
+          });
+          continue;
+        }
+        try {
+          const output = await impl.execute(
+            tc.input as any,
+            { toolCallId: tc.toolCallId, messages: childMessages },
+          );
+          const outputStr = String(output ?? '');
+          // doc_pool 挂钩：读阶段记录 / 被修改文件移除（子模型关联了文件池时生效）
+          docPoolStore.onToolResult(agent.name, tc.toolName, tc.input, outputStr, tc.toolCallId);
+          recordToolResult(agent.name, tc.toolName, tc.toolCallId, outputStr);
+          childMessages.push({
+            role: 'tool',
+            content: [{ type: 'tool-result', toolCallId: tc.toolCallId, toolName: tc.toolName, output: { type: 'text', value: outputStr } }],
+          });
+        } catch (err: any) {
+          const errMsg = `执行错误: ${err.message}`;
+          recordToolResult(agent.name, tc.toolName, tc.toolCallId, errMsg);
+          childMessages.push({
+            role: 'tool',
+            content: [{ type: 'tool-result', toolCallId: tc.toolCallId, toolName: tc.toolName, output: { type: 'text', value: errMsg } }],
+          });
+        }
+      }
+
+      // 既无文本也无工具调用 → 无法继续，退出
+      if (!fullText && calls.length === 0) break;
     }
-    return fullText || '(无回答)';
+
+    return firstText || '(子模型未产生文本输出)';
   } catch (err: any) {
     return `查询出错: ${err.message}`;
+  } finally {
+    subAgentManager.updateStatus(agent.name, 'done');
+    // 问答写入子模型对话流（mission 模式）：让下次派活/提问延续本次问答
+    if (agent.mode === 'mission' && childMessages.length > 0) {
+      subagentContextStore.save(agent.name, {
+        name: agent.name,
+        mode: agent.mode,
+        tools: agent.tools ?? [],
+        systemPrompt: agent.systemPrompt,
+        context: agent.context,
+        requirement: agent.requirement,
+        maxRounds: agent.maxRounds,
+        createdAt: agent.createdAt,
+        messages: slimMessages(childMessages),
+      }, ownerSid);
+    }
   }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

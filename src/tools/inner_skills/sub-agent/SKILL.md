@@ -10,7 +10,7 @@
 |------|------|
 | `spawn_agent` | 创建/注册一个子 AI 模型，指定模式、名称、可用工具 |
 | `agent_task` | 给已创建的子模型委派任务并立即执行 |
-| `agent_query` | 查询子模型状态、向子模型提问、或等待子模型完成 |
+| `agent_query` | 向子模型提问（question 必填）：安全截停当前执行，把问题注入其对话流，返回第一条文本 |
 | `agent_fire` | 销毁/解雇指定名称的子模型 |
 | `a_submission` | 子模型内部使用的提交工具，向主模型汇报工作结果 |
 
@@ -81,7 +81,7 @@ instructor 的 system prompt 模板在 `src/prompts/INSTRUCTOR.md`，可直接�
 1. spawn_agent  →  创建子模型
 2. agent_task   →  委派任务并执行
 3. a_submission →  子模型完成任务后自动提交结果
-4. agent_query  →  查询子模型状态或向子模型提问
+4. agent_query  →  向子模型提问（question 必填，安全截停 + 注入对话流 + 返回第一条文本）
 5. agent_fire   →  任务完成后销毁子模型
 ```
 
@@ -91,6 +91,8 @@ instructor 的 system prompt 模板在 `src/prompts/INSTRUCTOR.md`，可直接�
 - 子模型的工具调用直接使用主系统全局注册的工具（`add_patch` / `del_patch` / `modify_patch` 等）
 - 子模型的提交在主模型空闲时才会注入（排队机制）
 - 退出程序时自动销毁所有子模型
+
+
 
 
 

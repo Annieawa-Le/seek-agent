@@ -209,6 +209,8 @@ export interface WorkdirResult {
   success: boolean;
   error?: string;
   path?: string;
+  roots?: string[];
+  active?: string;
 }
 
 export interface SwitchSessionResult {
@@ -276,9 +278,12 @@ export interface ElectronAPI {
   // ---- 查询（A 直通） ----
   getAgentStatus(): Promise<AgentStatusPayload>;
 
-  // ---- 工作区（A 直通 3 个 + B 降级 1 个） ----
-  getWorkdir(): Promise<string>;
+  // ---- 工作区（A 直通 + B 降级 1 个） ----
+  getWorkdir(): Promise<{ roots: string[]; active: string }>;
   setWorkdir(dirPath: string): Promise<WorkdirResult>;
+  setWorkspaceRoots(payload: { roots: string[]; active?: string }): Promise<WorkdirResult>;
+  addWorkspaceRoot(dirPath: string): Promise<WorkdirResult>;
+  removeWorkspaceRoot(dirPath: string): Promise<WorkdirResult>;
   selectFolder(): Promise<SelectFolderResult>;
   getRecentDirs(): Promise<string[]>;
 
@@ -319,6 +324,8 @@ export interface ElectronAPI {
   sendTrustRequest(relayDeviceId: string, remoteId: string, label?: string): void;
   sendTrustRevoke(relayDeviceId: string, remoteId: string): void;
 }
+
+
 
 
 

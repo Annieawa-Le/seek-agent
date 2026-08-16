@@ -4,7 +4,7 @@
  * 暴露 4 个主模型可用工具：
  *   spawn_agent — 创建子模型
  *   agent_task  — 给子模型委派任务并执行
- *   agent_query — 查询子模型状态
+ *   agent_query — 向子模型提问（安全截停 + user 消息注入，返回第一条文本）
  *   agent_fire  — 销毁子模型
  * （a_submission 为子模型专用终端工具，由 runner.ts 的 buildChildTools 注入，
  *   不在此全局注册，主模型不可见。）
@@ -128,67 +128,28 @@ tools['agent_task'] = tool({
 });
 
 // ═════════════════════════════════════════════════════
-// agent_query — 查询子模型状态
+// agent_query — 向子模型提问（question 必填）
 // ═════════════════════════════════════════════════════
 
 tools['agent_query'] = tool({
-  description: '向子模型提问或查询状态。传 question 时，子模型的 LLM 会基于其自身的工作上下文（mission 模式加载上次派活的历史、clone 模式带主模型消息）直接回答问题，不调工具；不传 question 时返回状态摘要。注意：派活后无需等待——子模型完成后会通过「【name 提交工作结果】」自动回到对话。',
+  description: '向子模型提问（question 必填）。调用时会安全截停子模型的当前执行（若有正在运行的任务，先中断并等待其收尾保存上下文），把问题以 user 消息注入子模型对话流，运行带工具的短循环取子模型返回的第一条文本作为结果。注意：派活后无需等待——子模型完成后会通过「【name 提交工作结果】」自动回到对话。',
   inputSchema: z.object({
-    name: z.string().describe('子模型名称'),
-    question: z.string().optional().describe('向子模型提出的问题（将会让子模型的 LLM 回答）'),
-    waitForCompletion: z.boolean().optional().default(false).describe('（已废弃）不再同步等待；仅用于查看已完成子模型的提交结果或当前状态'),
+    name: z.string().describe('子模型名称（必须已通过 spawn_agent 创建）'),
+    question: z.string().describe('要问子模型的问题（必填，会作为 user 消息注入子模型对话流）'),
   }),
-  execute: async ({ name, question, waitForCompletion }, { messages }) => {
+  execute: async ({ name, question }, { messages }) => {
     const agent = subAgentManager.get(name);
     if (!agent) {
       return `❌ 未找到子模型 "${name}"。`;
     }
-
-    // 等待正在运行的子模型完成 → 已去除同步等待（异步协作：派活后直接结束本轮，提交会自动回到对话）
-    if (waitForCompletion) {
-      if (agent.status === 'running') {
-        return `⏳ 子模型 "${name}" 正在运行中。已改为异步协作：布置工作后无需等待，直接结束本轮即可，子模型的提交会自动回到对话。`;
-      }
-      if (agent.status === 'done' && agent.submission) {
-        try {
-          const parsed = JSON.parse(agent.submission);
-          return `📋 子模型 "${name}" 已完成\n\n概要: ${parsed.summary}\n详情: ${parsed.details}`;
-        } catch { /* 非 JSON 提交走下方状态摘要 */ }
-      }
-      if (agent.status === 'error') {
-        return `❌ 子模型 "${name}" 出错: ${agent.error || '未知错误'}`;
-      }
-      return `📋 子模型 "${name}" 当前状态: ${agent.status}`;
+    try {
+      const mainMsgs = messages as ModelMessage[];
+      const mainSysPrompt = getSystemPrompt();
+      const answer = await queryChildAgent(agent, mainMsgs, mainSysPrompt, question);
+      return `💬 ${name} 的回答:\n${answer}`;
+    } catch (err: any) {
+      return `❌ 向子模型 "${name}" 提问时出错: ${err.message}`;
     }
-
-    // 向子模型提问（轻量 LLM 调用）
-    if (question) {
-      try {
-        const mainMsgs = messages as ModelMessage[];
-        const mainSysPrompt = getSystemPrompt();
-        const answer = await queryChildAgent(agent, mainMsgs, mainSysPrompt, question);
-        return `💬 ${name} 的回答:\n${answer}`;
-      } catch (err: any) {
-        return `❌ 向子模型 "${name}" 提问时出错: ${err.message}`;
-      }
-    }
-
-    // 纯状态查询
-    const lines: string[] = [];
-    lines.push(`📋 子模型: "${name}"`);
-    lines.push(`模式: ${agent.mode}`);
-    lines.push(`状态: ${agent.status}`);
-    lines.push(`可用工具: ${(agent.tools ?? []).join(', ')}`);
-    if (agent.submission) {
-      try {
-        const p = JSON.parse(agent.submission);
-        lines.push(`\n最近提交概要: ${p.summary || '(无)'}`);
-      } catch {
-        lines.push(`\n最近提交: ${agent.submission}`);
-      }
-    }
-    if (agent.error) lines.push(`\n错误: ${agent.error}`);
-    return lines.join('\n');
   },
 });
 
@@ -217,7 +178,7 @@ tools['agent_worklog'] = tool({
       return e ? `[${e.id}] ${e.title}（${e.createdAt}）\n${e.summary}` : `未找到 ${name} 的 ${id} 记录。`;
     }
     const list = subagentWorklogStore.list();
-    if (list.length === 0) return `子模型 "${name}" 暂无工作记录（可能尚未经历过上下文压缩，可用 agent_query 查询其状态）。`;
+    if (list.length === 0) return `子模型 "${name}" 暂无工作记录（可能尚未经历过上下文压缩，可用 agent_query 向其提问）。`;
     return [`📚 子模型 "${name}" 的工作记录：`,
       ...list.map((e) => `- [${e.id}] ${e.title}（${e.createdAt}）`),
       '', `查看完整梗概：agent_worklog{name: "${name}", id: "W1"}`].join('\n');
@@ -251,6 +212,9 @@ tools['agent_fire'] = tool({
 // 在组装子模型工具集时无条件注入（含幻觉模式执行器），主模型不需要它，
 // 因此不在此全局注册——避免主模型的 payload / session 记录中出现该工具。
 export default tools;
+
+
+
 
 
 

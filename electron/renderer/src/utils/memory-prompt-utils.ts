@@ -8,9 +8,13 @@
  * 分块策略（按一级标题聚合，避免碎片化）：
  *   1. 逐行扫描，`# 标题` 行开启新块：该标题到下一个一级标题前的内容（含 ## 子标题
  *      与无标题散段，如 platform 说明、工作目录行、MCP 指令等）都归入该块；
- *   2. 开头无标题的引言（如 MAIN.md 首段）独立成块，标题取内容摘要；
- *   3. 整个 system 没有任何一级标题时，回退为按空行切分 + 短段合并；
- *   4. 重组 = 各块 content 按序 join('\n\n')，与原文逐字节等价（除多余空行规范化）。
+ *   2. 代码块围栏（``` 或 ~~~）内的 `#` 行（shell 注释等）不当作标题；
+ *   3. 开头无标题的引言（如 MAIN.md 首段）独立成块，标题取内容摘要；
+ *   4. 整个 system 没有任何一级标题时，回退为按空行切分 + 短段合并；
+ *   5. 重组 = 各块 content 按序 join('\n\n')，与原文逐字节等价（除多余空行规范化）。
+ *
+ * 子标题树：buildSubTree 把一级块内容里的 ##+ 标题解析成可折叠树（纯展示派生，
+ * 不改块 content，重组可逆性不受影响），供记忆面板渲染逐级可展开的标签。
  */
 
 export interface PromptBlock {
@@ -31,14 +35,129 @@ function simpleHash(s: string): string {
   return (h >>> 0).toString(16).padStart(8, '0').slice(0, 8);
 }
 
-/** 从段文本提取语义标题：首行 `# ` 标题优先；否则取首个非空行/前若干字符做摘要 */
+/** 从段文本提取语义标题：首个围栏外非空行的 `# ` 标题优先；否则取该行/前若干字符做摘要 */
 export function extractBlockTitle(content: string): string {
-  const firstLine = content.split('\n').find(l => l.trim().length > 0) ?? '';
+  // 跳过代码块围栏行及其内部行（```ts、围栏内 # 注释等），避免提取成伪标题
+  let firstLine = '';
+  let inFence = false;
+  for (const l of content.split('\n')) {
+    if (isFenceLine(l)) { inFence = !inFence; continue; }
+    if (inFence || l.trim().length === 0) continue;
+    firstLine = l;
+    break;
+  }
   const m = /^#+\s+(.+)$/.exec(firstLine.trim());
   if (m) return m[1].trim();
   const plain = firstLine.replace(/[#*`>]/g, '').trim();
   const title = plain || content.replace(/\s+/g, ' ').trim();
   return title.length > 24 ? `${title.slice(0, 24)}…` : title;
+}
+
+/** 代码块围栏行（``` 或 ~~~ 开头的行，允许前导空格） */
+function isFenceLine(line: string): boolean {
+  return /^\s*(```+|~~~+)/.test(line);
+}
+
+/**
+ * 一级块内容里的子标题树节点（纯展示派生，不改块 content）。
+ * lines 为该节点标题行以下、下一个同级/上级标题之前的内容行。
+ * linesStart/linesEnd 为该段正文在块 content 行数组中的 1-based 行号区间（含），
+ * 供 applyNodeEdit 精确替换；无正文时 linesEnd = linesStart - 1（空区间）。
+ */
+export interface PromptSubNode {
+  /** 稳定 id（内容 hash + 序号，用于 React key 与折叠状态） */
+  id: string;
+  /** 标题级别（2..6，对应 ##+ 的井号数） */
+  level: number;
+  /** 标题文本 */
+  title: string;
+  /** 本节点直属内容行（不含子节点内容） */
+  lines: string[];
+  /** 本节点正文起始行号（1-based，标题行 + 1） */
+  linesStart: number;
+  /** 本节点正文结束行号（1-based 含；无正文时 = linesStart - 1） */
+  linesEnd: number;
+  /** 下级标题节点 */
+  children: PromptSubNode[];
+}
+
+/** buildSubTree 的返回：块内第一个子标题前的散段 + 子标题树 */
+export interface PromptSubTree {
+  /** 第一个子标题之前的内容（引言/散段），无则空串 */
+  preamble: string;
+  /** preamble 起始行号（1-based，无内容时 = 1） */
+  preambleStart: number;
+  /** preamble 结束行号（1-based 含；无内容时 = preambleStart - 1） */
+  preambleEnd: number;
+  /** 子标题树根列表 */
+  nodes: PromptSubNode[];
+}
+
+/**
+ * 解析一级块内容里的 ##+ 标题树（代码块围栏内的 # 行忽略）。
+ * 栈式构建：遇到 ## 开新根，### 挂到当前 ## 下，更深的依此类推；
+ * 回到同级/更高级别时出栈。非标题行归入当前节点（无节点时归入 preamble）。
+ * 每个节点/preamble 记录正文行号区间，供段落级编辑精确替换。
+ */
+export function buildSubTree(content: string): PromptSubTree {
+  const nodes: PromptSubNode[] = [];
+  const stack: PromptSubNode[] = [];
+  let preambleLines: string[] = [];
+  let inFence = false;
+  let seq = 0;
+  let lineNo = 0; // 1-based 行号
+  const pushLine = (line: string, no: number) => {
+    if (stack.length > 0) {
+      const top = stack[stack.length - 1];
+      top.lines.push(line);
+      top.linesEnd = no;
+    } else {
+      preambleLines.push(line);
+    }
+  };
+  for (const line of content.split('\n')) {
+    lineNo++;
+    if (isFenceLine(line)) { inFence = !inFence; pushLine(line, lineNo); continue; }
+    const m = !inFence ? /^(#{2,6})\s+(.+)$/.exec(line) : null;
+    if (m) {
+      const level = m[1].length;
+      const node: PromptSubNode = {
+        id: `s${seq++}_${simpleHash(m[2].trim())}`,
+        level,
+        title: m[2].trim(),
+        lines: [],
+        linesStart: lineNo + 1,
+        linesEnd: lineNo,
+        children: [],
+      };
+      while (stack.length > 0 && stack[stack.length - 1].level >= level) stack.pop();
+      if (stack.length === 0) nodes.push(node);
+      else stack[stack.length - 1].children.push(node);
+      stack.push(node);
+    } else {
+      pushLine(line, lineNo);
+    }
+  }
+  return {
+    preamble: preambleLines.join('\n'),
+    preambleStart: 1,
+    preambleEnd: preambleLines.length,
+    nodes,
+  };
+}
+
+/**
+ * 段落级编辑：把块 content 中 [start, end]（1-based 含）行区间替换为 newText。
+ * 传入节点或 preamble 的行号区间；未触及的行逐字节保留。
+ */
+export function applyNodeEdit(content: string, start: number, end: number, newText: string): string {
+  const lines = content.split('\n');
+  const s = Math.max(0, start - 1);
+  const e = Math.min(lines.length, end);
+  // 空文本 = 删除区间，不插入任何行；空区间 + 空文本 = 无变化
+  const newLines = newText ? newText.replace(/\r\n/g, '\n').split('\n') : [];
+  if (s >= e && newLines.length === 0) return content;
+  return [...lines.slice(0, s), ...newLines, ...lines.slice(e)].join('\n');
 }
 
 /** 判断一段是否适合并入前一块：过短、无结构标记、且前一块足够长（避免连续短段无限制并成一块） */
@@ -56,7 +175,12 @@ export function splitPromptBlocks(system: string): PromptBlock[] {
   if (!system || !system.trim()) return [];
 
   const lines = system.split('\n');
-  const hasHeading = lines.some(l => /^#\s+/.test(l));
+  // 代码块围栏感知：围栏内的 # 行（shell 注释等）不当作标题
+  let probeInFence = false;
+  const hasHeading = lines.some(l => {
+    if (isFenceLine(l)) { probeInFence = !probeInFence; return false; }
+    return !probeInFence && /^#\s+/.test(l);
+  });
   if (!hasHeading) return splitByParagraph(system);
 
   const blocks: PromptBlock[] = [];
@@ -71,8 +195,10 @@ export function splitPromptBlocks(system: string): PromptBlock[] {
       content,
     });
   };
+  let inFence = false;
   for (const line of lines) {
-    const m = /^#\s+(.+)$/.exec(line);
+    if (isFenceLine(line)) { inFence = !inFence; curLines.push(line); continue; }
+    const m = !inFence ? /^#\s+(.+)$/.exec(line) : null;
     if (m) {
       pushCur();
       curTitle = m[1].trim();
@@ -138,4 +264,14 @@ export function messageContentText(msg: { content?: unknown }): string {
   if (c === null || c === undefined) return '';
   return JSON.stringify(c);
 }
+
+
+
+
+
+
+
+
+
+
 

@@ -568,8 +568,11 @@ class RemoteTransport {
       getAgentStatus: () => invoke('getAgentStatus'),
 
       // ---- A 直通：工作区 ----
-      getWorkdir: () => invoke<string>('getWorkdir'),
+      getWorkdir: () => invoke<{ roots: string[]; active: string }>('getWorkdir'),
       setWorkdir: (dirPath: string) => invoke('setWorkdir', [dirPath]),
+      setWorkspaceRoots: (payload: { roots: string[]; active?: string }) => invoke('setWorkspaceRoots', [payload]),
+      addWorkspaceRoot: (dirPath: string) => invoke('addWorkspaceRoot', [{ path: dirPath }]),
+      removeWorkspaceRoot: (dirPath: string) => invoke('removeWorkspaceRoot', [{ path: dirPath }]),
       getRecentDirs: () => invoke<string[]>('getRecentDirs'),
 
       // ---- A 直通：文件系统 ----
@@ -630,6 +633,9 @@ class RemoteTransport {
     };
   }
 }
+
+
+
 
 
 

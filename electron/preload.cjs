@@ -130,14 +130,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ─── 工作区目录管理 ───
 
-  /** 获取当前工作目录 */
+  /** 获取当前会话工作区状态 { roots, active } */
   getWorkdir: async () => {
     return ipcRenderer.invoke('workdir:get');
   },
 
-  /** 设置工作目录 */
+  /** 设置工作目录（单路径语义：替换为单个根） */
   setWorkdir: async (dirPath) => {
     return ipcRenderer.invoke('workdir:set', dirPath);
+  },
+
+  /** 整体设置多工作区根列表（{ roots, active? }） */
+  setWorkspaceRoots: async (payload) => {
+    return ipcRenderer.invoke('workdir:setRoots', payload);
+  },
+
+  /** 追加一个工作区根 */
+  addWorkspaceRoot: async (dirPath) => {
+    return ipcRenderer.invoke('workdir:addRoot', { path: dirPath });
+  },
+
+  /** 移除一个工作区根 */
+  removeWorkspaceRoot: async (dirPath) => {
+    return ipcRenderer.invoke('workdir:removeRoot', { path: dirPath });
   },
 
   /** 打开系统对话框选择文件夹 */
@@ -263,6 +278,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('window:isMaximized');
   },
 });
+
 
 
 

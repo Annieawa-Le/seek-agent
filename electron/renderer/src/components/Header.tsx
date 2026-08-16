@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
 import type { AgentStatusState } from '@/hooks/useAgentStatus.ts';
-import { FolderSelector } from './FolderSelector.tsx';
 import { Tabs, type TabItem } from './Tabs.tsx';
 
 interface Props {
@@ -62,8 +61,6 @@ export function Header({ status, theme, onToggleTheme, onOpenSettings, onToggleS
       </div>
 
       <div className="header-right">
-        <FolderSelector />
-
         <button className={`panel-toggle${panelOpen ? ' active' : ''}`} onClick={onTogglePanel} title={panelOpen ? '收起右侧栏' : '展开右侧栏'}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/>
@@ -121,6 +118,9 @@ export function Header({ status, theme, onToggleTheme, onOpenSettings, onToggleS
     </header>
   );
 }
+
+
+
 
 
 

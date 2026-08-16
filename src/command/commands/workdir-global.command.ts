@@ -2,6 +2,7 @@ import { Command } from '../types';
 import path from 'node:path';
 import fs from 'node:fs';
 import { setCwd, getWorkspaceRoot, setWorkspaceRootOnly, resetWorkspaceRoot } from '../../workdir';
+import { syncMemoryToWorkspace } from '../../tools/memory-core';
 import {
   setExplorerRoot,
   getExplorerRoot,
@@ -37,6 +38,7 @@ export const WorkdirGlobalCommand: Command = {
         resetExplorerRoot();
         resetExplorerPath();
         resetWorkspaceRoot();
+        syncMemoryToWorkspace();
         setCwd(getWorkspaceRoot());
         if (!silent) {
           ctx.ui.addUserMessage(`/workdir-global reset`);
@@ -74,6 +76,7 @@ export const WorkdirGlobalCommand: Command = {
         resetExplorerPath();
         setCwd(resolved);
         setWorkspaceRootOnly(resolved);
+        syncMemoryToWorkspace();
         if (!silent) {
           ctx.ui.addUserMessage(`/workdir-global ${pathArg}`);
           ctx.ui.addAgentMessage(
@@ -96,6 +99,7 @@ export const WorkdirGlobalCommand: Command = {
     }
   },
 };
+
 
 
 

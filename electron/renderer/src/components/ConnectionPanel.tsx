@@ -4,7 +4,7 @@
  * - 通过 useRemoteConnection() 取状态；context 为 null（桌面 Electron 原生环境）或面板未打开时不渲染。
  * - 已连接（paired）：绿色大号状态 + 中继地址 + 断开按钮；
  * - 未连接：中继地址 + 配对码（6 位大写自动转大写）+ 「信任此设备」选项 + 连接主按钮 + 状态/错误文案。
- * - 已保存设备列表：顶部展示已信任（🔒 免密直连）与未信任设备卡片，点击连接、× 删除、未信任可补信任。
+ * - 已保存设备列表：顶部展示已信任（免密直连）与未信任设备卡片，点击连接、× 删除、未信任可补信任。
  * - 关闭：遮罩点击（target===currentTarget）、× 按钮、ESC 键。
  */
 import { useEffect, useState } from 'react';
@@ -200,7 +200,17 @@ export function ConnectionPanel(): JSX.Element | null {
                           color: d.trusted ? '#2e7d32' : '#8c8c8c',
                           background: d.trusted ? '#e6f6e6' : '#f0f2f5',
                         }}
-                      >{d.trusted ? '🔒 已信任' : '未信任'}</span>
+                      >
+                        {d.trusted ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                            </svg>
+                            已信任
+                          </span>
+                        ) : '未信任'}
+                      </span>
                       <button
                         type="button"
                         aria-label="删除设备"
@@ -390,6 +400,7 @@ export function ConnectionPanel(): JSX.Element | null {
     </>
   );
 }
+
 
 
 

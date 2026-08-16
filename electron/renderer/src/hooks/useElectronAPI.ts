@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentStatus, CollabLogEntry, FileTreeNode, GitChange, RemoteDeviceInfo, RemotePairCode, RemoteStatus, SessionInfo } from '@/types/index.ts';
+import type { AgentMessage, AgentStatus, CollabLogEntry, FileTreeNode, GitChange, RemoteDeviceInfo, RemotePairCode, RemoteStatus, SessionInfo, WorkdirState } from '@/types/index.ts';
 import { useEffect, useRef, useCallback, useMemo } from 'react';
 
 export function isElectron(): boolean {
@@ -37,7 +37,7 @@ export function useElectronAPI() {
     return unsub;
   }, [api]);
 
-  const onWorkdirChanged = useCallback((cb: (path: string) => void) => {
+  const onWorkdirChanged = useCallback((cb: (state: WorkdirState) => void) => {
     if (!api) return () => {};
     const unsub = api.onWorkdirChanged(cb);
     listenersRef.current.push(unsub);
@@ -60,14 +60,29 @@ export function useElectronAPI() {
     api?.restart();
   }, [api]);
 
-  const getWorkdir = useCallback(async (): Promise<string> => {
-    if (!api) return '';
+  const getWorkdir = useCallback(async (): Promise<WorkdirState> => {
+    if (!api) return { roots: [], active: '' };
     return api.getWorkdir();
   }, [api]);
 
   const setWorkdir = useCallback(async (dirPath: string) => {
     if (!api) return { error: 'API 不可用' };
     return api.setWorkdir(dirPath);
+  }, [api]);
+
+  const setWorkspaceRoots = useCallback(async (payload: { roots: string[]; active?: string }) => {
+    if (!api) return { error: 'API 不可用' };
+    return api.setWorkspaceRoots(payload);
+  }, [api]);
+
+  const addWorkspaceRoot = useCallback(async (dirPath: string) => {
+    if (!api) return { error: 'API 不可用' };
+    return api.addWorkspaceRoot(dirPath);
+  }, [api]);
+
+  const removeWorkspaceRoot = useCallback(async (dirPath: string) => {
+    if (!api) return { error: 'API 不可用' };
+    return api.removeWorkspaceRoot(dirPath);
   }, [api]);
 
   const getSkillsList = useCallback(async (): Promise<Array<{ name: string; description: string }>> => {
@@ -257,6 +272,9 @@ export function useElectronAPI() {
     restart,
     getWorkdir,
     setWorkdir,
+    setWorkspaceRoots,
+    addWorkspaceRoot,
+    removeWorkspaceRoot,
     selectFolder,
     openFileDialog,
     getRecentDirs,
@@ -289,6 +307,10 @@ export function useElectronAPI() {
     onMaximizedChange,
   }), [api]);
 }
+
+
+
+
 
 
 

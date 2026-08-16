@@ -14,9 +14,8 @@ import {
   resolveDshSkillRoots,
   discoverDshSkills,
   loadDshSkill,
-  dsh_skill_catalog,
-  dsh_skill,
-} from '../src/tools/inner_skills/dsh-skill/index';
+} from '../src/tools/inner_skills/dsh-skill/lib';
+import { dsh_skill_catalog, dsh_skill } from '../src/tools/inner_skills/dsh-skill/index';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -143,6 +142,7 @@ check('frontmatter: 未闭合返回 undefined', brokenFm === undefined);
   console.log(`\n结果: ${passed} 通过, ${failed} 失败`);
   process.exitCode = failed > 0 ? 1 : 0;
 })();
+
 
 
 

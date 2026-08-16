@@ -362,7 +362,7 @@ tools['spawn_worker'] = tool({
       ? `额外技能(${skills.length}): ${skills.join(', ')}`
       : '';
     const skillInfo = [defaultSkillInfo, extraSkills].filter(Boolean).join(' | ');
-    return `✅ 已从预制员工库创建 mission 子模型 "${agentName}"（${who}）\n身份：${identityDesc}\n可用工具(${mergedTools.length}): ${toolList}\n${skillInfo}\n\n下一步：调用 agent_task(name: "${agentName}", task: "<任务描述>") 派活；可用 agent_query 查状态、agent_fire 销毁。`;
+    return `✅ 已从预制员工库创建 mission 子模型 "${agentName}"（${who}）\n身份：${identityDesc}\n可用工具(${mergedTools.length}): ${toolList}\n${skillInfo}\n\n下一步：调用 agent_task(name: "${agentName}", task: "<任务描述>") 派活；需要时可用 agent_query(name, question) 向员工提问、agent_fire 销毁。`;
   },
 });
 
@@ -384,6 +384,7 @@ tools['worker-library-prompt-get'] = tool({
 });
 
 export default tools;
+
 
 
 

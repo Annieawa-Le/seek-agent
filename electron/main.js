@@ -46,6 +46,9 @@ const METHOD_TO_CHANNEL = {
   getAgentStatus: 'agent:status:request',
   getWorkdir: 'workdir:get',
   setWorkdir: 'workdir:set',
+  setWorkspaceRoots: 'workdir:setRoots',
+  addWorkspaceRoot: 'workdir:addRoot',
+  removeWorkspaceRoot: 'workdir:removeRoot',
   getRecentDirs: 'workdir:getRecent',
   readFileTree: 'fs:readFileTree',
   readGitStatus: 'fs:readGitStatus',
@@ -155,20 +158,53 @@ function newSessionId() {
 let __sessionsSig = '';
 let __sessionsCache = [];
 let currentWorkDir = ROOT;
-// 按会话的工作区映射（sessionId -> dir）：不同标签页可各自工作区，切换会话时应用
+// 按会话的工作区映射（sessionId -> { roots, active }）：不同标签页可各自挂载多个工作区，切换会话时应用
 const sessionWorkDirs = new Map();
 
-/** 获取指定会话的工作区（优先会话映射；回退 session.json.cwd；最后回退当前活动会话的） */
-function getWorkdirFor(sessionId) {
-  if (sessionWorkDirs.has(sessionId)) return sessionWorkDirs.get(sessionId);
+/** 获取指定会话的工作区状态 { roots, active }（优先会话映射；兼容旧 string；回退 session.json.cwd；最后回退当前活动会话的） */
+function getWorkspaceStateFor(sessionId) {
+  const sid = sessionId || currentSessionId;
+  const hit = sessionWorkDirs.get(sid);
+  // 旧数据兼容：sessionWorkDirs 曾存单目录字符串
+  if (hit && typeof hit === 'string') {
+    return { roots: [hit], active: hit };
+  }
+  if (hit && Array.isArray(hit.roots) && hit.roots.length > 0) {
+    return { roots: [...hit.roots], active: hit.active || hit.roots[0] };
+  }
   try {
-    const sp = join(ROOT, 'sessions', sessionId, 'session.json');
+    const sp = join(ROOT, 'sessions', sid, 'session.json');
     if (existsSync(sp)) {
       const data = JSON.parse(readFileSync(sp, 'utf8'));
-      if (data && typeof data.cwd === 'string' && existsSync(data.cwd)) return data.cwd;
+      // 多工作区状态（新）：{ roots, active }
+      if (data && Array.isArray(data.workspace?.roots) && data.workspace.roots.length > 0) {
+        const roots = data.workspace.roots.filter(r => typeof r === 'string' && existsSync(r));
+        if (roots.length > 0) {
+          const active = data.workspace.active && roots.includes(data.workspace.active) ? data.workspace.active : roots[0];
+          return { roots, active };
+        }
+      }
+      // 旧字段兼容：cwd 为单目录
+      if (data && typeof data.cwd === 'string' && existsSync(data.cwd)) {
+        return { roots: [data.cwd], active: data.cwd };
+      }
     }
   } catch { /* 读取失败忽略 */ }
-  return currentWorkDir || ROOT;
+  return { roots: [currentWorkDir || ROOT], active: currentWorkDir || ROOT };
+}
+
+/** 获取指定会话的工作区活跃根（旧语义，供 fs:readFileTree / git 等使用） */
+function getWorkdirFor(sessionId) {
+  return getWorkspaceStateFor(sessionId).active;
+}
+
+/** 保存某会话的工作区状态（roots 非空；同步当前活动会话的缓存） */
+function saveWorkspaceState(sessionId, state) {
+  const roots = Array.isArray(state.roots) && state.roots.length > 0 ? [...state.roots] : [currentWorkDir || ROOT];
+  const active = state.active && roots.includes(state.active) ? state.active : roots[0];
+  sessionWorkDirs.set(sessionId, { roots, active });
+  if (sessionId === currentSessionId) currentWorkDir = active;
+  return { roots, active };
 }
 
 // ═════════════════════════════════════════════════════
@@ -575,14 +611,15 @@ registerRpc('session:switch', async (sessionId, name) => {
     if (!existed) spawnAgent(sessionId);
     currentSessionId = sessionId;
     // 应用目标会话自己的工作区（不同标签页各自工作区，切换时跟随）
-    const targetDir = getWorkdirFor(sessionId);
+    const targetState = getWorkspaceStateFor(sessionId);
+    const targetDir = targetState.active;
     currentWorkDir = targetDir;
     // 后台拉起：就绪后下发激活/加载命令，失败则通知渲染层
     waitForReady(sessionId).then(() => {
       const entry = agentProcs.get(sessionId);
       if (entry?.ready) {
-        // 同步目标会话的工作区到其 agent（静默），再恢复/激活
-        if (targetDir && targetDir !== ROOT) sendWorkdirToAgent(sessionId, targetDir);
+        // 同步目标会话的工作区到其 agent（静默，多根整体同步），再恢复/激活
+        syncWorkspaceToAgent(sessionId, targetState);
         if (!existed) {
           if (name) {
             sendToAgent(sessionId, { type: 'command', cmd: `/loadsession ${name}`, id: `load-${sessionId}` });
@@ -594,7 +631,7 @@ registerRpc('session:switch', async (sessionId, name) => {
           sendToAgent(sessionId, { type: 'command', cmd: 'session:activate', id: `activate-${sessionId}` });
         }
         // 通知渲染层当前会话工作区（FolderSelector 跟随显示不同标签页各自的工作区）
-        broadcastToClients('workdir:changed', targetDir || ROOT);
+        broadcastToClients('workdir:changed', { roots: targetState.roots, active: targetState.active });
       } else {
         notifySessionError(sessionId, 'Agent 进程启动失败或超时');
       }
@@ -611,14 +648,13 @@ registerRpc('session:new', async () => {
   spawnAgent(sessionId);
   currentSessionId = sessionId;
   // 新会话继承当前活动会话的工作区（可后续各自修改）
-  sessionWorkDirs.set(sessionId, currentWorkDir);
-  // 新进程初始即为空会话，无需下发 session:new（避免 clear-messages 清掉渲染层刚组装的初始气泡）
+  saveWorkspaceState(sessionId, getWorkspaceStateFor(currentSessionId));
   // 后台等待就绪，仅做失败兜底
   waitForReady(sessionId).then(() => {
     const entry = agentProcs.get(sessionId);
     if (entry?.ready) {
-      // 新会话继承当前工作区（静默同步，不产生气泡）
-      if (currentWorkDir !== ROOT) sendWorkdirToAgent(sessionId, currentWorkDir);
+      // 新会话继承当前工作区（静默同步多根，不产生气泡）
+      syncWorkspaceToAgent(sessionId, getWorkspaceStateFor(sessionId));
     } else {
       notifySessionError(sessionId, 'Agent 进程启动失败或超时');
     }
@@ -735,39 +771,105 @@ function sendWorkdirToAgent(sessionId, dir) {
   sendToAgent(sessionId, { type: 'command', cmd: `workdir-global silent ${target}`, id: `workdir-sync-${sessionId}` });
 }
 
+/** 向指定会话的 agent 同步多工作区根（workdir-roots 静默指令，整体替换） */
+function syncWorkspaceToAgent(sessionId, state) {
+  const st = state || getWorkspaceStateFor(sessionId);
+  if (!sessionId || !st || !st.roots || !st.roots.length) return;
+  const payload = JSON.stringify({ roots: st.roots, active: st.active });
+  sendToAgent(sessionId, { type: 'command', cmd: `workdir-roots silent ${payload}`, id: `workdir-roots-${sessionId}` });
+}
+
+/** 校验目录存在且为目录；返回 { path } 或 { error } */
+function normalizeDir(pathStr) {
+  if (!pathStr) return { error: '缺少目录路径' };
+  const resolved = resolve(pathStr);
+  if (!existsSync(resolved)) return { error: `目录不存在: ${pathStr}` };
+  if (!statSync(resolved).isDirectory()) return { error: `路径不是目录: ${pathStr}` };
+  return { path: resolved };
+}
 
 registerRpc('workdir:get', () => {
-  // 返回当前活动会话的工作区（不同标签页可各自工作区）
-  return getWorkdirFor(currentSessionId);
+  // 返回当前活动会话的工作区状态（多根 + 活跃）
+  return getWorkspaceStateFor(currentSessionId);
 });
 
 registerRpc('workdir:set', async (newDir) => {
+  // 单路径语义（向后兼容）：整体替换为单个根
+  const norm = normalizeDir(newDir);
+  if (norm.error) return { error: norm.error };
+  const state = saveWorkspaceState(currentSessionId, { roots: [norm.path], active: norm.path });
+  addRecentDir(norm.path);
+  // 会话列表/身份卡目录随工作区变化，重置签名缓存强制重新读取
+  __sessionsSig = '';
+  __sessionsCache = [];
+
+  // 只同步当前会话的 agent（其余会话保持各自工作区）
+  syncWorkspaceToAgent(currentSessionId, state);
+
+  broadcastToClients('workdir:changed', state);
+
+  return { success: true, path: norm.path, roots: state.roots, active: state.active, sessionId: currentSessionId };
+});
+
+/** 整体设置多工作区根列表（{ roots, active? }）：校验后替换，广播并同步 agent */
+registerRpc('workdir:setRoots', async ({ roots, active } = {}) => {
   try {
-    const resolved = resolve(newDir);
-    if (!existsSync(resolved)) {
-      return { error: '目录不存在' };
+    const list = Array.isArray(roots) ? roots : [];
+    if (list.length === 0) return { error: 'roots 不能为空' };
+    const normed = [];
+    for (const r of list) {
+      const norm = normalizeDir(r);
+      if (norm.error) return { error: norm.error };
+      normed.push(norm.path);
     }
-    const stat = statSync(resolved);
-    if (!stat.isDirectory()) {
-      return { error: '路径不是目录' };
-    }
-    // 只作用于当前活动会话（不同标签页各自工作区，互不影响）
-    sessionWorkDirs.set(currentSessionId, resolved);
-    currentWorkDir = resolved;
-    addRecentDir(resolved);
-    // 会话列表/身份卡目录随工作区变化，重置签名缓存强制重新读取
-    __sessionsSig = '';
-    __sessionsCache = [];
+    // 去重保序
+    const unique = [...new Set(normed)];
+    let act = active ? resolve(active) : unique[0];
+    if (!unique.includes(act)) act = unique[0];
+    const state = saveWorkspaceState(currentSessionId, { roots: unique, active: act });
+    addRecentDir(act);
+    __sessionsSig = ''; __sessionsCache = [];
+    syncWorkspaceToAgent(currentSessionId, state);
+    broadcastToClients('workdir:changed', state);
+    return { success: true, roots: state.roots, active: state.active, sessionId: currentSessionId };
+  } catch (err) { return { error: err.message }; }
+});
 
-    // 只同步当前会话的 agent（其余会话保持各自工作区）
-    sendWorkdirToAgent(currentSessionId, resolved);
+/** 追加一个工作区根（不改变活跃根；初始默认根时自动把新目录设为活跃） */
+registerRpc('workdir:addRoot', async ({ path } = {}) => {
+  try {
+    const norm = normalizeDir(path);
+    if (norm.error) return { error: norm.error };
+    const prev = getWorkspaceStateFor(currentSessionId);
+    let roots = prev.roots.includes(norm.path) ? prev.roots : [...prev.roots, norm.path];
+    let active = prev.active;
+    // 初始状态（只有默认 ROOT 根且活跃未改）时把新目录设为活跃，让用户立即看到效果
+    if (prev.roots.length === 1 && prev.active === ROOT) active = norm.path;
+    const state = saveWorkspaceState(currentSessionId, { roots, active });
+    addRecentDir(norm.path);
+    __sessionsSig = ''; __sessionsCache = [];
+    syncWorkspaceToAgent(currentSessionId, state);
+    broadcastToClients('workdir:changed', state);
+    return { success: true, roots: state.roots, active: state.active, sessionId: currentSessionId };
+  } catch (err) { return { error: err.message }; }
+});
 
-    broadcastToClients('workdir:changed', resolved);
-
-    return { success: true, path: resolved, sessionId: currentSessionId };
-  } catch (err) {
-    return { error: err.message };
-  }
+/** 移除一个工作区根（活跃根被移除时切到剩余第一个；至少保留一个根） */
+registerRpc('workdir:removeRoot', async ({ path } = {}) => {
+  try {
+    if (!path) return { error: '缺少 path' };
+    const resolved = resolve(path);
+    const prev = getWorkspaceStateFor(currentSessionId);
+    let roots = prev.roots.filter(r => r !== resolved);
+    if (roots.length === 0) roots = [ROOT];
+    let active = prev.active;
+    if (active === resolved) active = roots[0];
+    const state = saveWorkspaceState(currentSessionId, { roots, active });
+    __sessionsSig = ''; __sessionsCache = [];
+    syncWorkspaceToAgent(currentSessionId, state);
+    broadcastToClients('workdir:changed', state);
+    return { success: true, roots: state.roots, active: state.active, sessionId: currentSessionId };
+  } catch (err) { return { error: err.message }; }
 });
 
 
@@ -1178,6 +1280,15 @@ if (process.env.SEEK_RELAY_URL) {
     trustedDevicesFile: TRUSTED_DEVICES_FILE,
   });
 }
+
+
+
+
+
+
+
+
+
 
 
 

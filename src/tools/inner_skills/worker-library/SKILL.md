@@ -29,7 +29,7 @@ Manager 拆解任务后可直接按模板 `spawn_worker`，不必每次重写提
    → name 可省略，省略时用员工默认名字（如"小码"）；也可显式传 name 自定义
 4. 精细路径（可选）：get_worker(code-implementer) 拿到模板后
    手动 spawn_agent(mode: "mission", name, tools, systemPrompt, contextAndTask)
-5. agent_task 派活 → agent_query 监控 → a_submission 验收
+5. agent_task 派活 → a_submission 验收 → 需要时 agent_query(name, question) 向员工提问
 ```
 
 ### 自定义员工
@@ -37,4 +37,5 @@ Manager 拆解任务后可直接按模板 `spawn_worker`，不必每次重写提
 在 `src/prompts/workers/` 下新建 `<id>.md`，复制现有文件结构
 （`## 名字` / `## 性格` + `----SYSTEM_PROMPT_START/END----` + `----TOOLS_START/END----`），
 工具会自动扫描到，无需改代码。
+
 

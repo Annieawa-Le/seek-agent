@@ -10,7 +10,6 @@ import { MessageList } from '@/components/MessageList.tsx';
 import { ModePicker } from '@/components/ModePicker.tsx';
 import { InputBar } from '@/components/InputBar.tsx';
 import { RightPanel } from '@/components/RightPanel.tsx';
-import { StatusBar } from '@/components/StatusBar.tsx';
 import { RemoteStatusBar } from '@/components/RemoteStatusBar.tsx';
 import type { AgentMessage, SessionInfo, SidebarRuntimeData } from '@/types/index.ts';
 import type { TabItem } from '@/components/Tabs.tsx';
@@ -430,6 +429,7 @@ export function App() {
                 )}
                 <InputBar
                   processing={status.processing}
+                  ctxTokens={status.ctxTokens}
                   sessionKey={currentSessionId}
                   kbEnabled={kbEnabled}
                   thinking={status.thinking}
@@ -447,15 +447,13 @@ export function App() {
           </div>
           <RightPanel runtimeData={runtimeData} open={rightOpen} />
         </div>
-        <StatusBar
-          status={status}
-          toolCallTotal={status.toolCallTotal}
-          totalMessages={panelState.current.totalMessages}
-        />
       </div>
     </div>
   );
 }
+
+
+
 
 
 

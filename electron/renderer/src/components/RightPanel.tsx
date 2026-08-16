@@ -43,8 +43,10 @@ function handleNodeDragStart(e: React.DragEvent, node: FileTreeNode) {
     'white-space: nowrap',
   ].join(';');
   const icon = document.createElement('span');
-  icon.style.cssText = 'font-size: 15px; line-height: 1; flex-shrink: 0;';
-  icon.textContent = node.type === 'folder' ? '📁' : '📄';
+  icon.style.cssText = 'font-size: 15px; line-height: 1; flex-shrink: 0; display: inline-flex;';
+  icon.innerHTML = node.type === 'folder'
+    ? '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>'
+    : '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
   const label = document.createElement('span');
   label.style.cssText = 'overflow: hidden; text-overflow: ellipsis;';
   dragImageEl = img;
@@ -146,8 +148,16 @@ function FolderNode({ node }: { node: FileTreeNode }) {
 
   return <>
     <div className="tree-item folder" onClick={toggle} draggable onDragStart={e => handleNodeDragStart(e, node)} title={node.path}>
-      <span className="tree-toggle">{expanded ? '▼' : '▶'}</span>
-      <span className="tree-folder-icon">📁</span>
+      <span className={`tree-toggle${expanded ? ' expanded' : ''}`}>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </span>
+      <span className="tree-folder-icon">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        </svg>
+      </span>
       <span className="tree-name">{node.name}</span>
     </div>
     {expanded && children && <div className="tree-children"><TreeNodes nodes={children} /></div>}
@@ -350,7 +360,25 @@ function CollabContent({ runtimeData }: { runtimeData: SidebarRuntimeData | null
               <div key={`${entry.ts}-${i}`} className={`collab-log-item ${entry.direction === 'reply' ? 'reply' : 'out'}`}>
                 <div className="collab-log-head">
                   <span className="collab-log-arrow">
-                    {entry.direction === 'out' ? `${entry.fromName || entry.from} → ${entry.toName || entry.to}` : `${entry.fromName || entry.from} ↺ ${entry.toName || entry.to}`}
+                    {entry.direction === 'out' ? (
+                      <>
+                        <span className="collab-log-dir-name">{entry.fromName || entry.from}</span>
+                        <svg className="collab-log-dir-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="5" y1="12" x2="19" y2="12" />
+                          <polyline points="12 5 19 12 12 19" />
+                        </svg>
+                        <span className="collab-log-dir-name">{entry.toName || entry.to}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="collab-log-dir-name">{entry.fromName || entry.from}</span>
+                        <svg className="collab-log-dir-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="1 4 1 10 7 10" />
+                          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                        </svg>
+                        <span className="collab-log-dir-name">{entry.toName || entry.to}</span>
+                      </>
+                    )}
                   </span>
                   <span className="collab-log-time">{entry.time}</span>
                 </div>
@@ -444,6 +472,9 @@ function ChatView({ peer, peerType, thread, streams, api, onBack }: {
     </div>
   );
 }
+
+
+
 
 
 

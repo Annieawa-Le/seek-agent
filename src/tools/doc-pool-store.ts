@@ -93,12 +93,8 @@ export function normKey(p: string): string {
 }
 
 /** 从工具调用输入中提取目标文件路径 */
-export function extractFilePath(toolName: string, input: unknown): string | undefined {
+export function extractFilePath(_toolName: string, input: unknown): string | undefined {
   const obj = (input ?? {}) as Record<string, unknown>;
-  // create_file 特例：filePath 是目录 + fileName 是文件名，需先合并（避免通用路径提前返回目录）
-  if (toolName === 'create_file' && typeof obj.filePath === 'string' && typeof obj.fileName === 'string' && obj.fileName) {
-    return `${obj.filePath.replace(/[\\/]+$/, '')}/${obj.fileName}`;
-  }
   const p = obj.filePath ?? obj.file ?? obj.path;
   if (typeof p === 'string' && p.trim()) return p.trim();
   return undefined;
@@ -393,6 +389,8 @@ export class DocPoolStore {
 
 /** 全局单例（进程内共享，与 subagentContextStore 同生命周期） */
 export const docPoolStore = new DocPoolStore();
+
+
 
 
 

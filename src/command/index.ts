@@ -16,6 +16,7 @@ import { ExitCommand } from './commands/exit.command';
 import { ClearCommand } from './commands/clear.command';
 import { WorkdirCommand } from './commands/workdir.command';
 import { WorkdirGlobalCommand } from './commands/workdir-global.command';
+import { WorkdirRootsCommand } from './commands/workdir-roots.command';
 import { createHelpCommand } from './commands/help.command';
 import { SaveSessionCommand } from './commands/savesession.command';
 import { LoadSessionCommand } from './commands/loadsession.command';
@@ -34,6 +35,7 @@ export function createCommandRegistry(): CommandRegistry {
     .register(WithdrawCommand)
     .register(WorkdirCommand)
     .register(WorkdirGlobalCommand)
+    .register(WorkdirRootsCommand)
     // help 依赖 registry，放在最后注册
     .register(createHelpCommand(registry))
     .register(SaveSessionCommand)
@@ -42,6 +44,8 @@ export function createCommandRegistry(): CommandRegistry {
 
   return registry;
 }
+
+
 
 
 

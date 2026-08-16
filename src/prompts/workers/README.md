@@ -26,7 +26,7 @@ Manager 模式在拆解任务后，可以从这里挑选预制员工直接 `spaw
    从员工库直接创建 mission 子模型，身份（名字+性格）、systemPrompt 与 tools 自动装配
    （只接受 mission）；`name` 可省略，省略时用员工默认名字，也可显式传 `name` 自定义
 3. **派活**：`agent_task(name: "<上面创建的名字>", task: "<任务描述>")`
-4. **监控验收**：`agent_query` 查状态，`a_submission` 提交后对照验收标准检查，不合格重新派发
+4. **监控验收**：`a_submission` 提交后对照验收标准检查，不合格重新派发；需要时用 `agent_query(name, question)` 向员工提问确认细节
 5. **补充**：需要精细控制时用 `get_worker` 拿模板后手动 `spawn_agent`；工具组/提示词可按任务增删，多员工可并行派发
 
 ## 如何新增员工
@@ -34,5 +34,6 @@ Manager 模式在拆解任务后，可以从这里挑选预制员工直接 `spaw
 1. 在 `src/prompts/workers/` 下新建 `<id>.md`，复制现有文件结构（`## 名字` / `## 性格` + `----SYSTEM_PROMPT_START/END----` + `----TOOLS_START/END----`）
 2. 在 README 清单中补一行
 3. `list_workers` / `get_worker` / `spawn_worker` 会自动扫描目录，无需改代码
+
 
 

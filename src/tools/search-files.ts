@@ -112,6 +112,34 @@ function lineMatches(line: string, content: string, useRegex: boolean, compiled?
   return line.toLowerCase().includes(content.toLowerCase());
 }
 
+/** 匹配行截断上下文长度：匹配点前/后各保留的字符数 */
+const MATCH_CONTEXT = 200;
+
+/**
+ * 匹配行过长时截断到匹配点前/后各 200 字符（带省略号），避免超长行撑爆输出。
+ * 匹配点：正则取第一个匹配的起始下标；普通关键词取包含匹配的起始下标；
+ * 通配符模式无法精确定位时回退到行首。
+ */
+function truncateMatchLine(
+  line: string,
+  content: string,
+  useRegex: boolean,
+  compiled?: RegExp,
+): string {
+  if (line.length <= MATCH_CONTEXT * 2 + 1) return line;
+  let idx = 0;
+  if (useRegex) {
+    const pattern = compiled ?? compilePattern(content);
+    idx = pattern.exec(line)?.index ?? 0;
+  } else {
+    const found = line.toLowerCase().indexOf(content.toLowerCase());
+    if (found >= 0) idx = found;
+  }
+  const start = Math.max(0, idx - MATCH_CONTEXT);
+  const end = Math.min(line.length, idx + MATCH_CONTEXT);
+  return (start > 0 ? '…' : '') + line.slice(start, end) + (end < line.length ? '…' : '');
+}
+
 /** 读取文本文件；若头部含 NUL 字节视为二进制，返回 null */
 async function readTextIfNotBinary(filePath: string): Promise<string | null> {
   const fd = await fs.open(filePath, 'r');
@@ -290,7 +318,7 @@ export const searchContent = tool({
           let fileHits = 0;
           for (let i = 0; i < lines.length; i++) {
             if (lineMatches(lines[i], content, useRegex, compiled)) {
-              matches.push({ lineNum: i + 1, line: lines[i], filePath: f });
+              matches.push({ lineNum: i + 1, line: truncateMatchLine(lines[i], content, useRegex, compiled), filePath: f });
               fileHits++;
               if (fileHits >= MAX_LINES_PER_FILE || matches.length >= maxResults) {
                 truncated = true;
@@ -323,7 +351,7 @@ export const searchContent = tool({
           const pattern = compilePattern(content);
           for (let i = 0; i < lines.length; i++) {
             if (pattern.test(lines[i])) {
-              matches.push({ lineNum: i + 1, line: lines[i] });
+              matches.push({ lineNum: i + 1, line: truncateMatchLine(lines[i], content, true, pattern) });
               if (matches.length >= maxResults) { truncated = true; break; }
             }
           }
@@ -335,7 +363,7 @@ export const searchContent = tool({
       } else {
         for (let i = 0; i < lines.length; i++) {
           if (lineMatches(lines[i], content, false)) {
-            matches.push({ lineNum: i + 1, line: lines[i] });
+            matches.push({ lineNum: i + 1, line: truncateMatchLine(lines[i], content, false) });
             if (matches.length >= maxResults) { truncated = true; break; }
           }
         }
@@ -357,5 +385,7 @@ export const searchContent = tool({
     }
   },
 });
+
+
 
 

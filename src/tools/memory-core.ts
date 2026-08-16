@@ -86,6 +86,12 @@ function tokenize(text: string): string[] {
 // 工作记忆（短期）— WeightedLRU 淘汰
 // ═════════════════════════════════════════════════════
 
+// 惰性清理阈值：
+//   - 已沉淀到长期记忆的条目（dreamed=true）48h 未碰即清除——短期记忆让位给当前焦点；
+//   - 未沉淀但 7 天未碰的条目也不再算当前焦点，一并清除。
+const DREAMED_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+const STALE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 export class WorkingMemoryStore {
   private items = new Map<number, WorkingMemoryItem>();
   private nextId = 1;
@@ -130,6 +136,7 @@ export class WorkingMemoryStore {
   }
 
   list(): WorkingMemoryItem[] {
+    this.prune();
     return [...this.items.values()].sort((a, b) => b.lastAccess - a.lastAccess);
   }
 
@@ -145,6 +152,7 @@ export class WorkingMemoryStore {
       const it = this.items.get(id);
       if (it && !it.dreamed) {
         it.dreamed = true;
+        it.weight = 0.1; // 已沉淀：降为瞬时权重，让其在短期记忆中快速自然淘汰
         changed = true;
       }
     }
@@ -156,6 +164,7 @@ export class WorkingMemoryStore {
   }
 
   add(content: string, weight: number): WorkingMemoryItem {
+    this.prune();
     const item: WorkingMemoryItem = {
       id: this.nextId++,
       content,
@@ -170,6 +179,7 @@ export class WorkingMemoryStore {
   }
 
   update(id: number, content?: string, weight?: number): boolean {
+    this.prune();
     const it = this.items.get(id);
     if (!it) return false;
     if (content !== undefined && content !== null) it.content = content;
@@ -180,6 +190,7 @@ export class WorkingMemoryStore {
   }
 
   touch(id: number): boolean {
+    this.prune();
     const it = this.items.get(id);
     if (!it) return false;
     it.lastAccess = Date.now();
@@ -217,6 +228,27 @@ export class WorkingMemoryStore {
       }
     }
     if (toEvict !== null) this.items.delete(toEvict);
+  }
+
+  /** 惰性清理：超龄条目移除（list/touch/update/add 入口触发，无变化不写盘） */
+  private prune(): void {
+    const now = Date.now();
+    let changed = false;
+    for (const [id, it] of this.items) {
+      const age = now - it.lastAccess;
+      if ((it.dreamed && age > DREAMED_MAX_AGE_MS) || (!it.dreamed && age > STALE_MAX_AGE_MS)) {
+        this.items.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) this.save();
+  }
+
+  /** 重新从当前活跃工作区的文件加载（工作区切换后调用） */
+  reload(): void {
+    this.items.clear();
+    this.nextId = 1;
+    this.load();
   }
 }
 
@@ -345,11 +377,26 @@ export class LongTermMemoryStore {
     this.nextId = 1;
     this.save();
   }
+
+  /** 重新从当前活跃工作区的文件加载（工作区切换后调用） */
+  reload(): void {
+    this.items = [];
+    this.nextId = 1;
+    this.load();
+  }
 }
 
 // ── 模块级单例 ──
 export const workingMemory = new WorkingMemoryStore();
 export const longTermMemory = new LongTermMemoryStore();
+
+/** 工作区切换后同步重载：按当前活跃根重新加载工作/长期记忆 */
+export function syncMemoryToWorkspace(): void {
+  workingMemory.reload();
+  longTermMemory.reload();
+}
+
+
 
 
 

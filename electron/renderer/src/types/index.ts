@@ -1,18 +1,30 @@
+/** 工作区状态：多根挂载 + 当前活跃根 */
+export interface WorkdirState {
+  roots: string[];
+  active: string;
+}
+
 /** Electron API 桥接类型 */
 export interface ElectronAPI {
   onAgentMessage: (callback: (msg: AgentMessage) => void) => () => void;
   getAgentStatus: () => Promise<{ connected: boolean }>;
   onAgentStatus: (callback: (status: AgentStatus) => void) => () => void;
   onAgentStderr: (callback: (text: string) => void) => () => void;
-  onWorkdirChanged: (callback: (path: string) => void) => () => void;
+  onWorkdirChanged: (callback: (state: WorkdirState) => void) => () => void;
   /** 监听会话 Agent 后台拉起失败（session:new / session:switch 异步化后的兜底） */
   onSessionError: (callback: (data: { sessionId: string; error: string }) => void) => () => void;
   sendInput: (content: string) => number;
   sendCommand: (cmd: string) => number;
   abort: () => void;
   restart: () => void;
-  getWorkdir: () => Promise<string>;
-  setWorkdir: (dirPath: string) => Promise<{ success?: boolean; error?: string; path?: string }>;
+  getWorkdir: () => Promise<WorkdirState>;
+  setWorkdir: (dirPath: string) => Promise<{ success?: boolean; error?: string; path?: string; roots?: string[]; active?: string }>;
+  /** 整体设置多工作区根列表（{ roots, active? }） */
+  setWorkspaceRoots: (payload: { roots: string[]; active?: string }) => Promise<{ success?: boolean; error?: string; roots?: string[]; active?: string }>;
+  /** 追加一个工作区根 */
+  addWorkspaceRoot: (path: string) => Promise<{ success?: boolean; error?: string; roots?: string[]; active?: string }>;
+  /** 移除一个工作区根 */
+  removeWorkspaceRoot: (path: string) => Promise<{ success?: boolean; error?: string; roots?: string[]; active?: string }>;
   selectFolder: () => Promise<{ canceled: boolean; path?: string; error?: string }>;
   /** 打开系统对话框选择附件文件（支持多选） */
   openFileDialog: () => Promise<{ canceled: boolean; files: string[]; error?: string }>;
@@ -280,6 +292,8 @@ export interface RemoteDeviceInfo {
   /** 信任时间（ISO 字符串） */
   trustedAt?: string | null;
 }
+
+
 
 
 

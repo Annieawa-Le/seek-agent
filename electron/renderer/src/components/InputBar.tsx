@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { isElectron } from '@/hooks/useElectronAPI.ts';
+import { FolderSelector } from './FolderSelector.tsx';
 
 interface Attachment {
   name: string;
@@ -10,6 +11,8 @@ interface Attachment {
 
 interface Props {
   processing: boolean;
+  /** 上下文 Token 数（原底部状态栏迁移而来，灰色小字显示在输入框下方） */
+  ctxTokens: number;
   /** 当前会话 id：输入栏草稿（文本/附件/技能选择）按会话独立保存与恢复 */
   sessionKey: string;
   thinking: boolean;
@@ -59,13 +62,44 @@ function inferSkillLabel(name: string, description: string): string {
   return label;
 }
 
+/** 运行计时显示：毫秒 → 「N秒 / N分N秒」 */
+function formatElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}秒`;
+  const m = Math.floor(s / 60);
+  return s % 60 > 0 ? `${m}分${s % 60}秒` : `${m}分`;
+}
+
 export function InputBar({
-  sessionKey, processing, thinking, kbEnabled, smartSearchEnabled, thinkingEnabled, skillsList,
+  sessionKey, processing, ctxTokens, thinking, kbEnabled, smartSearchEnabled, thinkingEnabled, skillsList,
   onSend, onAbort, onToggleKb, onToggleSmartSearch, onToggleThinking,
 }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // ── 运行计时：从上次发送到现在 ──
+  const [elapsed, setElapsed] = useState(0);
+  const [hasRun, setHasRun] = useState(false);
+  const startAtRef = useRef<number | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevProcessingRef = useRef(processing);
+
+  const stopRunTimer = useCallback(() => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+  }, []);
+
+  // processing 由 true → false（本轮回复完成）：停表并定格最终时长
+  useEffect(() => {
+    if (prevProcessingRef.current && !processing && startAtRef.current !== null) {
+      setElapsed(Date.now() - startAtRef.current);
+      stopRunTimer();
+    }
+    prevProcessingRef.current = processing;
+  }, [processing, stopRunTimer]);
+
+  // 卸载时清理计时器
+  useEffect(() => () => stopRunTimer(), [stopRunTimer]);
 
   // 输入栏草稿按会话隔离：sessionKey → { value, attachments, selectedSkills }
   const draftsRef = useRef<Map<string, { value: string; attachments: Attachment[]; selectedSkills: Set<string> }>>(new Map());
@@ -254,10 +288,18 @@ export function InputBar({
     }
 
     onSend(text);
+    // 开始/重置运行计时（从本次发送起算）
+    setHasRun(true);
+    startAtRef.current = Date.now();
+    setElapsed(0);
+    stopRunTimer();
+    timerRef.current = setInterval(() => {
+      if (startAtRef.current !== null) setElapsed(Date.now() - startAtRef.current);
+    }, 1000);
     setValue('');
     setAttachments([]);
     setSkillsOpen(false);
-  }, [value, onSend, hasSelectedSkills, selectedSkills, attachments]);
+  }, [value, onSend, hasSelectedSkills, selectedSkills, attachments, stopRunTimer]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -325,6 +367,7 @@ export function InputBar({
             </div>
             <div className="input-toolbar-spacer" />
             <div className="input-actions">
+              <FolderSelector />
               <button
                 className="action-btn"
                 title="添加附件"
@@ -359,7 +402,11 @@ export function InputBar({
               {attachments.map(a => (
                 <span key={a.path} className="attachment-chip">
                   {a.type === 'folder' ? (
-                    <span className="attachment-chip-icon attachment-chip-folder">📁</span>
+                    <span className="attachment-chip-icon attachment-chip-folder">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </span>
                   ) : (
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="attachment-chip-icon">
                       <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
@@ -390,8 +437,12 @@ export function InputBar({
               onChange={e => setValue(e.target.value)}
               onKeyDown={handleKeyDown}
             />
-            {thinking && <div className="thinking-indicator" title="AI 思考中…">⠋</div>}
+            {thinking && <div className="thinking-indicator" title="AI 思考中…" />}
           </div>
+        </div>
+        <div className="input-meta">
+          {ctxTokens > 0 && <span className="input-meta-stat">Token {ctxTokens}</span>}
+          {hasRun && <span className="input-meta-stat">运行 {formatElapsed(elapsed)}</span>}
         </div>
       </div>
 
@@ -434,6 +485,20 @@ export function InputBar({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

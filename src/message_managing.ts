@@ -99,7 +99,8 @@ export function createMessageHook(options?: ContextManagerOptions): MessageHook 
     // ──────── 第零步：注入工作记忆（双层记忆的短期层） ────────
     // 工作记忆有内容时注入为一条 [工作记忆] 标记的 user 消息；
     // 已注入过则原地更新内容，让模型在调用 memory_* 工具后能看到最新状态。
-    const wmItems = workingMemory.list();
+    // 只注入最近访问的 top 10，避免历史决策档案淹没当前焦点
+    const wmItems = workingMemory.list().slice(0, 10);
     if (wmItems.length > 0) {
       const wmContent = [
         '[工作记忆] 当前对话焦点与任务状态（可通过 memory_add / memory_update / memory_touch / memory_remove 维护，权重越高存活越久）：',
@@ -207,6 +208,7 @@ export function createMessageHook(options?: ContextManagerOptions): MessageHook 
       .filter(Boolean) as ModelMessage[];
   };
 }
+
 
 
 

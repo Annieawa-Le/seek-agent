@@ -33,7 +33,9 @@ const translations: Record<string, {
     category: 'read',
     callLabel: (args) => {
       const name = (args?.name ?? '(?)') as string;
-      return `查询子模型: ${name}`;
+      const question = (args?.question ?? '') as string;
+      const short = question.length > 30 ? question.slice(0, 27) + '...' : question;
+      return `向子模型提问: ${name} (${short})`;
     },
     collapse: 'single',
   },
@@ -67,4 +69,5 @@ const translations: Record<string, {
   },
 };
 export default translations;
+
 

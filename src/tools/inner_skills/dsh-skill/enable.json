@@ -3,3 +3,4 @@
   "always_detectable": true,
   "description": "dsh skill 兼容层：扫描并加载 dsh（DeepSeek Harness）规范的 SKILL.md（YAML frontmatter + 正文），提供目录查询与按需加载工具。"
 }
+

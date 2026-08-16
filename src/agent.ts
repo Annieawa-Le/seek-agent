@@ -10,7 +10,7 @@ import * as fs from 'node:fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import path from 'node:path';
-import { getWorkspaceRoot, getSessionsRoot, resolvePath } from './workdir';
+import { getWorkspaceRoot, getWorkspaceRoots, getSessionsRoot, resolvePath } from './workdir';
 import { deskEditManager, DESK_EDIT_TOOLS } from './tools/desk-edit';
 import { setAlarmListener } from './tools/alarm';
 import { getModel, setSystemPrompt } from './model-provider';
@@ -209,9 +209,12 @@ export class CLIAAgent {
       ['桌面/上下文', ['desk_add', 'desk_list', 'desk_remove', 'desk_clear', 'memory_focus', 'memory_shorten']],
     ];
     const known = new Set(coreGroups.flatMap(([, t]) => t));
-    const groupLines = coreGroups
-      .map(([label, t]) => `  ${label}: ${t.filter((n) => n in tools).join(', ')}`)
-      .filter((l) => l.trim().length > 0);
+    // 核心工具按组压缩为计数概览（完整定义见各工具 schema）
+    const coreCounts = coreGroups
+      .map(([label, t]) => [label, t.filter((n) => n in tools).length] as const)
+      .filter(([, c]) => c > 0)
+      .map(([label, c]) => `${label}(${c})`)
+      .join('、');
 
     // 技能工具按前缀聚合（数量统计）
     const skillGroups: [RegExp, string][] = [
@@ -244,10 +247,8 @@ export class CLIAAgent {
       '当前处于【思考模式】。在回答任何问题之前，你必须先在 <thinking> 标签内完整展开推理过程（选择合适的工具，分步分析问题、评估可能的方案、检查潜在错误），然后再给出最终答案。思考内容写在 <thinking>...</thinking> 中，最终答案在标签外输出。禁止在最终答案中重复思考过程。',
       '',
       '工作流程：先理解后修改，先计划后执行，每步可回溯。接到任务先阅读相关代码，多步任务用 create_todo 跟踪进度，每轮修改后编译验证。',
+      `可用工具：核心 ${coreCounts}${skillLine ? '；技能 ' + skillLine : ''}（完整定义见各工具 schema）`,
       '',
-      `可用工具（核心）：`,
-      ...groupLines,
-      skillLine ? `  技能工具：${skillLine}（完整定义见各工具 schema）` : '',
       '',
       '记忆系统：每轮自动注入 [工作记忆]（当前焦点），可用 memory_add/update/touch/remove 维护；跨会话规则与约定用 memory_remember 沉淀，新任务开始前先用 memory_recall 检索相关历史约定。',
     ].join('\n');
@@ -349,9 +350,19 @@ export class CLIAAgent {
       }
     }
 
-
-    // ── 当前工作目录 ──
-    parts.push(`> 当前工作目录：${getWorkspaceRoot()}`);
+    // ── 当前工作目录（含已挂载的多工作区列表，让模型知道可访问的根） ──
+    const activeRoot = getWorkspaceRoot();
+    const mountedRoots = getWorkspaceRoots();
+    if (mountedRoots.length > 1) {
+      parts.push(
+        `# 可用的工作区\n` +
+        `> 当前工作目录：${activeRoot}\n` +
+        `> 已挂载工作区（沙箱放行，均可读写访问）：\n` +
+        mountedRoots.map(r => `>   - ${r}${r === activeRoot ? '（活跃）' : ''}`).join('\n')
+      );
+    } else {
+      parts.push(`# 可用的工作区\n` +`> 当前工作目录：${activeRoot}`);
+    }
 
     // ── MCP Server 指令注入 ──
     const mcpManager = getMcpManager();
@@ -1485,7 +1496,8 @@ export class CLIAAgent {
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
       title: this.sessionTitle,
-      cwd: process.cwd(),
+      cwd: getWorkspaceRoot(),
+      workspace: { roots: getWorkspaceRoots(), active: getWorkspaceRoot() }, // 多工作区状态（重启恢复用）
       mode: getActiveModeNames(), // 模式随会话持久化（切回时恢复）
       agentMessages: messages,
     };
@@ -1594,6 +1606,11 @@ export class CLIAAgent {
     return this.sessionId;
   }
 }
+
+
+
+
+
 
 
 

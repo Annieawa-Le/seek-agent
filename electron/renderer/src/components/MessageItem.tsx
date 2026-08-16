@@ -204,11 +204,13 @@ const ToolResultContent = memo(function ToolResultContent({ entry, lines }: { en
         <div className="tool-result-scroll-container">{content}</div>
         <button className="tool-result-toggle" onClick={(e) => {
           const wrap = (e.target as HTMLElement).closest('.tool-result-scroll-wrap')!;
-          const isCollapsed = wrap.classList.contains('collapsed');
           wrap.classList.toggle('collapsed');
           wrap.classList.toggle('expanded');
-          (e.target as HTMLElement).textContent = isCollapsed ? '▲' : '▼';
-        }}>▼</button>
+        }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
       </div>
     );
   }
@@ -299,6 +301,7 @@ const UserMessage = memo(function UserMessage({ content }: { content: string }) 
     </div>
   );
 });
+
 
 
 
