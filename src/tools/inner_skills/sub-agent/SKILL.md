@@ -88,7 +88,7 @@ instructor 的 system prompt 模板在 `src/prompts/INSTRUCTOR.md`，可直接�
 ## 注意事项
 
 - 子模型持续运行直到调用 `a_submission` 提交结果（主动 `agent_fire` 销毁时立即终止）
-- 子模型的工具调用直接使用主系统全局注册的工具（`add_patch` / `del_patch` / `modify_patch` 等）
+- 子模型的工具调用直接使用主系统全局注册的工具（`add_patch` / `del_patch` / `replace_str` 等）
 - 子模型的提交在主模型空闲时才会注入（排队机制）
 - 退出程序时自动销毁所有子模型
 

@@ -6,7 +6,7 @@
  * 注入新子模型的初始上下文，实现「一组员工共享同一批背景文件」。
  *
  * 读阶段语义：从子模型第一条工具调用开始，从前往后扫描，直到遇到第一个写入工具
- * （add_patch / del_patch / modify_patch / create_file / replace_file / wrap_by 等）
+ * （add_patch / del_patch / replace_str / create_file / replace_file / wrap_by 等）
  * 或 TODO 工具（create_todo 等）为止——之前的读取工具调用（read_file / read_lines /
  * scan_file 等）都被记录。之后若有写入工具修改了池中的文件，该文件的片段会被移除。
  *
@@ -48,9 +48,9 @@ const READ_TOOLS = new Set([
 
 /** 写入工具（结束读阶段 + 其文件从池中移除） */
 const WRITE_TOOLS = new Set([
-  'add_patch', 'del_patch', 'modify_patch', 'wrap_by', 'wrap_by_label',
-  'create_file', 'replace_file',
-  'explorer-add-patch', 'explorer-del-patch', 'explorer-modify-patch',
+  'add_patch', 'del_patch', 'wrap_by', 'wrap_by_label',
+  'create_file', 'replace_file', 'replace_str',
+  'explorer-add-patch', 'explorer-del-patch',
   'explorer-create-file', 'explorer-replace-file',
 ]);
 
@@ -389,6 +389,7 @@ export class DocPoolStore {
 
 /** 全局单例（进程内共享，与 subagentContextStore 同生命周期） */
 export const docPoolStore = new DocPoolStore();
+
 
 
 

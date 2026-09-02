@@ -4,7 +4,7 @@
  */
 import * as fs from 'node:fs';
 import { precheckReplacement, formatSyntaxErrors, checkSyntax } from '../src/tools/syntax-validator.js';
-import { modifyPatch } from '../src/tools/file-manipulation.js';
+import { addPatch } from '../src/tools/file-manipulation.js';
 import { wrapByLabel } from '../src/tools/inner_skills/code-edit-detector/scripts/wrap-by-label.js';
 import { findMatchingLabel } from '../src/tools/inner_skills/code-edit-detector/scripts/find-matching-label.js';
 
@@ -115,21 +115,21 @@ try {
   const f4 = JSON.parse(await findMatchingLabel.execute({ filePath: target, lineNumber: 7 } as any));
   check('6d 自动检测标签', f4.tagName === 'span' && f4.closeLine === 7, JSON.stringify(f4));
 
-  // ── 7. 集成：modify_patch 提交不平衡替换块 → 报错含预检提示 ──
+  // ── 7. 集成：add_patch 提交不平衡插入块 → 报错含预检提示 ──
   const badReplace = [
     '      {show ? (',
     '        <span>yes</span>',
     '      ) : (',
     '        <span>no</span>',
-    '      )', // 缺闭合 } → 替换块自身不平衡
+    '      )', // 缺闭合 } → 插入块自身不平衡
   ];
-  const m1 = await modifyPatch.execute({ filePath: target, startLine: 6, endLine: 10, replaceLines: badReplace } as any);
+  const m1 = await addPatch.execute({ filePath: target, lineIndex: 5, Lines: badReplace } as any);
   const m1str = String(m1);
-  check('7a 不平衡替换块被拦截', m1str.includes('插入未成功'), m1str.slice(0, 200));
+  check('7a 不平衡插入块被拦截', m1str.includes('插入未成功'), m1str.slice(0, 200));
   check('7b 报错含替换块预检', m1str.includes('替换块结构预检'), m1str.slice(0, 300));
   check('7c 文件未被写入', fs.readFileSync(target, 'utf8') === FIXTURE.join('\n'), fs.readFileSync(target, 'utf8').slice(-120));
 
-  // 平衡的替换块应成功
+  // 平衡的插入块应成功
   const goodReplace = [
     '      {show ? (',
     '        <b>yes</b>',
@@ -137,8 +137,8 @@ try {
     '        <b>no</b>',
     '      )}',
   ];
-  const m2 = await modifyPatch.execute({ filePath: target, startLine: 6, endLine: 10, replaceLines: goodReplace } as any);
-  check('7d 平衡替换块成功', String(m2).includes('[MODIFY]'), String(m2).slice(0, 100));
+  const m2 = await addPatch.execute({ filePath: target, lineIndex: 5, Lines: goodReplace } as any);
+  check('7d 平衡插入块成功', String(m2).includes('[ADD]'), String(m2).slice(0, 100));
   check('7e 内容已更新', fs.readFileSync(target, 'utf8').includes('<b>yes</b>'), fs.readFileSync(target, 'utf8'));
 
   // 8. 复现截图场景：模拟"多带一个 </div>"的经典错误
@@ -151,15 +151,16 @@ try {
     '      )}',
   ];
   fs.writeFileSync(target, FIXTURE.join('\n'), 'utf8');
-  const m3 = await modifyPatch.execute({ filePath: target, startLine: 4, endLine: 10, replaceLines: dupDivReplace } as any);
+  const m3 = await addPatch.execute({ filePath: target, lineIndex: 3, Lines: dupDivReplace } as any);
   const m3str = String(m3);
   check('8a 重复 div 被预检发现', m3str.includes('多余的闭合标签') || m3str.includes('未闭合的标签'), m3str.slice(0, 300));
-
 } finally {
   try { fs.unlinkSync(target); } catch { /* ignore */ }
   console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
   if (fail > 0) process.exit(1);
 }
+
+
 
 
 

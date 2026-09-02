@@ -31,11 +31,18 @@ const __dirname = dirname(__filename);
 /** 内部触发标记：子模型提交后空闲时触发新一轮（不显示为 user 消息） */
 const INTERNAL_SUBMISSION_TRIGGER = '__internal_submission__';
 
+/** 把 provider 上报的 token 数值规整为非负整数（非法值视为 undefined） */
+function normalizeToken(v: unknown): number | undefined {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return undefined;
+  return Math.round(v);
+}
+
 import { compactMessages, checkBudget, estimateMessagesTokens, slimOldestRound, type CompactionPlan } from './context-compactor';
 import { worklogStore } from './tools/worklog-store';
 import { subagentContextStore } from './tools/subagent-context-store';
 import { subagentRegistryStore } from './tools/subagent-registry-store';
 import { docPoolStore } from './tools/doc-pool-store';
+import { maybeDistillActions } from './tools/action-memory';
 // 类型定义
 // ═════════════════════════════════════════════════════
 
@@ -108,6 +115,8 @@ export class CLIAAgent {
   private hasInteracted = false;
   /** 本轮实际（非缓存）工具调用计数 */
   private roundActualToolCalls = 0;
+  /** 会话累计 token 用量四桶（dsh 风格：uncachedInput + output + cacheRead + cacheWrite，互斥不重复） */
+  private usageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   private afterRoundCollapseQueue: Array<{ msgIndex: number; toolName: string; args: Record<string, unknown> }> = [];
   /** 智能搜索模式开关 */
   private smartSearchEnabled = false;
@@ -292,6 +301,25 @@ export class CLIAAgent {
     const workflowPath = path.join(promptsDir, 'WORKFLOW.md');
     if (fs.existsSync(workflowPath)) {
       parts.push(fs.readFileSync(workflowPath, 'utf-8'));
+    }
+
+    // ── 工具使用引导（与工具 schema 分离的跨调用纪律，dsh 式 tool guidance band） ──
+    const guidancePath = path.join(promptsDir, 'TOOL_GUIDANCE.md');
+    if (fs.existsSync(guidancePath)) {
+      parts.push(fs.readFileSync(guidancePath, 'utf-8'));
+    }
+
+    // ── 行为记忆（ACTION.md，由行为模式整理师维护；无实质条目时跳过） ──
+    const actionPath = path.join(promptsDir, 'ACTION.md');
+    if (fs.existsSync(actionPath)) {
+      try {
+        const actionContent = fs.readFileSync(actionPath, 'utf-8').trim();
+        if (actionContent && !/当前记录的行为：\[空\]/.test(actionContent)) {
+          parts.push(actionContent);
+        }
+      } catch {
+        // 读取失败则静默跳过
+      }
     }
 
     // ── 加载可用的 inner_skills 列表（仅已启用的） ──
@@ -762,6 +790,7 @@ export class CLIAAgent {
           if (usage?.inputTokens) {
             this.maybeScheduleCompaction(usage.inputTokens);
           }
+          this.accumulateUsage(usage);
         } catch { /* usage 不可用时跳过 */ }
         if (finalResult.toolCalls) {
           const tl = await finalResult.toolCalls;
@@ -929,7 +958,7 @@ export class CLIAAgent {
       // ── 编辑模式拦截 ──
       if (deskEditManager.isActive()) {
         if (!DESK_EDIT_TOOLS.has(toolName)) {
-          const errMsg = `⛔ 当前处于桌面编辑模式，仅支持桌面编辑工具（desk_edit, desk_add_patch, desk_del_patch, desk_modify_patch, ctrl_z, desk_save, desk_cancel）。请先调用 desk_save 退出编辑模式。`;
+          const errMsg = `⛔ 当前处于桌面编辑模式，仅支持桌面编辑工具（desk_edit, line_cursor, line_paste, ctrl_z, desk_save, desk_cancel）。请先调用 desk_save 退出编辑模式。`;
           this.ui.addToolMessage(errMsg);
           this.messages.push({
             role: 'tool',
@@ -978,6 +1007,7 @@ export class CLIAAgent {
       this.roundActualToolCalls += 1;
       this.ui.setToolCallCount(this.roundActualToolCalls);
 
+
       // ── 提取 rawBulk 和 AI 文本 ──
       const extracted = extractBulk(execResult);
       const sout = String(extracted.text);
@@ -1010,6 +1040,9 @@ export class CLIAAgent {
           output: { type: 'text', value: sout },
         }],
       });
+
+      // ── 行为记忆采样：累计实际工具调用达窗口时后台蒸馏（fire-and-forget，不阻塞） ──
+      void maybeDistillActions(this.messages, () => this.reloadPrompt());
 
     }
 
@@ -1114,6 +1147,32 @@ export class CLIAAgent {
       .catch(() => {
         this.compactionInFlight = false;
       });
+  }
+
+  /**
+   * 把一次调用的 usage 折入会话累计四桶（互补互斥：uncached input / output / cacheRead / cacheWrite），
+   * 并按 dsh 的 cacheHitRate 公式计算缓存命中率后推送到 UI（输入框下方灰色小字）。
+   */
+  private accumulateUsage(usage: any): void {
+    if (!usage || typeof usage !== 'object') return;
+    const detail = usage.inputTokenDetails ?? usage.inputTokensDetails ?? {};
+    const cacheRead = normalizeToken(detail.cacheReadTokens) ?? 0;
+    const cacheWrite = normalizeToken(detail.cacheWriteTokens) ?? 0;
+    const noCache = normalizeToken(detail.noCacheTokens);
+    const billedInput = normalizeToken(usage.inputTokens) ?? 0;
+    // uncached 输入优先取 provider 明确上报的 noCache，缺失时由 billed 反推（clamp 到非负）
+    const uncachedInput = noCache ?? Math.max(0, billedInput - cacheRead - cacheWrite);
+    const output = normalizeToken(usage.outputTokens) ?? 0;
+
+    const t = this.usageTotals;
+    t.inputTokens += uncachedInput;
+    t.outputTokens += output;
+    t.cacheReadTokens += cacheRead;
+    t.cacheWriteTokens += cacheWrite;
+
+    const denominators = t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens;
+    const cacheHitRate = denominators > 0 ? Math.round((t.cacheReadTokens / denominators) * 100) : null;
+    this.ui.setUsageSummary({ ...t, cacheHitRate });
   }
 
   /**
@@ -1606,6 +1665,17 @@ export class CLIAAgent {
     return this.sessionId;
   }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

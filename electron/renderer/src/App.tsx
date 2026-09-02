@@ -430,6 +430,7 @@ export function App() {
                 <InputBar
                   processing={status.processing}
                   ctxTokens={status.ctxTokens}
+                  usageSummary={status.usageSummary}
                   sessionKey={currentSessionId}
                   kbEnabled={kbEnabled}
                   thinking={status.thinking}
@@ -451,6 +452,8 @@ export function App() {
     </div>
   );
 }
+
+
 
 
 

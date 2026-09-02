@@ -17,7 +17,6 @@
  *   replace_file    — 替换文件内容（diff 化 + 持久化）
  *   add_patch       — 在指定位置插入内容（diff 化 + 持久化）
  *   del_patch       — 删除指定行（diff 化 + 持久化）
- *   modify_patch    — 替换指定行内容（diff 化 + 持久化）
  *   undo_patch      — 撤销最近一次文件修改操作
  *   history_patch   — 查看操作历史
  */
@@ -169,52 +168,6 @@ function locateDelRanges(
   return { ok: true, merged, description };
 }
 
-/** modify_patch 定位：返回 1-based 闭区间（上下文模式下替换范围直接包含 pretext/endtext 本身） */
-function locateModifyRange(
-  fileLines: string[],
-  startLine: number,
-  endLine: number,
-  _replaceLines: string[],
-  pretext?: string[],
-  endtext?: string[],
-): LocateResult<{ actualStart: number; actualEnd: number; locateMessage: string }> {
-  let actualStart = startLine;
-  let actualEnd = endLine;
-  let locateMessage = '';
-
-  // 上下文定位模式：替换范围直接包含 pretext/endtext 全部上下文行
-  if ((pretext && pretext.length > 0) || (endtext && endtext.length > 0)) {
-    const locateResult = contextLocate(fileLines, pretext, endtext, startLine, endLine, 20);
-    if (!locateResult.matched) {
-      return {
-        ok: false,
-        error: '上下文匹配失败：' + locateResult.message,
-        message: '❌ 错误：上下文匹配失败：' + locateResult.message + '。请修正 pretext/endtext 后重试，或改用 startLine/endLine 行号模式。',
-      };
-    }
-    const pLen = pretext?.length ?? 0;
-    const eLen = endtext?.length ?? 0;
-    // pretext 直接纳入替换范围：从 pretext 首行开始
-    if (pLen > 0) actualStart = locateResult.pretextEndLine - pLen;
-    // endtext 直接纳入替换范围：到 endtext 末行结束
-    if (eLen > 0) actualEnd = locateResult.endtextStartLine + eLen - 1;
-    // 仅提供一种上下文时，替换该上下文自身所在范围
-    if (pLen > 0 && eLen === 0) actualEnd = locateResult.pretextEndLine - 1;
-    else if (eLen > 0 && pLen === 0) actualStart = locateResult.endtextStartLine - 1;
-
-    locateMessage = locateResult.message + '（替换范围已包含 pretext/endtext 上下文行）';
-
-    if (actualStart > actualEnd) {
-      return { ok: false, error: 'pretext 和 endtext 之间没有内容可替换', message: '❌ 错误：pretext 和 endtext 之间没有内容可替换' };
-    }
-  }
-
-  // 纯行号模式（不提供上下文时）：精准使用用户行号，不做自动修正
-  if (actualStart < 1) actualStart = 1;
-  if (actualEnd > fileLines.length) actualEnd = fileLines.length;
-  return { ok: true, actualStart, actualEnd, locateMessage };
-}
-
 // ============================================================
 // 1. create_file
 // ============================================================
@@ -256,8 +209,7 @@ export const createFile = tool({
 export const replaceFile = tool({
   description: `向一个文件中写入 fileContent。
   filePath 是文件的绝对路径或相对当前工作目录的路径，会替换原本的所有内容。
-  force 为 true 时跳过语法检查。注意：此工具直接执行，不会进入暂存区。
-  整文件覆写风险高：能局部修改（add_patch / del_patch / modify_patch）时优先局部修改，避免误伤无关代码。`,
+  force 为 true 时跳过语法检查。注意：此工具直接执行，不会进入暂存区。`,
   inputSchema: z.object({
     filePath: z.string().describe('文件的绝对路径或相对当前工作目录的路径'),
     fileContent: z.string().describe('要写入的文件内容'),
@@ -312,8 +264,7 @@ export const replaceFile = tool({
 // 3. add_patch
 // ============================================================
 export const addPatch = tool({
-  description: `在文件中插入内容。以 diff 为核心载体。支持 lineIndex 行号模式或 pretext/endtext 上下文匹配模式。
-  嵌套结构（JSX/HTML/三元表达式）优先小步插入，避免一次插入大段易破坏括号/标签平衡的代码。`,
+  description: `在文件中插入内容。以 diff 为核心载体，修改前语法检查、修改后持久化可用 undo_patch 撤销。支持 lineIndex 行号模式或 pretext/endtext 上下文匹配模式。`,
   inputSchema: z.object({
     filePath: z.string().describe('文件的绝对路径或相对当前工作目录的路径'),
     lineIndex: z.number().int().describe('在第 N 行之后插入（0=文件开头，N=第 N 行后，-1=末尾追加；行号从 1 开始）'),
@@ -387,8 +338,7 @@ export const addPatch = tool({
 // 4. del_patch
 // ============================================================
 export const delPatch = tool({
-  description: `直接从文件中删除指定行。以 diff 为核心载体。支持 lineIndex 行号模式或 pretext/endtext 上下文匹配模式。
-  删除范围越大越容易破坏嵌套结构：JSX/HTML 优先小步删除（一次删一层），删前可用 find_matching_brace / find_matching_label 确认边界。`,
+  description: `直接从文件中删除指定行。以 diff 为核心载体，修改前语法检查、修改后持久化可用 undo_patch 撤销。支持 lineIndex 行号模式或 pretext/endtext 上下文匹配模式。`,
   inputSchema: z.object({
     filePath: z.string().describe('文件的绝对路径或相对当前工作目录的路径'),
     lineIndex: z.array(z.array(z.number().int())).optional().describe('要删除的行范围，格式 [[start,end], ...]。与 pretext/endtext 二选一'),
@@ -449,82 +399,6 @@ export const delPatch = tool({
     if (record.diff) msg += '\n--- diff ---\n' + record.diff;
     msg += '\n💡 如需撤销：undo_patch()';
     return new ToolOutput({ type: 'patch', action: 'del', description, filePath: resolvedPath, diff: record.diff, undoId: record.meta.id }, msg);
-  },
-});
-
-// ============================================================
-// 5. modify_patch
-// ============================================================
-export const modifyPatch = tool({
-  description: `直接替换文件中指定行的内容。以 diff 为核心载体。支持行号模式或 pretext/endtext 上下文匹配模式（提供上下文时，替换范围包含 pretext/endtext 本身）。
-  小步编辑建议：替换范围越大越容易引入括号/标签不平衡（JSX/HTML 尤为明显）。嵌套结构优先拆小步：先精确修改单行，再小范围插入/删除；包裹结构用 wrap_by（花括号）或 wrap_by_label（HTML/JSX 标签）；改前可用 find_matching_brace / find_matching_label 确认括号/标签配对。`,
-  inputSchema: z.object({
-    filePath: z.string().describe('文件的绝对路径或相对当前工作目录的路径'),
-    startLine: z.number().int().describe('要替换的起始行号（从 1 开始，提供 pretext/endtext 时作为锚点）'),
-    endLine: z.number().int().describe('要替换的结束行号（从 1 开始，包含该行，提供 pretext/endtext 时作为锚点）'),
-    replaceLines: z.array(z.string()).describe('替换后的新内容行列表。替换块必须自身括号/标签平衡，末尾闭合符（}、)、</tag>）数量须与旧范围一致'),
-    pretext: z.array(z.string()).optional().describe('上下文前导行列表。匹配后，替换范围从 pretext 首行开始（包含 pretext 本身）。与 startLine/endLine 锚定配合使用'),
-    endtext: z.array(z.string()).optional().describe('上下文后续行列表。匹配后，替换范围到 endtext 末行结束（包含 endtext 本身）'),
-    force: z.boolean().optional().default(false).describe('跳过语法检查'),
-  }),
-  execute: async ({ filePath, startLine, endLine, replaceLines, pretext, endtext, force }) => {
-    if (!filePath?.trim()) return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: '文件路径为空' }, '❌ 错误：文件路径为空');
-    if (!Array.isArray(replaceLines)) return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: 'replaceLines 必须是字符串数组' }, '❌ 错误：replaceLines 必须是字符串数组');
-
-    const resolvedPath = resolvePath(filePath);
-
-    // ── 并行批次暂存模式：只定位 + 入暂存，不写盘 ──
-    if (patchBatch.isBatching(resolvedPath)) {
-      const batch = patchBatch.getBatch(resolvedPath)!;
-      const locate = locateModifyRange(batch.baseLines, startLine, endLine, replaceLines, pretext, endtext);
-      if (!locate.ok) {
-        return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: locate.error }, locate.message);
-      }
-      const seq = patchBatch.stage(resolvedPath, {
-        type: 'modify',
-        startLine: locate.actualStart,
-        endLine: locate.actualEnd,
-        lines: replaceLines,
-        description: '修改行 ' + locate.actualStart + '-' + locate.actualEnd + '（' + replaceLines.length + ' 行）',
-      });
-      const stagedMsg = `✅ [MODIFY 已暂存] 修改行 ${locate.actualStart}-${locate.actualEnd}（${replaceLines.length} 行）\n📄 文件：${resolvedPath}\n📦 同批第 ${seq} 个 patch：与同文件其他 patch 从后往前合并应用`;
-      return new ToolOutput({ type: 'patch', action: 'modify', description: '修改行 ' + locate.actualStart + '-' + locate.actualEnd + '（已暂存）', filePath: resolvedPath }, stagedMsg);
-    }
-
-    // ── 普通模式：直接写盘 ──
-    const { lines: fileLines, hasTrailingNewline, lineEnding } = await readFileLines(resolvedPath);
-    const locate = locateModifyRange(fileLines, startLine, endLine, replaceLines, pretext, endtext);
-    if (!locate.ok) {
-      return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: locate.error }, locate.message);
-    }
-    const { actualStart, actualEnd, locateMessage } = locate;
-
-    const newLines = [...fileLines.slice(0, actualStart - 1), ...replaceLines, ...fileLines.slice(actualEnd)];
-    const description = '修改行 ' + actualStart + '-' + actualEnd + '（' + replaceLines.length + ' 行）';
-
-    if (!force) {
-      const newContent = newLines.join(lineEnding) + (hasTrailingNewline ? lineEnding : '');
-      const checkResult = checkSyntax(resolvedPath, newContent);
-      if (!checkResult.ok) {
-        const replaceRange = { start: actualStart, end: actualStart + replaceLines.length - 1 };
-        const errMsg = formatSyntaxErrors(checkResult, {
-          oldLines: fileLines, newLines, replaceRange,
-          precheck: precheckReplacement(resolvedPath, replaceLines),
-        });
-        return new ToolOutput({ type: 'patch', action: 'modify', description: '', error: errMsg }, errMsg);
-      }
-    }
-
-    const record = await undoStack.executeWrite(
-      resolvedPath, 'modify', description, fileLines, newLines, hasTrailingNewline, lineEnding,
-      async (nl: string[]) => { await fs.writeFile(resolvedPath, nl.join(lineEnding) + (hasTrailingNewline ? lineEnding : ''), 'utf8'); },
-    );
-
-    let msg = '✅ [MODIFY] ' + description + '\n📄 文件：' + resolvedPath + '\n📐 行数：' + fileLines.length + ' → ' + newLines.length + '\n📝 diff 已持久化到：' + record.diffFilePath + '\n';
-    if (locateMessage) msg += '🔍 ' + locateMessage + '\n';
-    if (record.diff) msg += '\n--- diff ---\n' + record.diff;
-    msg += '\n💡 如需撤销：undo_patch()';
-    return new ToolOutput({ type: 'patch', action: 'modify', description, filePath: resolvedPath, diff: record.diff, undoId: record.meta.id }, msg);
   },
 });
 
@@ -596,7 +470,6 @@ export async function applyPatchesToFile(
   const sorted = [...patches].sort((a, b) => {
     const getBase = (p: typeof a) => {
       switch (p.type) {
-        case 'modify': return (p.params as any).startLine ?? Infinity;
         case 'del': return Math.min(...((p.params as any).lineIndex as [number, number][]).map(([s]) => s));
         case 'add': { const li = (p.params as any).lineIndex as number; return li === -1 ? Infinity : li; }
         default: return Infinity;
@@ -633,12 +506,6 @@ export async function applyPatchesToFile(
           results.push(`  [DEL] 删除 ${deleted} 行`);
           break;
         }
-        case 'modify': {
-          const { startLine, endLine, replaceLines } = patch.params as { startLine: number; endLine: number; replaceLines: string[]; };
-          currentLines = [...currentLines.slice(0, startLine - 1), ...replaceLines, ...currentLines.slice(endLine)];
-          results.push(`  [MODIFY] 替换行 ${startLine}-${endLine}（${replaceLines.length} 行）`);
-          break;
-        }
       }
     } catch (err: any) {
       results.push(`  ❌ 应用失败 [${patch.type}]: ${err.message}`);
@@ -654,6 +521,14 @@ export async function applyPatchesToFile(
 
 // ── 导出 UndoStack 以供外部使用 ──
 export { UndoStack } from './patch-undo.js';
+
+
+
+
+
+
+
+
 
 
 

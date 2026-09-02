@@ -39,6 +39,7 @@ export type ChildToParent =
   | { type: 'message'; role: BridgeMessage['role']; content: string; subagentName?: string; toolMeta?: BridgeMessage['toolMeta']; toolCallHtml?: string; toolResultHtml?: string; fullOutput?: string; rawBulk?: Record<string, unknown> }
   | { type: 'state'; processing: boolean }
   | { type: 'context'; chars: number; tokens: number }
+  | { type: 'usage'; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cacheHitRate: number | null }
   | { type: 'tool-call'; count: number }
   | { type: 'thinking'; active: boolean }
   | { type: 'thinking-bubble'; active: boolean }
@@ -307,6 +308,11 @@ export class ElectronUIBridge {
     this.send({ type: 'context', chars, tokens });
   }
 
+  /** 推送会话累计 token 用量与缓存命中率（dsh 风格的 disjoint 桶 + cacheHitRate） */
+  setUsageSummary(summary: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cacheHitRate: number | null }): void {
+    this.send({ type: 'usage', ...summary });
+  }
+
   setToolCallCount(n: number): void {
     this.send({ type: 'tool-call', count: n });
   }
@@ -441,6 +447,9 @@ function formatToolCallHtml(toolName: string, args: Record<string, unknown>): st
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+
+
 
 
 

@@ -15,7 +15,8 @@
  * 导致正常写入被拦截；而 Python 靠缩进表达块结构，括号平衡检查对它的保护价值很低。
  * 若需真实检查应接入 `python -m py_compile` / ast.parse。
  *
- * 全局开关：设置环境变量 SEEK_DISABLE_SYNTAX_CHECK=1 时，所有文件类型跳过语法检查。
+ * 全局开关：语法检查默认关闭（patch 工具不再被括号平衡/TS 诊断卡住）。
+ * 显式设置 SEEK_ENABLE_SYNTAX_CHECK=1 时恢复检查（所有文件类型）。
  */
 
 import ts from 'typescript';
@@ -44,8 +45,8 @@ export interface SyntaxError {
 export function checkSyntax(filePath: string, content: string): SyntaxCheckResult {
   // Python 文件跳过语法检查：通用括号检查不识别 # 注释/三引号，会误报拦截正常写入
   if (isPythonFile(filePath)) return { ok: true, errors: [] };
-  // 全局开关：SEEK_DISABLE_SYNTAX_CHECK=1 时所有文件类型跳过语法检查
-  if (process.env.SEEK_DISABLE_SYNTAX_CHECK === '1') return { ok: true, errors: [] };
+  // 全局开关：默认跳过全部语法检查，显式 SEEK_ENABLE_SYNTAX_CHECK=1 才恢复
+  if (process.env.SEEK_ENABLE_SYNTAX_CHECK !== '1') return { ok: true, errors: [] };
 
   const ext = getExtension(filePath).toLowerCase();
   switch (ext) {
@@ -498,7 +499,8 @@ export interface ReplacementPrecheck {
 export function precheckReplacement(filePath: string, lines: string[]): ReplacementPrecheck {
   // Python 文件跳过预检（与 checkSyntax 保持一致，避免 # 注释/三引号误报）
   if (isPythonFile(filePath)) return { ok: true, issues: [] };
-  if (process.env.SEEK_DISABLE_SYNTAX_CHECK === '1') return { ok: true, issues: [] };
+  // 全局开关：默认跳过预检，显式 SEEK_ENABLE_SYNTAX_CHECK=1 才恢复
+  if (process.env.SEEK_ENABLE_SYNTAX_CHECK !== '1') return { ok: true, issues: [] };
 
   const ext = getExtension(filePath).toLowerCase();
   const issues: ReplacementIssue[] = scanBracketBalance(lines);

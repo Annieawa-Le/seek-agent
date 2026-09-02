@@ -19,7 +19,7 @@
 ### 2. 修改文件
 
 1. 注意，每次使用patch工具修改文件前，都**一定要**先读取文件的对应部分，确定修改点位！
-2. 使用 `add_patch` / `del_patch` / `modify_patch` 执行修改（以 diff 为核心载体，自动持久化）
+2. 使用 `add_patch` / `del_patch` / `replace_str` 执行修改（以 diff 为核心载体，自动持久化）
 3. 若diff有误，检查文件确认是改坏了，通过 `undo_patch()` 可撤销最近一次操作
 4. 如需查看操作历史，使用 `history_patch`
 
@@ -252,7 +252,7 @@ spawn_agent(
   mode="listen",
   name="patch审查员",
   listenMode="result",
-  listenTools=["modify_patch", "add_patch", "del_patch"],
+  listenTools=["add_patch", "del_patch"],
   analyzeTarget="检查对文件的修改是否合理：是否会引入语法错误、是否遵循项目代码风格、修改逻辑是否正确",
   returnTemplate="严重程度: {{severity}}\n问题: {{issue}}\n建议: {{suggestion}}"
 )

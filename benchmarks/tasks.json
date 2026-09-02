@@ -1,0 +1,23 @@
+{
+  "_comment": "任务集定义。id 同时用于在 benchmarks/fixtures/ 下定位种子工作区；grader.cmd 在任务工作区目录内执行，退出码+输出子串共同判定。",
+  "tasks": [
+    {
+      "id": "sum-bug",
+      "instruction": "阅读 math.js，修复 add 函数的负数处理 bug（负数参与相加应得到正确结果，例如 -1 + -2 应等于 -3），最后运行 node check.js 并确保退出码为 0 且输出 PASS。",
+      "timeoutSec": 240,
+      "grader": { "cmd": "node check.js", "expectExit": 0, "expectOutput": ["PASS"] }
+    },
+    {
+      "id": "refactor",
+      "instruction": "阅读 utils.js：addAllPositive 和 sumOverTen 存在重复的过滤+累加逻辑。请提取一个公共 helper 函数并让两者复用它，保持对外行为完全一致。完成后运行 node check.js，确保退出码为 0 且输出 PASS（检查器会验证行为不变且重复循环已消除）。",
+      "timeoutSec": 240,
+      "grader": { "cmd": "node check.js", "expectExit": 0, "expectOutput": ["PASS"] }
+    },
+    {
+      "id": "csv-task",
+      "instruction": "data.csv 有两列（name,value）。请写一个 Node 脚本 sum.js：读取 data.csv，计算 value 列的数值总和，把结果写入 result.txt（格式为一行 TOTAL=<总和>，例如 TOTAL=187）。然后运行它生成 result.txt，再运行 node check.js 确认退出码为 0 且输出 PASS。",
+      "timeoutSec": 240,
+      "grader": { "cmd": "node check.js", "expectExit": 0, "expectOutput": ["PASS"] }
+    }
+  ]
+}

@@ -13,6 +13,8 @@ interface Props {
   processing: boolean;
   /** 上下文 Token 数（原底部状态栏迁移而来，灰色小字显示在输入框下方） */
   ctxTokens: number;
+  /** 会话累计 token 用量与缓存命中率（dsh 风格灰色小字） */
+  usageSummary: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cacheHitRate: number | null };
   /** 当前会话 id：输入栏草稿（文本/附件/技能选择）按会话独立保存与恢复 */
   sessionKey: string;
   thinking: boolean;
@@ -71,7 +73,7 @@ function formatElapsed(ms: number): string {
 }
 
 export function InputBar({
-  sessionKey, processing, ctxTokens, thinking, kbEnabled, smartSearchEnabled, thinkingEnabled, skillsList,
+  sessionKey, processing, ctxTokens, usageSummary, thinking, kbEnabled, smartSearchEnabled, thinkingEnabled, skillsList,
   onSend, onAbort, onToggleKb, onToggleSmartSearch, onToggleThinking,
 }: Props) {
   const [value, setValue] = useState('');
@@ -81,6 +83,8 @@ export function InputBar({
   // ── 运行计时：从上次发送到现在 ──
   const [elapsed, setElapsed] = useState(0);
   const [hasRun, setHasRun] = useState(false);
+  // 会话累计用量是否已产生（任一桶非 0 才展示，避免空会话显示无意义“用量 ↑0 ↓0”）
+  const hasUsage = usageSummary.inputTokens > 0 || usageSummary.outputTokens > 0 || usageSummary.cacheReadTokens > 0 || usageSummary.cacheWriteTokens > 0;
   const startAtRef = useRef<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevProcessingRef = useRef(processing);
@@ -442,6 +446,7 @@ export function InputBar({
         </div>
         <div className="input-meta">
           {ctxTokens > 0 && <span className="input-meta-stat">Token {ctxTokens}</span>}
+          {hasUsage && <span className="input-meta-stat" title="会话累计 token 用量（↑未缓存输入 ↓输出）· 缓存命中率">用量 ↑{usageSummary.inputTokens} ↓{usageSummary.outputTokens}{usageSummary.cacheHitRate != null ? ` 缓存${usageSummary.cacheHitRate}%` : ''}</span>}
           {hasRun && <span className="input-meta-stat">运行 {formatElapsed(elapsed)}</span>}
         </div>
       </div>
@@ -485,6 +490,11 @@ export function InputBar({
     </div>
   );
 }
+
+
+
+
+
 
 
 

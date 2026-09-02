@@ -7,6 +7,48 @@
 
 /* @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap'); */
 
+/* ═══════════════════════════════════════════════════════════════
+   本地字体：霞鹜文楷 1.520（LXGW WenKai）全字族
+   · WebUIMain      → 界面正文（Light 300 / Regular 400 / Medium 500-700）
+   · WebUIMainMono  → 代码等宽（Light 300 / Regular 400 / Medium 500-700）
+   ═══════════════════════════════════════════════════════════════ */
+@font-face {
+  font-family: 'WebUIMain';
+  src: url('./fonts/LXGWWenKai-Light.ttf') format('truetype');
+  font-display: swap;
+  font-weight: 300;
+}
+@font-face {
+  font-family: 'WebUIMain';
+  src: url('./fonts/LXGWWenKai-Regular.ttf') format('truetype');
+  font-display: swap;
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'WebUIMain';
+  src: url('./fonts/LXGWWenKai-Medium.ttf') format('truetype');
+  font-display: swap;
+  font-weight: 500 700; /* 500/600/700 均落 Medium，避免浏览器合成假粗 */
+}
+@font-face {
+  font-family: 'WebUIMainMono';
+  src: url('./fonts/LXGWWenKaiMono-Light.ttf') format('truetype');
+  font-display: swap;
+  font-weight: 300;
+}
+@font-face {
+  font-family: 'WebUIMainMono';
+  src: url('./fonts/LXGWWenKaiMono-Regular.ttf') format('truetype');
+  font-display: swap;
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'WebUIMainMono';
+  src: url('./fonts/LXGWWenKaiMono-Medium.ttf') format('truetype');
+  font-display: swap;
+  font-weight: 500 700;
+}
+
 
 /* 主题切换过渡动画 */
 #app, #header, .input-bar, .message, .session-item, #new-session-btn {
@@ -86,8 +128,8 @@
   --shadow-glow-green: 0 0 20px rgba(34, 197, 94, 0.15);
 
   /* ── 原始字体 ── */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  --font-sans: 'WebUIMain', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'WebUIMainMono', 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
 
   /* ── 原始动画 ── */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -295,6 +337,7 @@ html, body {
 
 #info-panel {
   width: var(--right-panel-width);
+  min-width: 0; /* flex 子项：允许收起到 0，避免内容撑开宽度 */
   flex-shrink: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-deepest);
@@ -304,6 +347,17 @@ html, body {
   line-height: 1.6;
   display: flex;
   flex-direction: column;
+  /* 开合动画：宽度过渡让 main-content 平滑扩展，opacity 渐隐避免收起过程内容挤压突兀 */
+  transition: width var(--duration-slow) var(--ease-out),
+              border-left-width var(--duration-slow) var(--ease-out),
+              opacity var(--duration-fast) var(--ease-out);
+}
+
+#info-panel.info-panel-closed {
+  width: 0;
+  border-left-width: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ================================================================
@@ -1126,6 +1180,7 @@ html, body {
 #panel-content {
   padding: var(--space-3);
   flex: 1;
+  min-height: 0; /* flex 子项：允许收缩，内容超高时在自身内滚动（否则撑开外层 #info-panel 整体滚动，sticky 面包屑失效） */
   overflow-y: auto;
 }
 
@@ -1383,6 +1438,118 @@ html, body {
 .tree-children { padding-left: 16px; }
 .tree-item.folder .tree-icon { color: var(--text-dim); }
 .tree-item.file { padding-left: 20px; }
+
+/* ── 文件面板：工作区根列表 + 目录浏览 ── */
+/* 视图进出动画作用于列表内容（面包屑保持固定不被 transform 干扰，sticky 稳定）：进入 fwd 从右滑入，返回 back 从左滑入 */
+.file-browser.fwd .browser-list { animation: browser-in-right var(--duration-normal) var(--ease-out); }
+.file-browser.back .workspace-list { animation: browser-in-left var(--duration-normal) var(--ease-out); }
+.file-browser.back .browser-list { animation: browser-in-left var(--duration-normal) var(--ease-out); }
+@keyframes browser-in-right {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes browser-in-left {
+  from { opacity: 0; transform: translateX(-18px); }
+  to { opacity: 1; transform: none; }
+}
+
+.workspace-list { padding: var(--space-2) 0; }
+.ws-item { margin: 0 var(--space-2); }
+.ws-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.ws-head:hover { background: var(--bg-hover); }
+.ws-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.ws-active {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: rgba(212, 168, 67, 0.15);
+  color: var(--gold-300);
+  line-height: 1.8;
+  white-space: nowrap;
+}
+.ws-loading { flex-shrink: 0; margin-left: auto; font-size: 11px; color: var(--text-dim); }
+/* 根展开：0fr→1fr 网格行过渡，纯 CSS 手风琴动画（不需要 JS 测量高度） */
+.ws-children {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--duration-slow) var(--ease-out);
+}
+.ws-children.open { grid-template-rows: 1fr; }
+.ws-children-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.ws-child { padding-left: 20px; }
+.ws-child .browser-enter-icon { margin-left: auto; }
+
+/* 目录浏览：面包屑 + 单层列表 */
+.browser-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  background: var(--bg-deepest);
+  z-index: 1;
+}
+.browser-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  flex-shrink: 0;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.browser-back:hover { background: var(--bg-hover); color: var(--text-primary); }
+.crumb {
+  cursor: pointer;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  padding: 1px 4px;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.crumb:hover { background: var(--bg-hover); color: var(--text-primary); }
+.crumb.root { font-weight: 600; color: var(--accent); }
+.crumb-sep { color: var(--text-dim); flex-shrink: 0; }
+.browser-list { padding: var(--space-2) 0; }
+.browser-enter-icon {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+}
 
 .changes-list {
   padding: var(--space-2) var(--space-3);
@@ -2571,16 +2738,17 @@ html, body {
 }
 
 @media (max-width: 900px) {
-  #info-panel { display: none; }
+  /* 手机端默认收起：宽度 0 + 透明，配合宽度过渡实现开合动画（桌面端由 info-panel-closed 类控制） */
+  #info-panel { width: 0; border-left-width: 0; opacity: 0; pointer-events: none; }
   /* 手机端窗口控制按钮（最小化/最大化/关闭）无意义且占位，隐藏 */
   .window-controls { display: none; }
 }
 
 /* 右侧栏开合控制：桌面默认无 class → 基础 flex 不变；手机点开加 info-panel-open 覆盖窄屏隐藏 */
-#info-panel.info-panel-closed { display: none; }
+#info-panel.info-panel-closed { width: 0; border-left-width: 0; opacity: 0; pointer-events: none; }
 #info-panel.info-panel-open { display: flex; }
 @media (max-width: 900px) {
-  #info-panel.info-panel-open { width: min(85vw, 320px); }
+  #info-panel.info-panel-open { width: min(85vw, 320px); opacity: 1; border-left-width: 1px; pointer-events: auto; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2696,6 +2864,21 @@ html, body {
   white-space: pre;
   word-break: normal;
   color: var(--red-400);
+}
+
+.exec-deferred {
+  margin: 0;
+  background: rgba(234, 179, 8, 0.07);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--amber-400);
+}
+.exec-deferred code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
 }
 .file-write, .desk-result {
   display: flex;
@@ -3789,6 +3972,16 @@ html, body {
 .note-icon-btn svg {
   display: block;
 }
+
+
+
+
+
+
+
+
+
+
 
 
 

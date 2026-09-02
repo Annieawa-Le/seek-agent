@@ -2,8 +2,7 @@
  * patch-batch.ts — 并行 patch 静默暂存管理器
  *
  * 场景：同一条 assistant 消息里出现对同一文件的多个 patch 工具调用
- * （add_patch / del_patch / modify_patch）。这些调用都是基于同一份文件
- * 快照生成的行号，若逐个直接写盘，后执行的 patch 会因行号偏移改错位置。
+ * （add_patch / del_patch）。这些调用都是基于同一份文件
  *
  * 机制（全自动，无需 ensure_patch）：
  *   1. agent 层在 executeToolCalls 开始时检测：同批 ≥2 个 patch 作用于
@@ -23,19 +22,16 @@ import { checkSyntax, formatSyntaxErrors } from './syntax-validator.js';
 import { undoStack } from './patch-undo.js';
 
 /** 参与并行批次合并的 patch 工具名 */
-export const PATCH_TOOL_NAMES = new Set(['add_patch', 'del_patch', 'modify_patch']);
+export const PATCH_TOOL_NAMES = new Set(['add_patch', 'del_patch']);
 
 /** 已解析定位的暂存条目（行号基于基准快照） */
 export interface StagedPatch {
-  type: 'add' | 'del' | 'modify';
+  type: 'add' | 'del';
   /** add: 插入位置（0-based 数组索引；-1 表示末尾追加） */
   insertIndex?: number;
   /** del: 1-based 闭区间列表（已合并去重） */
   ranges?: [number, number][];
-  /** modify: 1-based 闭区间 */
-  startLine?: number;
-  endLine?: number;
-  /** add: 插入行；modify: 替换行 */
+  /** add: 插入行 */
   lines?: string[];
   description: string;
 }
@@ -66,7 +62,6 @@ function rankOf(entry: StagedPatch): number {
   switch (entry.type) {
     case 'add': return entry.insertIndex === -1 ? Number.MAX_SAFE_INTEGER : entry.insertIndex!;
     case 'del': return Math.min(...entry.ranges!.map(([s]) => s));
-    case 'modify': return entry.startLine!;
   }
 }
 
@@ -150,11 +145,6 @@ class PatchBatchManager {
             if (s < 0 || e >= current.length || s > e) throw new Error(`删除范围 [${s + 1}, ${e + 1}] 超出范围`);
             current.splice(s, e - s + 1);
           }
-        } else {
-          const s = entry.startLine!;
-          const e = entry.endLine!;
-          if (s < 1 || e > current.length || s > e) throw new Error(`修改范围 [${s}, ${e}] 超出范围`);
-          current = [...current.slice(0, s - 1), ...entry.lines!, ...current.slice(e)];
         }
       } catch (err: any) {
         return { filePath, ok: false, message: `批次应用失败 [${entry.type}]：${err.message}` };
@@ -185,4 +175,7 @@ class PatchBatchManager {
 
 /** 全局批次暂存管理器单例 */
 export const patchBatch = new PatchBatchManager();
+
+
+
 

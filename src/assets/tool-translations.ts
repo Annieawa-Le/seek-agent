@@ -140,10 +140,6 @@ def('del_patch', 'patch', '■', (args) => {
   return `暂存删除: ${fp} (范围 ${range})`;
 }, 'after-round');
 
-def('modify_patch', 'patch', '■', (args) => {
-  const fp = (args?.filePath ?? '(?)') as string;
-  return `修改: ${fp}`;
-}, 'after-round');
 def('undo_patch', 'patch', '↩', () => {
   return '撤销最近的文件修改';
 }, 'after-round');
@@ -323,7 +319,7 @@ function formatExecResult(output: string): string {
 
 
 function formatPatchResult(output: string): string {
-  // patch 类工具（add_patch/del_patch/modify_patch/ensure_patch）
+  // patch 类工具（add_patch/del_patch/replace_str/ensure_patch）
   // 的输出已经是高度结构化的自描述文本（含 ANSI diff 标记）。
   // 直接原样输出完整内容，不截断、不加冗余前缀。
   // 超大输出时做头尾保留以控制体积
@@ -359,6 +355,7 @@ export function registerSkillTranslations(
     registerTool(name, trans);
   }
 }
+
 
 
 

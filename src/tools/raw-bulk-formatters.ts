@@ -49,6 +49,10 @@ function formatSearchContentAIText(bulk: SearchContentBulk): string {
 }
 
 function formatExecAIText(bulk: ExecBulk): string {
+  if (bulk.deferred) {
+    const secs = bulk.timeoutMs ? Math.round(bulk.timeoutMs / 1000) : 60;
+    return `命令执行超过 ${secs} 秒未结束，已转入后台任务 "${bulk.taskName}"。可继续用 task_switch(taskName="${bulk.taskName}") 查看输出、task_kill(taskName="${bulk.taskName}") 终止。`;
+  }
   if (bulk.error) return `命令执行失败: ${bulk.error}`;
   let out = bulk.stdout;
   if (bulk.stderr) out += `\n[stderr]: ${bulk.stderr}`;
@@ -206,8 +210,11 @@ function formatSearchContentTUI(bulk: SearchContentBulk): string {
   const tail = bulk.truncated ? `${BLUE_GRAY}  ... 结果已截断，共 ${bulk.totalCount} 行\x1b[0m` : `${BLUE_GRAY}  ... 还有 ${display.length - 8} 行 ...\x1b[0m`;
   return `●  共 ${PURPLE}${bulk.totalCount}\x1b[0m 行匹配\n${head}\n${tail}`;
 }
-
 function formatExecTUI(bulk: ExecBulk): string {
+  if (bulk.deferred) {
+    const secs = bulk.timeoutMs ? Math.round(bulk.timeoutMs / 1000) : 60;
+    return `● 命令超过 ${PURPLE}${secs}\x1b[0m 秒未结束，已转入后台任务 "${bulk.taskName}"，可 task_switch / task_kill 管理`;
+  }
   if (bulk.error) return `● 命令执行失败: ${bulk.error}`;
   const maxPreview = 300;
   const text = bulk.stdout + (bulk.stderr ? `\n[stderr]: ${bulk.stderr}` : '');
@@ -337,9 +344,14 @@ function formatSearchContentWebUI(bulk: SearchContentBulk): Record<string, unkno
   const more = bulk.truncated ? `<div class="more">… 结果已截断，共 ${bulk.totalCount} 行</div>` : '';
   return { html: `<div class="search-content-result">${esc(bulk.filePath)}（${bulk.truncated ? '已截断，共 ' + bulk.totalCount + ' 处' : '共 ' + bulk.totalCount + ' 处匹配'}）${matches}${more}</div>` };
 }
-
 // ── ExecBulk ──
 function formatExecWebUI(bulk: ExecBulk): Record<string, unknown> {
+  if (bulk.deferred) {
+    const secs = bulk.timeoutMs ? Math.round(bulk.timeoutMs / 1000) : 60;
+    return {
+      html: `<div class="exec-deferred">⏳ 命令执行超过 ${secs} 秒未结束，已转入后台任务 <code>${esc(bulk.taskName ?? '')}</code>，可用 task_switch / task_kill 管理</div>`
+    };
+  }
   if (bulk.error) {
     return { html: `<div class="exec-stderr">${esc(bulk.error)}</div>` };
   }
@@ -459,6 +471,9 @@ function formatMemoryWebUI(bulk: MemoryBulk): Record<string, unknown> {
   }
   return { html: `<div class="memory-result"><span class="label">${label}</span><span class="meta">${bulk.itemCount != null ? `${bulk.itemCount} 条` : ''}</span>${body}</div>` };
 }
+
+
+
 
 
 

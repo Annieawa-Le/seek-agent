@@ -36,6 +36,7 @@ export class TerminalUI {
   private contextChars = 0;
   private contextTokens = 0;
   private maxContextChars = 0;
+  private usageSummary: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cacheHitRate: number | null } | null = null;
 
   // ─── 思考 / spinner / 审查状态 ───
   private thinkingActive = false;
@@ -376,6 +377,12 @@ export class TerminalUI {
     this.contextChars = 0;
     this.contextTokens = 0;
     this.maxContextChars = 0;
+  }
+
+  /** 记录会话累计 token 用量与缓存命中率（TUI 事件指标位，供状态栏/后续展示） */
+  setUsageSummary(summary: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cacheHitRate: number | null }): void {
+    this.usageSummary = summary;
+    this.notify();
   }
 
   setToolCallCount(n: number): void {
@@ -719,6 +726,8 @@ export class TerminalUI {
     }
   }
 }
+
+
 
 
 

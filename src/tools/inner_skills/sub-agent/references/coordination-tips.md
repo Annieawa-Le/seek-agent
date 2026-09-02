@@ -27,7 +27,7 @@
 
 clone 和 mission 模式的子模型拥有**独立的 patch 暂存区**，它们做的修改不会影响主模型的暂存区。
 
-- `add_patch` / `del_patch` / `modify_patch` → 写入子模型的本地暂存区
+- `add_patch` / `del_patch` / `replace_str` → 写入子模型的本地暂存区
 - `ensure_patch(true)` → 直接修改文件（不需要主模型二次确认）
 - `ensure_patch(false)` → 丢弃所有本地暂存
 - `check_patch(index)` → 查看本地暂存区中某个 patch 的详情

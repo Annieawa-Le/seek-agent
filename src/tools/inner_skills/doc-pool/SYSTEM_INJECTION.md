@@ -17,6 +17,6 @@ Manager 模式编排工具：把子模型「读阶段」读取的文件片段沉
 ## 读阶段语义
 
 从子模型第一条工具调用起，从前往后扫描，直到第一个**写入工具**
-（add_patch / del_patch / modify_patch / create_file / replace_file / wrap_by 等）
+（add_patch / del_patch / replace_str / create_file / replace_file / wrap_by 等）
 或 **TODO 工具**（create_todo 等）为止——之前的读取工具
 （read_file / read_lines / scan_file 等）都视为读阶段，被记录。

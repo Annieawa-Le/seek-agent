@@ -18,7 +18,7 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { spawn, exec } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname, resolve, join } from 'path';
+import { dirname, resolve, join, isAbsolute } from 'path';
 import { watch } from 'fs';
 import { readdirSync, readFileSync, statSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { startRemoteBridge } from './remote-bridge.js';
@@ -1011,9 +1011,18 @@ registerRpc('env:write', (payload = {}) => {
 /**
  * 读取文件树（只读单层，文件夹展开时前端按需加载子层）。
  * 避免对包含 ai-ide/repos 等大目录的工作区做同步递归遍历而阻塞主进程。
+ * dirPath 支持两种形态：绝对路径（浏览任意挂载工作区，右侧文件面板用）；
+ * 相对路径（相对当前活跃工作区根，旧语义兼容）。
  */
 registerRpc('fs:readFileTree', async (dirPath) => {
-  const targetDir = dirPath ? resolve(currentWorkDir, dirPath) : currentWorkDir;
+  let targetDir;
+  if (!dirPath) {
+    targetDir = currentWorkDir;
+  } else if (isAbsolute(dirPath)) {
+    targetDir = dirPath;
+  } else {
+    targetDir = resolve(currentWorkDir, dirPath);
+  }
   try {
     return buildFileTree(targetDir, '', 1);
   } catch (err) {
@@ -1280,6 +1289,7 @@ if (process.env.SEEK_RELAY_URL) {
     trustedDevicesFile: TRUSTED_DEVICES_FILE,
   });
 }
+
 
 
 

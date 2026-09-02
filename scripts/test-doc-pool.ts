@@ -46,7 +46,7 @@ console.log('\n[1] 工具分类 / 路径提取 / 结果提取');
 assert(isReadTool('read_file') && isReadTool('read_lines') && isReadTool('scan_file'), 'read_file/read_lines/scan_file 是读取工具');
 assert(isReadTool('explorer-read-file'), 'explorer-read-file 是读取工具');
 assert(!isReadTool('add_patch'), 'add_patch 不是读取工具');
-assert(isWriteTool('add_patch') && isWriteTool('modify_patch') && isWriteTool('create_file') && isWriteTool('replace_file'), '写入工具识别');
+assert(isWriteTool('add_patch') && isWriteTool('replace_str') && isWriteTool('create_file') && isWriteTool('replace_file'), '写入工具识别');
 assert(isTodoTool('create_todo') && isTodoTool('finish_step'), 'TODO 工具识别');
 assert(!isWriteTool('read_file'), 'read_file 不是写入工具');
 assert(extractFilePath('read_file', { filePath: 'src/a.ts' }) === 'src/a.ts', 'read_file 路径提取');
@@ -64,8 +64,8 @@ const msgs: any[] = [
   { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c2', toolName: 'read_lines', input: { filePath: 'src/b.ts', startLine: 1, endLine: 10 } }] },
   { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c2', toolName: 'read_lines', output: { type: 'text', value: '文件B前10行' } }] },
   // 写入工具：结束读阶段 + 文件记录
-  { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c3', toolName: 'modify_patch', input: { filePath: 'src/a.ts' } }] },
-  { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c3', toolName: 'modify_patch', output: { type: 'text', value: 'ok' } }] },
+  { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c3', toolName: 'replace_str', input: { filePath: 'src/a.ts' } }] },
+  { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c3', toolName: 'replace_str', output: { type: 'text', value: 'ok' } }] },
   // 写入之后继续读取：不再记录
   { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c4', toolName: 'read_file', input: { filePath: 'src/c.ts' } }] },
   { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c4', toolName: 'read_file', output: { type: 'text', value: '文件C' } }] },
@@ -92,7 +92,7 @@ assert(todoScan.readEntries.length === 1 && todoScan.readEntries[0].filePath ===
 // ── 3. associateAndScan 填充池 + 修改文件移除 ──
 console.log('\n[3] associateAndScan（doc_pool 调用路径）');
 const pool = docPoolStore.associateAndScan('渲染组', '渲染修复员', msgs);
-// a.ts 读后被 modify_patch 修改 → 移除；b.ts 保留 → 池剩 1 个文件 1 条片段
+// a.ts 读后被 replace_str 修改 → 移除；b.ts 保留 → 池剩 1 个文件 1 条片段
 assert(pool.files.size === 1, `池含 1 个文件（a.ts 被修改移除，实际 ${pool.files.size}）`);
 assert(pool.entries.length === 1, `池含 1 条片段（实际 ${pool.entries.length}）`);
 assert(pool.files.has(normKey('src/a.ts')) === false, '被修改的文件 a.ts 已从池移除');
@@ -116,7 +116,7 @@ docPoolStore.onToolResult('后端开发', 'read_lines', { filePath: 'src/db.ts' 
 assert(pool2.files.size === 2, `实时挂钩记录 2 个文件（实际 ${pool2.files.size}）`);
 assert(pool2.entries.length === 2, `实时挂钩记录 2 条片段（实际 ${pool2.entries.length}）`);
 // 写入工具：移除文件 + 结束读阶段
-docPoolStore.onToolResult('后端开发', 'modify_patch', { filePath: 'src/api.ts' }, 'ok', 'w1');
+docPoolStore.onToolResult('后端开发', 'replace_str', { filePath: 'src/api.ts' }, 'ok', 'w1');
 assert(pool2.files.has('src/api.ts') === false, '被修改的文件从池移除');
 assert(pool2.entries.length === 1, '移除后剩 1 条片段');
 // 读阶段结束后的读取不再记录
@@ -171,7 +171,7 @@ assert(restored.files.has(normKey('src/persist.ts')), '恢复后文件分组完�
 freshStore.onToolResult('新持久员', 'read_file', { filePath: 'src/persist3.ts' }, '持久内容3', 'p3');
 assert(restored.entries.length === 3, '恢复后可继续追加');
 // 写工具修改 → 磁盘同步移除
-freshStore.onToolResult('新持久员', 'modify_patch', { filePath: 'src/persist.ts' }, 'ok', 'w2');
+freshStore.onToolResult('新持久员', 'replace_str', { filePath: 'src/persist.ts' }, 'ok', 'w2');
 assert(restored.files.has(normKey('src/persist.ts')) === false, '修改后的文件从磁盘池移除');
 const disk2 = JSON.parse(fs.readFileSync(poolFilePath, 'utf-8'));
 assert(disk2.entries.length === 2 && !disk2.entries.some((e: any) => e.filePath === 'src/persist.ts'), '磁盘文件已同步移除');

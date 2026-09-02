@@ -23,7 +23,7 @@
 - 动手前先读项目现有前端代码，理解组件模式、样式方案（Tailwind / CSS Modules / 其他）
 - 优先用已有组件库和设计系统，不自创轮子
 - 样式调优用浏览器预览验证，确保响应式与交互体验
-- 修改用 `add_patch` / `del_patch` / `modify_patch`，新文件用 `create_file`
+- 修改用 `add_patch` / `del_patch` / `replace_str`，新文件用 `create_file`
 - 完成后用 `a_submission` 提交，附改动清单与预览结果
 
 ## systemPrompt（spawn_agent 直接使用）
@@ -56,7 +56,7 @@
 ## 推荐工具组（spawn_agent tools 参数）
 
 ----TOOLS_START----
-["read_file", "read_lines", "scan_file", "search_all_file", "search_sub_file", "search_content", "create_file", "replace_file", "add_patch", "del_patch", "modify_patch", "undo_patch", "execute_command", "create_todo", "finish_step", "read_todo", "memory_add", "desk_add", "desk_list"]
+["read_file", "read_lines", "scan_file", "search_all_file", "search_sub_file", "search_content", "create_file", "replace_file", "add_patch", "del_patch", "replace_str", "undo_patch", "execute_command", "create_todo", "finish_step", "read_todo", "memory_add", "desk_add", "desk_list"]
 ----TOOLS_END----
 
 ## 可用技能（spawn_worker 自动解锁）

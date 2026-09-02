@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
 import type { ChatThreadData, CollabLogEntry, FileTreeNode, GitChange, RemoteDeviceInfo, SidebarRuntimeData, SubagentStreamMsg } from '@/types/index.ts';
 import { SubagentNotePanel } from './SubagentNotePanel.tsx';
@@ -55,20 +55,11 @@ function handleNodeDragStart(e: React.DragEvent, node: FileTreeNode) {
 }
 
 type PanelTab = 'files' | 'changes' | 'collab' | 'devices' | 'memory';
-
 export function RightPanel({ runtimeData, open }: { runtimeData: SidebarRuntimeData | null; open?: boolean }) {
-  const { readFileTree, readGitStatus } = useElectronAPI();
+  const { readGitStatus } = useElectronAPI();
   const [currentTab, setCurrentTab] = useState<PanelTab>('files');
-  const [fileTree, setFileTree] = useState<FileTreeNode[]>([]);
   const [gitChanges, setGitChanges] = useState<GitChange[]>([]);
   const [loading, setLoading] = useState(false);
-
-  const loadFileTree = useCallback(async () => {
-    setLoading(true);
-    const data = await readFileTree('');
-    if (Array.isArray(data)) setFileTree(data);
-    setLoading(false);
-  }, [readFileTree]);
 
   const loadGitChanges = useCallback(async () => {
     setLoading(true);
@@ -78,9 +69,8 @@ export function RightPanel({ runtimeData, open }: { runtimeData: SidebarRuntimeD
   }, [readGitStatus]);
 
   useEffect(() => {
-    if (currentTab === 'files') loadFileTree();
-    else if (currentTab === 'changes') loadGitChanges();
-  }, [currentTab, loadFileTree, loadGitChanges]);
+    if (currentTab === 'changes') loadGitChanges();
+  }, [currentTab, loadGitChanges]);
 
   return (
     <aside id="info-panel" className={open === false ? 'info-panel-closed' : open ? 'info-panel-open' : undefined}>
@@ -96,7 +86,7 @@ export function RightPanel({ runtimeData, open }: { runtimeData: SidebarRuntimeD
         </div>
       </div>
       <div id="panel-content">
-        {currentTab === 'files' && (loading ? <div className="file-tree-loading">加载中…</div> : <FileTreeContent nodes={fileTree} />)}
+        {currentTab === 'files' && <FileTabContent />}
         {currentTab === 'changes' && (loading ? <div className="file-tree-loading">加载中…</div> : <GitChangesContent changes={gitChanges} />)}
         {currentTab === 'collab' && <CollabContent runtimeData={runtimeData} />}
         {currentTab === 'devices' && <DevicesContent />}
@@ -106,63 +96,186 @@ export function RightPanel({ runtimeData, open }: { runtimeData: SidebarRuntimeD
   );
 }
 
-function FileTreeContent({ nodes }: { nodes: FileTreeNode[] }) {
-  if (nodes.length === 0) return <div className="panel-empty">项目为空</div>;
-  return <div className="file-tree"><TreeNodes nodes={nodes} /></div>;
+/* ═══════════════════════════════════════════════════════════
+   文件面板：工作区根列表 + 目录浏览
+   - 第一层 = 所有挂载工作区根目录（默认收起，点击展开显示该根第一层子项）
+   - 更深层级不再树式展开：点击子文件夹进入独立浏览视图（面包屑导航逐层进入）
+   ═══════════════════════════════════════════════════════════ */
+
+interface WorkspaceRootEntry { name: string; path: string; active: boolean; }
+/** 浏览位置：root = 工作区根绝对路径；segs = 从根算起的相对目录段（空数组 = 根本身） */
+interface BrowsePos { root: string; segs: string[]; }
+
+/** 绝对路径拼接（浏览任意挂载根时：root 绝对 + 相对段，/ 分隔 Node 端可解析） */
+function joinAbs(root: string, segs: string[]): string {
+  return segs.length ? `${root}/${segs.join('/')}` : root;
 }
 
-function TreeNodes({ nodes }: { nodes: FileTreeNode[] }) {
-  return <>
-    {nodes.map(node =>
-      node.type === 'folder' ? <FolderNode key={node.path} node={node} />
-        : (
-          <div key={node.path} className="tree-item file" data-path={node.path} draggable onDragStart={e => handleNodeDragStart(e, node)} title={node.path}>
-            {tagClassMap[node.ext || ''] ? <span className={`tree-tag ${tagClassMap[node.ext || '']}`}>{(tagLabelMap[node.ext || ''] || node.ext || '').toUpperCase()}</span>
-              : <span className="tree-icon">≡</span>}
-            <span className="tree-name">{node.name}</span>
-          </div>
-        )
-    )}
-  </>;
+/** 路径末段（工作区根显示名） */
+function pathBase(p: string): string {
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || p;
 }
 
-/** 文件夹节点：懒加载子层（首次展开时按需请求该目录内容，避免同步遍历整个工作区） */
-function FolderNode({ node }: { node: FileTreeNode }) {
-  const { readFileTree } = useElectronAPI();
-  const [expanded, setExpanded] = useState(false);
-  const [children, setChildren] = useState<FileTreeNode[] | null>(node.children ?? null);
+function FileTabContent() {
+  const { readFileTree, getWorkdir, onWorkdirChanged } = useElectronAPI();
+  const [roots, setRoots] = useState<WorkspaceRootEntry[]>([]);
+  /** 当前展开的工作区根（默认全部收起） */
+  const [expandedRoot, setExpandedRoot] = useState<string | null>(null);
+  /** 各工作区根的第一层子项缓存（避免反复请求） */
+  const [rootTop, setRootTop] = useState<Record<string, FileTreeNode[]>>({});
+  const [rootLoading, setRootLoading] = useState<string | null>(null);
+  /** 目录浏览位置（null = 根列表视图） */
+  const [pos, setPos] = useState<BrowsePos | null>(null);
+  const [items, setItems] = useState<FileTreeNode[]>([]);
   const [loading, setLoading] = useState(false);
+  /** 视图切换动画方向：进入 fwd（右滑入）/ 返回 back（左滑入） */
+  const [moveDir, setMoveDir] = useState<'fwd' | 'back'>('fwd');
 
-  const toggle = async () => {
-    const willExpand = !expanded;
-    if (willExpand && children === null) {
-      setLoading(true);
+  // 工作区列表：挂载时拉取 + 订阅根挂载变更（新增/移除/活跃切换实时刷新）
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
       try {
-        const data = await readFileTree(node.path);
-        if (Array.isArray(data)) setChildren(data);
-      } catch { /* 读取失败保持折叠 */ }
-      setLoading(false);
+        const wd = await getWorkdir();
+        if (!alive || !wd?.roots) return;
+        setRoots(wd.roots.map(r => ({ name: pathBase(r), path: r, active: r === wd.active })));
+      } catch { /* 保留旧列表 */ }
+    };
+    load();
+    const unsub = onWorkdirChanged(() => load());
+    return () => { alive = false; unsub(); };
+  }, [getWorkdir, onWorkdirChanged]);
+
+  /** 展开/收起工作区根；首次展开懒加载第一层子项（只拉一层，不递归） */
+  const toggleRoot = async (root: string) => {
+    if (expandedRoot === root) { setExpandedRoot(null); return; }
+    setExpandedRoot(root);
+    if (!rootTop[root]) {
+      setRootLoading(root);
+      try {
+        const data = await readFileTree(root);
+        if (Array.isArray(data)) setRootTop(prev => ({ ...prev, [root]: data }));
+      } catch { /* 读取失败保持空层 */ }
+      setRootLoading(null);
     }
-    setExpanded(willExpand);
   };
 
-  return <>
-    <div className="tree-item folder" onClick={toggle} draggable onDragStart={e => handleNodeDragStart(e, node)} title={node.path}>
-      <span className={`tree-toggle${expanded ? ' expanded' : ''}`}>
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="9 18 15 12 9 6" />
-        </svg>
-      </span>
-      <span className="tree-folder-icon">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-        </svg>
-      </span>
-      <span className="tree-name">{node.name}</span>
+  const enterDir = (from: BrowsePos, seg: string) => {
+    setMoveDir('fwd');
+    setPos({ root: from.root, segs: [...from.segs, seg] });
+  };
+  const enterFromRoot = (root: string, seg: string) => {
+    setMoveDir('fwd');
+    setPos({ root, segs: [seg] });
+  };
+  const backToRoots = () => { setMoveDir('back'); setPos(null); };
+
+  // 浏览视图内容：位置变化时按需读取该目录（单层）
+  useEffect(() => {
+    if (!pos) return;
+    let alive = true;
+    setLoading(true);
+    readFileTree(joinAbs(pos.root, pos.segs))
+      .then(data => { if (alive && Array.isArray(data)) setItems(data); })
+      .catch(() => { if (alive) setItems([]); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [pos, readFileTree]);
+
+  const renderRoots = () => (
+    <div key="roots" className={`file-browser ${moveDir}`}>
+      {roots.length === 0 ? (
+        <div className="panel-empty">未挂载工作区（可在输入框旁的文件夹菜单添加）</div>
+      ) : (
+        <div className="workspace-list">
+          {roots.map(r => {
+            const open = expandedRoot === r.path;
+            const top = rootTop[r.path];
+            return (
+              <div key={r.path} className="ws-item">
+                <div className={`ws-head${open ? ' open' : ''}`} onClick={() => toggleRoot(r.path)} title={r.path}>
+                  <span className={`tree-toggle${open ? ' expanded' : ''}`}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+                  </span>
+                  <span className="tree-folder-icon">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+                  </span>
+                  <span className="ws-name">{r.name}</span>
+                  {r.active && <span className="ws-active">当前</span>}
+                  {rootLoading === r.path && <span className="ws-loading">加载中…</span>}
+                </div>
+                {/* 0fr→1fr 网格行过渡：纯 CSS 手风琴展开/收起动画 */}
+                <div className={`ws-children${open ? ' open' : ''}`}>
+                  <div className="ws-children-inner">
+                    {open && (top === undefined ? <div className="file-tree-loading">加载中…</div>
+                      : top.length === 0 ? <div className="panel-empty">空目录</div>
+                      : top.map(node => node.type === 'folder' ? (
+                          <div key={node.path} className="tree-item folder ws-child" onClick={() => enterFromRoot(r.path, node.name)} draggable onDragStart={e => handleNodeDragStart(e, node)} title={node.absPath || node.path}>
+                            <span className="tree-folder-icon">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+                            </span>
+                            <span className="tree-name">{node.name}</span>
+                            <span className="browser-enter-icon">›</span>
+                          </div>
+                        ) : (
+                          <div key={node.path} className="tree-item file" draggable onDragStart={e => handleNodeDragStart(e, node)} title={node.absPath || node.path}>
+                            {tagClassMap[node.ext || ''] ? <span className={`tree-tag ${tagClassMap[node.ext || '']}`}>{(tagLabelMap[node.ext || ''] || node.ext || '').toUpperCase()}</span>
+                              : <span className="tree-icon">≡</span>}
+                            <span className="tree-name">{node.name}</span>
+                          </div>
+                        )
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
-    {expanded && children && <div className="tree-children"><TreeNodes nodes={children} /></div>}
-    {expanded && loading && <div className="file-tree-loading">加载中…</div>}
-  </>;
+  );
+
+  const renderBrowser = () => {
+    if (!pos) return null;
+    const rootName = pathBase(pos.root);
+    const viewKey = `${pos.root}|${pos.segs.join('/')}`;
+    return (
+      <div key={viewKey} className={`file-browser ${moveDir}`}>
+        <div className="browser-crumbs">
+          <button className="browser-back" onClick={backToRoots} title="返回工作区列表">←</button>
+          <span className="crumb root" onClick={() => { setMoveDir('back'); setPos({ root: pos.root, segs: [] }); }} title={pos.root}>{rootName}</span>
+          {pos.segs.map((seg, i) => (
+            <Fragment key={i}>
+              <span className="crumb-sep">/</span>
+              <span className="crumb" onClick={() => { setMoveDir(i < pos.segs.length - 1 ? 'back' : 'fwd'); setPos({ root: pos.root, segs: pos.segs.slice(0, i + 1) }); }}>{seg}</span>
+            </Fragment>
+          ))}
+        </div>
+        {loading ? <div className="file-tree-loading">加载中…</div>
+          : items.length === 0 ? <div className="panel-empty">空目录</div>
+          : <div className="browser-list">
+              {items.map(node => node.type === 'folder' ? (
+                <div key={node.path} className="tree-item folder browser-folder" onClick={() => enterDir(pos, node.name)} draggable onDragStart={e => handleNodeDragStart(e, node)} title={node.absPath || node.path}>
+                  <span className="tree-folder-icon">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+                  </span>
+                  <span className="tree-name">{node.name}</span>
+                  <span className="browser-enter-icon">›</span>
+                </div>
+              ) : (
+                <div key={node.path} className="tree-item file" draggable onDragStart={e => handleNodeDragStart(e, node)} title={node.absPath || node.path}>
+                  {tagClassMap[node.ext || ''] ? <span className={`tree-tag ${tagClassMap[node.ext || '']}`}>{(tagLabelMap[node.ext || ''] || node.ext || '').toUpperCase()}</span>
+                    : <span className="tree-icon">≡</span>}
+                  <span className="tree-name">{node.name}</span>
+                </div>
+              ))}
+            </div>}
+      </div>
+    );
+  };
+
+  return pos ? renderBrowser() : renderRoots();
 }
 
 const statusClassMap: Record<string, string> = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed' };
@@ -472,6 +585,10 @@ function ChatView({ peer, peerType, thread, streams, api, onBack }: {
     </div>
   );
 }
+
+
+
+
 
 
 

@@ -14,6 +14,8 @@ export interface AgentStatusState {
   ctxChars: number;
   ctxTokens: number;
   toolCallTotal: number;
+  /** 会话累计 token 用量与缓存命中率（输入框下方灰色小字展示） */
+  usageSummary: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cacheHitRate: number | null };
   /** 知识库索引构建状态 */
   kbStatus: { phase: 'idle' | 'building' | 'done' | 'failed'; message: string };
 }
@@ -57,6 +59,7 @@ export function useAgentStatus(currentSessionId: string = 'default') {
     ctxChars: 0,
     ctxTokens: 0,
     toolCallTotal: 0,
+    usageSummary: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cacheHitRate: null },
     kbStatus: { phase: 'idle', message: '' },
   });
 
@@ -108,6 +111,18 @@ export function useAgentStatus(currentSessionId: string = 'default') {
             ctxTokens: msg.tokens ?? prev.ctxTokens,
           }));
           break;
+        case 'usage':
+          setStatus(prev => ({
+            ...prev,
+            usageSummary: {
+              inputTokens: msg.inputTokens ?? prev.usageSummary.inputTokens,
+              outputTokens: msg.outputTokens ?? prev.usageSummary.outputTokens,
+              cacheReadTokens: msg.cacheReadTokens ?? prev.usageSummary.cacheReadTokens,
+              cacheWriteTokens: msg.cacheWriteTokens ?? prev.usageSummary.cacheWriteTokens,
+              cacheHitRate: msg.cacheHitRate ?? prev.usageSummary.cacheHitRate,
+            },
+          }));
+          break;
         case 'tool-call':
           setStatus(prev => ({ ...prev, toolCallTotal: msg.count ?? prev.toolCallTotal }));
           break;
@@ -146,6 +161,9 @@ export function useAgentStatus(currentSessionId: string = 'default') {
 
   return status;
 }
+
+
+
 
 
 

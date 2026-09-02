@@ -16,6 +16,6 @@
 
 ## 读阶段
 
-从子模型第一条工具调用起，到第一个**写入工具**（add_patch / del_patch / modify_patch /
+从子模型第一条工具调用起，到第一个**写入工具**（add_patch / del_patch / replace_str /
 create_file / replace_file / wrap_by 等）或 **TODO 工具**（create_todo 等）为止。
 此间的读取工具（read_file / read_lines / scan_file 等）被记录；之后修改过的文件片段自动移除。

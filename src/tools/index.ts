@@ -18,7 +18,7 @@ import {
   memoryRemember, memoryRecall, memoryClear, memoryStats,
 } from './memory';
 import { searchAllFile, searchSubFile, searchDirectory, searchContent } from './search-files';
-import { createFile, addPatch, delPatch, modifyPatch, replaceFile, undoPatch, historyPatch } from './file-manipulation';
+import { createFile, addPatch, delPatch, replaceFile, undoPatch, historyPatch } from './file-manipulation';
 import { replaceStrTool } from './replace-str';
 import { worklogRecallTool, workRecallTool } from './worklog-tools';
 import { createTodo, finishStep, finishToStep, undoStep, rerollStep, delStep, readTodo, delTodo, activeTodo } from './todo';
@@ -80,7 +80,6 @@ const coreTools = {
   replace_file: wrapTool('replace_file', replaceFile),
   add_patch: wrapTool('add_patch', addPatch),
   del_patch: wrapTool('del_patch', delPatch),
-  modify_patch: wrapTool('modify_patch', modifyPatch),
   undo_patch: wrapTool('undo_patch', undoPatch),
   history_patch: wrapTool('history_patch', historyPatch),
   replace_str: wrapTool('replace_str', replaceStrTool),

@@ -13,7 +13,7 @@ import { getExplorerPath } from './explorer-state.js';
 // ── 导入各原始工具 ──
 import { readFileTool, readCertainLines, readNumline, scanFileTool } from '../../read-file.js';
 import { searchAllFile, searchSubFile, searchDirectory, searchContent } from '../../search-files.js';
-import { createFile, replaceFile, addPatch, delPatch, modifyPatch } from '../../file-manipulation.js';
+import { createFile, replaceFile, addPatch, delPatch } from '../../file-manipulation.js';
 import { executeCommandTool } from '../../execute-command.js';
 
 // ── 辅助：将 filePath 解析为相对 explorer 当前目录的绝对路径 ──
@@ -159,17 +159,6 @@ export const explorerDelPatch = tool({
 });
 
 // ═════════════════════════════════════════════════════
-// explorer-modify-patch
-// ═════════════════════════════════════════════════════
-export const explorerModifyPatch = tool({
-  description: '相对于 virtual-explorer 当前目录暂存修改操作。filePath 相对 explorer 当前目录。',
-  inputSchema: z.object({ filePath: z.string(), startLine: z.number().int(), endLine: z.number().int(), replaceLines: z.array(z.string()) }),
-  execute: async ({ filePath, startLine, endLine, replaceLines }) => {
-    return callExecute(modifyPatch, { filePath: resolveExplorerPath(filePath), startLine, endLine, replaceLines });
-  },
-});
-
-// ═════════════════════════════════════════════════════
 // explorer-execute-command
 // ═════════════════════════════════════════════════════
 export const explorerExecuteCommand = tool({
@@ -180,6 +169,8 @@ export const explorerExecuteCommand = tool({
     return callExecute(executeCommandTool, { command: `cd /d "${explorerPath}" && ${command}` });
   },
 });
+
+
 
 
 

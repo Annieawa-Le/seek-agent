@@ -39,6 +39,7 @@ const GROUPS: Array<{ name: string; fields: Array<{ key: string; label: string; 
   ]},
   { name: '其他', fields: [
     { key: 'PROMPT_LOCALIZATION', label: 'Prompt 本地化', type: 'checkbox', hint: '开启后会话不再自动注入动态组装的系统 Prompt，改用最近一次 payload 快照（系统 Prompt + 工具 + 工作区信息固定不变）。重启 seek-agent 生效。' },
+    { key: 'ACTION_MEMORY_ENABLED', label: '行为记忆训练', type: 'checkbox', hint: '开启后每累计 5 次工具调用，后台把调用窗口交给行为蒸馏师提炼行为经验；行为池满 10 条后由整理师合并进 ACTION.md 并注入主模型系统 Prompt。重启 seek-agent 生效。' },
     { key: 'TAVILY_API_KEY', label: 'Tavily API Key', type: 'password' },
     { key: 'GITHUB_TOKEN', label: 'GitHub Token', type: 'password' },
   ]},
@@ -288,6 +289,7 @@ export function SettingsPanel({ onClose }: Props) {
     </>
   );
 }
+
 
 
 

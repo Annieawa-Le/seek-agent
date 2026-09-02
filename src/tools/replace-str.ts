@@ -1,7 +1,9 @@
 /**
- * replace-str.ts — 快速字符串替换工具
+ * replace-str.ts — 快速字符串替换工具（dsh str_replace 标准语义）
  *
- * 编辑器式替换：普通字符串（非正则）查找替换，支持大小写敏感 / 整个单词 / 全部替换选项。
+ * 字面量（非正则）查找替换，对齐 dsh edit/str_replace 的标准：
+ *   - 默认大小写敏感的字面量精确匹配
+ *   - 默认要求唯一匹配：search 出现多次时拒绝执行（除非 replaceAll=true 全量替换）
  * 与 patch 工具一致：语法检查（可 force 跳过）+ diff 持久化（undo_patch 可撤销）。
  */
 
@@ -18,12 +20,21 @@ import { checkSyntax, formatSyntaxErrors } from './syntax-validator.js';
 // ============================================================
 
 export interface ReplaceOptions {
-  /** 大小写敏感（默认 false，与编辑器默认一致） */
+  /** 大小写敏感（默认 true，字面量精确匹配） */
   caseSensitive?: boolean;
   /** 整个单词匹配：匹配边界前后不能是字母/数字/下划线（默认 false） */
   wholeWord?: boolean;
-  /** 全部替换（默认 true；false 只替换第一处） */
+  /** 全部替换（默认 false；false 时要求 search 唯一匹配） */
   replaceAll?: boolean;
+}
+
+export interface TextMatch {
+  /** 匹配段起始偏移（相对原内容，0-based） */
+  start: number;
+  /** 匹配段结束偏移（不含，0-based） */
+  end: number;
+  /** 匹配所在行（1-based） */
+  line: number;
 }
 
 function isWordChar(ch: string | undefined): boolean {
@@ -37,39 +48,66 @@ function isWordBoundary(content: string, start: number, end: number): boolean {
   return !isWordChar(before) && !isWordChar(after);
 }
 
-/** 在 content 中查找并替换 search（普通字符串，非正则），返回新文本与替换次数 */
+/** 按匹配起始偏移计算各匹配所在行号（1-based；支持跨行 search） */
+function lineNumbersAt(content: string, offsets: number[]): number[] {
+  let line = 1;
+  let cursor = 0;
+  return offsets.map((offset) => {
+    while (cursor < offset) {
+      if (content[cursor] === '\n') line += 1;
+      cursor += 1;
+    }
+    return line;
+  });
+}
+
+/** 在 content 中查找所有非重叠匹配位置（普通字符串，非正则） */
+export function findMatches(
+  content: string,
+  search: string,
+  options: ReplaceOptions = {},
+): TextMatch[] {
+  if (!search) return [];
+  const caseSensitive = options.caseSensitive ?? true;
+  const wholeWord = options.wholeWord ?? false;
+  const haystack = caseSensitive ? content : content.toLowerCase();
+  const needle = caseSensitive ? search : search.toLowerCase();
+
+  const offsets: number[] = [];
+  let offset = 0;
+  while (offset < content.length) {
+    const idx = haystack.indexOf(needle, offset);
+    if (idx < 0) break;
+    if (!wholeWord || isWordBoundary(content, idx, idx + search.length)) {
+      offsets.push(idx);
+      offset = idx + search.length;
+    } else {
+      offset = idx + 1;
+    }
+  }
+  const lines = lineNumbersAt(content, offsets);
+  return offsets.map((start, i) => ({ start, end: start + search.length, line: lines[i] }));
+}
+
+/** 在 content 中执行替换：replaceAll=true 全量，否则只替换第一处。返回新文本与替换次数 */
 export function replaceText(
   content: string,
   search: string,
   replace: string,
   options: ReplaceOptions = {},
-): { text: string; count: number } {
-  if (!search) return { text: content, count: 0 };
-  const caseSensitive = options.caseSensitive ?? false;
-  const wholeWord = options.wholeWord ?? false;
-  const replaceAll = options.replaceAll ?? true;
-
-  const haystack = caseSensitive ? content : content.toLowerCase();
-  const needle = caseSensitive ? search : search.toLowerCase();
+): { text: string; count: number; matches: TextMatch[] } {
+  const matches = findMatches(content, search, options);
+  if (matches.length === 0) return { text: content, count: 0, matches };
+  const targets = options.replaceAll ?? false ? matches : matches.slice(0, 1);
 
   let out = '';
-  let count = 0;
-  let i = 0;
-  while (i < content.length) {
-    if (haystack.startsWith(needle, i) && (!wholeWord || isWordBoundary(content, i, i + search.length))) {
-      out += replace;
-      count++;
-      i += search.length;
-      if (!replaceAll) {
-        out += content.slice(i);
-        i = content.length;
-      }
-    } else {
-      out += content[i];
-      i++;
-    }
+  let cursor = 0;
+  for (const m of targets) {
+    out += content.slice(cursor, m.start) + replace;
+    cursor = m.end;
   }
-  return { text: out, count };
+  out += content.slice(cursor);
+  return { text: out, count: targets.length, matches };
 }
 
 // ============================================================
@@ -77,17 +115,15 @@ export function replaceText(
 // ============================================================
 
 export const replaceStrTool = tool({
-  description: `快速字符串替换工具（编辑器式替换选项）。
-  在文件中查找并替换字符串（普通字符串，非正则表达式），支持大小写敏感 / 整个单词 / 全部替换等选项。
-  每次替换做语法检查（可 force 跳过）并持久化 diff，可用 undo_patch 撤销。
-  适用场景：变量改名、常量值替换、删除特定字符串等。`,
+  description: `在文件中查找并替换字符串（普通字符串，非正则表达式，字面量精确匹配）。
+  默认要求 search 唯一匹配；出现多处时须设置 replaceAll=true 才执行全量替换。`,
   inputSchema: z.object({
     filePath: z.string().describe('文件的绝对路径或相对当前工作目录的路径'),
-    search: z.string().describe('要被替换的字符串（普通字符串，非正则表达式）'),
+    search: z.string().describe('要被替换的字符串（普通字符串，非正则，字面量精确匹配）'),
     replace: z.string().optional().default('').describe('要替换成的字符串（默认空串，即删除匹配内容）'),
-    caseSensitive: z.boolean().optional().default(false).describe('是否大小写敏感（默认 false，大小写不敏感）'),
+    caseSensitive: z.boolean().optional().default(true).describe('是否大小写敏感（默认 true，字面量精确匹配）'),
     wholeWord: z.boolean().optional().default(false).describe('是否整个单词匹配（匹配边界：前后不能是字母/数字/下划线）'),
-    replaceAll: z.boolean().optional().default(true).describe('是否替换所有匹配（默认 true；false 时只替换第一处）'),
+    replaceAll: z.boolean().optional().default(false).describe('是否全量替换所有匹配（默认 false；false 时 search 必须唯一匹配，多处匹配会拒绝执行）'),
     force: z.boolean().optional().default(false).describe('跳过语法检查'),
   }),
   execute: async ({ filePath, search, replace, caseSensitive, wholeWord, replaceAll, force }) => {
@@ -103,13 +139,25 @@ export const replaceStrTool = tool({
       return new ToolOutput({ type: 'patch', action: 'replace', description: '', error: errMsg }, errMsg);
     }
 
-    const { text: newContent, count } = replaceText(content, search, replace ?? '', { caseSensitive, wholeWord, replaceAll });
+    const { text: newContent, count, matches } = replaceText(content, search, replace ?? '', {
+      caseSensitive: caseSensitive ?? true,
+      wholeWord,
+      replaceAll: replaceAll ?? false,
+    });
+
     if (count === 0) {
-      const mode = `${caseSensitive ? '大小写敏感' : '大小写不敏感'}${wholeWord ? '·整词' : ''}`;
+      const mode = `${caseSensitive ?? true ? '大小写敏感' : '大小写不敏感'}${wholeWord ? '·整词' : ''}`;
       return new ToolOutput(
         { type: 'patch', action: 'replace', description: '', error: `未找到匹配 "${search}"` },
         `❌ 未找到匹配 "${search}"（${mode}）`,
       );
+    }
+
+    // ── 唯一性约束：非全量模式下多处匹配拒绝执行（dsh str_replace 标准） ──
+    if (matches.length > 1 && !(replaceAll ?? false)) {
+      const lines = [...new Set(matches.map(m => m.line))].join(', ');
+      const errMsg = `"${search}" 在 ${resolvedPath} 第 ${lines} 行出现 ${matches.length} 处，非全量模式下拒绝执行。请提供更具体的 search 使其唯一匹配，或设置 replaceAll=true 全量替换。`;
+      return new ToolOutput({ type: 'patch', action: 'replace', description: '', error: errMsg }, `❌ ${errMsg}`);
     }
 
     // ── 语法检查（非 force） ──
@@ -147,4 +195,3 @@ export const replaceStrTool = tool({
     return new ToolOutput({ type: 'patch', action: 'replace', description, filePath: resolvedPath, diff: record.diff, undoId: record.meta.id }, msg);
   },
 });
-

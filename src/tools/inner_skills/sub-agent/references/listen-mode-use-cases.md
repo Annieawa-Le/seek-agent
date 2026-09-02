@@ -35,7 +35,7 @@ listen 模式分两种子模式：`call`（监听工具调用参数）和 `resul
 >   mode="listen",
 >   name="代码审查员",
 >   listenMode="result",
->   listenTools=["modify_patch", "add_patch", "del_patch"],
+>   listenTools=["add_patch", "del_patch"],
 >   analyzeTarget="检查对文件的修改是否合理：是否会引入语法错误、是否遵循项目代码风格、修改逻辑是否正确",
 >   returnTemplate="文件: {{file}}\n修改类型: {{type}}\n问题: {{issue}}\n严重程度: {{severity}}"
 > )

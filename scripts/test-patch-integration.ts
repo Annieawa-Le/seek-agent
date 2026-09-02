@@ -1,9 +1,10 @@
 /**
- * patch 工具集成测试：走完整 add_patch / del_patch / modify_patch 链路
+ * patch 工具集成测试：走完整 add_patch / del_patch / replace_str 链路
  * 运行：pnpm tsx scripts/test-patch-integration.ts
  */
 import * as fs from 'node:fs';
-import { addPatch, delPatch, modifyPatch } from '../src/tools/file-manipulation.js';
+import { addPatch, delPatch } from '../src/tools/file-manipulation.js';
+import { replaceStrTool } from '../src/tools/replace-str.js';
 
 const target = 'scripts/__patch_target.ts';
 fs.writeFileSync(target, [
@@ -39,19 +40,16 @@ try {
   check('add_patch 插入位置正确（beta 之后）', content.includes('export function beta() {') && content.includes('export function gamma() {'),
     content);
 
-  // 2. modify_patch：上下文替换（行尾空白差异）
-  const modRes = await modifyPatch.execute({
+  // 2. replace_str：字面量替换（唯一匹配默认成功）
+  const modRes = await replaceStrTool.execute({
     filePath: target,
-    startLine: 1,
-    endLine: 1,
-    replaceLines: ['export function alpha() {', '  const x = 42;', '  return x;', '}'],
-    pretext: ['export function alpha() {'],
-    endtext: ['}'],
+    search: '  const x = 1;',
+    replace: '  const x = 42;',
   } as any);
   const modText = String(modRes);
-  check('modify_patch 上下文替换成功', !modText.includes('错误'), modText);
+  check('replace_str 替换成功', !modText.includes('错误'), modText);
   content = fs.readFileSync(target, 'utf8');
-  check('modify_patch 替换内容生效', content.includes('const x = 42;'), content);
+  check('replace_str 替换内容生效', content.includes('const x = 42;'), content);
   // 3. del_patch：上下文删除（删除 pretext 与 endtext 之间的 body，锚点无关——验证全局搜索）
   const delRes = await delPatch.execute({
     filePath: target,
@@ -81,6 +79,7 @@ try {
 console.log('\n==============================');
 console.log('PASS ' + pass + ' / ' + (pass + fail));
 if (fail > 0) process.exit(1);
+
 
 
 

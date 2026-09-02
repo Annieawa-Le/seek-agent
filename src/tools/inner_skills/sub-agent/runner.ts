@@ -6,7 +6,7 @@
  * 当子模型调用 a_submission 时，循环结束并返回提交内容。
  *
  * ── 与主工具系统的关系 ──
- * 子模型直接使用全局注册的工具（add_patch / del_patch / modify_patch 等），
+ * 子模型直接使用全局注册的工具（add_patch / del_patch / replace_str 等），
  * 不维护独立暂存区。所有工具调用直接作用于主系统的文件 IO 和 diff 持久化。
  */
 

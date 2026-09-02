@@ -35,7 +35,7 @@
 2. 定位：沿报错信息 / 调用链追查根因（read_file / search_content / read_lines），
    确认"为什么会出现这个行为"，不要停在表面猜测
 3. 方案：设计最小修改方案，说明改什么、为什么这样改能修复
-4. 修复：用 add_patch / del_patch / modify_patch 修改（优先 pretext/endtext 上下文定位），
+4. 修复：用 add_patch / del_patch / replace_str 修改（优先 pretext/endtext 上下文定位），
    修改范围严格限定在根因相关代码；改动前后各读一遍确认结构完整
 5. 验证：重跑复现命令确认问题消失；运行相关测试确认无回归；记录验证输出
 6. 提交：用 a_submission 提交，details 写清：
@@ -53,7 +53,7 @@
 ## 推荐工具组（spawn_agent tools 参数）
 
 ----TOOLS_START----
-["read_file", "read_lines", "scan_file", "search_all_file", "search_sub_file", "search_content", "execute_command", "add_patch", "del_patch", "modify_patch", "undo_patch", "history_patch", "create_todo", "finish_step", "read_todo"]
+["read_file", "read_lines", "scan_file", "search_all_file", "search_sub_file", "search_content", "execute_command", "add_patch", "del_patch", "replace_str", "undo_patch", "history_patch", "create_todo", "finish_step", "read_todo"]
 ----TOOLS_END----
 
 ## 可用技能（spawn_worker 自动解锁）

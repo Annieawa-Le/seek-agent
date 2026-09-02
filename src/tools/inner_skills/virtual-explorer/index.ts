@@ -20,7 +20,6 @@ import {
   explorerReplaceFile,
   explorerAddPatch,
   explorerDelPatch,
-  explorerModifyPatch,
   explorerExecuteCommand,
 } from './explorer-tools';
 
@@ -46,8 +45,9 @@ const tools: Record<string, any> = {
   'explorer-replace-file': explorerReplaceFile,
   'explorer-add-patch': explorerAddPatch,
   'explorer-del-patch': explorerDelPatch,
-  'explorer-modify-patch': explorerModifyPatch,
   'explorer-execute-command': explorerExecuteCommand,
 };
 
 export default tools;
+
+

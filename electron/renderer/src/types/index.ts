@@ -105,7 +105,7 @@ export interface ReplayMessage {
 }
 
 export interface AgentMessage {
-  type: 'message' | 'state' | 'context' | 'tool-call' | 'thinking' | 'thinking-bubble' | 'thinking-delta' | 'listen' | 'subagent' | 'instructor' | 'append' | 'kb-build' | 'input-state' | 'clear-messages' | 'sidebar-data' | 'replace-messages';
+  type: 'message' | 'state' | 'context' | 'usage' | 'tool-call' | 'thinking' | 'thinking-bubble' | 'thinking-delta' | 'listen' | 'subagent' | 'instructor' | 'append' | 'kb-build' | 'input-state' | 'clear-messages' | 'sidebar-data' | 'replace-messages';
   /** 所属会话（主进程在转发时附加） */
   sessionId?: string;
   role?: MessageRole;
@@ -121,6 +121,12 @@ export interface AgentMessage {
   chars?: number;
   tokens?: number;
   count?: number;
+  /** usage 消息负载：会话累计 token 用量四桶 + 缓存命中率 */
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  cacheHitRate?: number | null;
   phase?: 'building' | 'done' | 'failed';
   message?: string;
   /** input-state 消息负载：胶囊开关状态 + 处理中标志（供按会话同步发送按钮与胶囊） */
@@ -292,6 +298,8 @@ export interface RemoteDeviceInfo {
   /** 信任时间（ISO 字符串） */
   trustedAt?: string | null;
 }
+
+
 
 
 

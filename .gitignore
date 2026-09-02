@@ -53,3 +53,13 @@ reference/
 .todo-data/
 
 
+
+
+# 根目录字体源存档（保留本地；运行时字体在 renderer/src/fonts/ 已单独提交）
+/fonts/
+
+# 基准运行产物
+benchmarks/run-output/
+
+# 本地启动器（硬编码本机路径，仅本机使用）
+Seek Launcher.vbs

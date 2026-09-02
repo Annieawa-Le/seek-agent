@@ -50,7 +50,7 @@
 ## 推荐工具组（spawn_agent tools 参数）
 
 ----TOOLS_START----
-["read_file", "read_lines", "search_all_file", "search_sub_file", "search_content", "execute_command", "create_file", "replace_file", "add_patch", "del_patch", "modify_patch", "desk_add", "desk_list", "desk_remove"]
+["read_file", "read_lines", "search_all_file", "search_sub_file", "search_content", "execute_command", "create_file", "replace_file", "add_patch", "del_patch", "replace_str", "desk_add", "desk_list", "desk_remove"]
 ----TOOLS_END----
 
 ## 可用技能（spawn_worker 自动解锁）

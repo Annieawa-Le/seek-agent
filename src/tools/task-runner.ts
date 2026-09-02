@@ -91,6 +91,62 @@ class TaskRunner {
 
     return { ok: true, task };
   }
+  /**
+   * 接管一个已在运行的子进程（execute_command 超时转后台时调用）。
+   * child 必须尚未 close；已有输出经 seed 迁入任务记录，后续输出继续累积。
+   */
+  adopt(
+    name: string,
+    command: string,
+    child: import('child_process').ChildProcess,
+    seed: { stdout: string; stderr: string },
+    startedAt: number = Date.now(),
+  ): { ok: true; task: TaskInfo } | { ok: false; error: string } {
+    const existed = this.tasks.get(name);
+    if (existed) {
+      return {
+        ok: false,
+        error: existed.status === 'running'
+          ? `任务 "${name}" 正在运行中，无法接管`
+          : `任务 "${name}" 已存在（状态 ${existed.status}），无法接管`
+      };
+    }
+
+    const task: TaskInfo = {
+      name,
+      command,
+      status: 'running',
+      startedAt,
+      stdout: seed.stdout,
+      stderr: seed.stderr,
+    };
+    this.tasks.set(name, task);
+
+    // 暂停流 → 摘掉原监听器 → 挂 TaskRunner 的 → 恢复
+    // （pause/resume 保证接管窗口期的数据不会丢失）
+    child.stdout?.pause();
+    child.stderr?.pause();
+    child.removeAllListeners();
+    child.stdout?.on('data', (chunk: Buffer) => { task.stdout = appendOutput(task.stdout, chunk); });
+    child.stderr?.on('data', (chunk: Buffer) => { task.stderr = appendOutput(task.stderr, chunk); });
+    child.on('error', (err) => {
+      task.status = 'failed';
+      task.error = err.message;
+      task.endedAt = Date.now();
+      this.children.delete(name);
+    });
+    child.on('close', (code, signal) => {
+      task.exitCode = code;
+      task.endedAt = Date.now();
+      task.status = (signal || task.status === 'killed') ? 'killed' : (code === 0 ? 'done' : 'failed');
+      this.children.delete(name);
+    });
+    child.stdout?.resume();
+    child.stderr?.resume();
+
+    this.children.set(name, child);
+    return { ok: true, task };
+  }
 
   get(name: string): TaskInfo | undefined {
     return this.tasks.get(name);
@@ -249,5 +305,6 @@ export const taskKillTool = tool({
     return new ToolOutput(bulk, `⏹ 已发送终止信号给任务 "${taskName}"（退出后状态会变为 killed）。`);
   },
 });
+
 
 

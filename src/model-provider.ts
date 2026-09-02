@@ -28,6 +28,15 @@ function buildProvider() {
     });
   }
 
+  // 本地 Ollama / vLLM 等 OpenAI 兼容端点
+  if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
+    return createOpenAICompatible({
+      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: baseUrl,
+      name: 'ollama',
+    });
+  }
+
   // 默认走 deepseek（包括 "deepseek" 或非 opencode 的其他端点）
   return createDeepSeek({
     apiKey: process.env.OPENAI_API_KEY,
@@ -82,6 +91,15 @@ function buildLiteProvider() {
     });
   }
 
+  // 本地 Ollama / vLLM 等 OpenAI 兼容端点
+  if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
+    return createOpenAICompatible({
+      apiKey,
+      baseURL: baseUrl,
+      name: 'ollama',
+    });
+  }
+
   return createDeepSeek({
     apiKey,
     baseURL: baseUrl || undefined,
@@ -113,6 +131,8 @@ export function getSystemPrompt(): string {
 export function setSystemPrompt(prompt: string): void {
   _systemPrompt = prompt;
 }
+
+
 
 
 

@@ -63,6 +63,12 @@ export interface ExecBulk {
   exitCode?: number;
   truncated: boolean;
   error?: string;
+  /** 命令超过时限转入后台任务的标记 */
+  deferred?: boolean;
+  /** 转后台后的任务名（deferred 时） */
+  taskName?: string;
+  /** 本次超时时限毫秒数（deferred 时用于提示） */
+  timeoutMs?: number;
 }
 
 /** 文件创建/覆写结果 */
@@ -242,6 +248,7 @@ export interface WorklogBulk {
   size?: number;
   msg: string;
 }
+
 
 
 
