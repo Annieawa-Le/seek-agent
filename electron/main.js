@@ -18,10 +18,12 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { spawn, exec } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname, resolve, join, isAbsolute } from 'path';
+import { dirname, resolve, join, isAbsolute, basename } from 'path';
 import { watch } from 'fs';
-import { readdirSync, readFileSync, statSync, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { readdirSync, readFileSync, statSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'fs';
 import { startRemoteBridge } from './remote-bridge.js';
+import { extractPatchBody, parsePatchMeta, truncatePatchBody } from './patch-history.js';
+import { revertContent, RevertError } from './patch-revert.js';
 import dotenv from 'dotenv';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -52,6 +54,9 @@ const METHOD_TO_CHANNEL = {
   getRecentDirs: 'workdir:getRecent',
   readFileTree: 'fs:readFileTree',
   readGitStatus: 'fs:readGitStatus',
+  readFile: 'fs:readFile',
+  writeFile: 'fs:writeFile',
+  listPatches: 'fs:listPatches',
   listSessions: 'fs:listSessions',
   getCollabLog: 'collab:log',
   switchSession: 'session:switch',
@@ -1030,6 +1035,194 @@ registerRpc('fs:readFileTree', async (dirPath) => {
   }
 });
 
+/** 文本文件读写上限（2MB）：超出直接拒绝，避免大文件撑爆渲染层编辑器 */
+const MAX_TEXT_FILE_SIZE = 2 * 1024 * 1024;
+
+/** 解析编辑器目标文件：绝对路径直接用，相对路径按当前活跃工作区根解析 */
+function resolveEditorPath(filePath) {
+  if (!filePath || typeof filePath !== 'string') throw new Error('路径为空');
+  return isAbsolute(filePath) ? filePath : resolve(currentWorkDir, filePath);
+}
+
+/** 二进制探测：前 8KB 出现 NUL 字节即视为二进制 */
+function looksBinary(buf) {
+  const n = Math.min(buf.length, 8192);
+  for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
+  return false;
+}
+
+/**
+ * 读取文本文件内容（内嵌编辑器用）。
+ * 返回 { ok, path, name, content, size, mtime } 或 { ok:false, error }，
+ * 前端据此区分「加载失败」与「不支持的类型」，不必再做一层错误解析。
+ */
+registerRpc('fs:readFile', async (filePath) => {
+  try {
+    const target = resolveEditorPath(filePath);
+    const st = statSync(target);
+    if (st.isDirectory()) return { ok: false, error: '这是一个目录' };
+    if (st.size > MAX_TEXT_FILE_SIZE) {
+      return { ok: false, error: `文件过大（${(st.size / 1024 / 1024).toFixed(1)}MB），编辑器上限 2MB` };
+    }
+    const buf = readFileSync(target);
+    if (looksBinary(buf)) return { ok: false, error: '二进制文件，暂不支持预览' };
+    return {
+      ok: true,
+      path: target,
+      name: basename(target),
+      content: buf.toString('utf8'),
+      size: st.size,
+      mtime: st.mtimeMs,
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/** 写入文本文件（编辑器 Ctrl+S 保存；仅允许覆盖已存在文件，不做新建） */
+registerRpc('fs:writeFile', async (payload = {}) => {
+  try {
+    const { path: filePath, content } = payload;
+    const target = resolveEditorPath(filePath);
+    if (typeof content !== 'string') return { ok: false, error: '内容格式错误' };
+    if (!existsSync(target)) return { ok: false, error: '文件已不存在（暂不支持新建文件）' };
+    if (Buffer.byteLength(content, 'utf8') > MAX_TEXT_FILE_SIZE) {
+      return { ok: false, error: '内容超出 2MB 上限' };
+    }
+    writeFileSync(target, content, 'utf8');
+    const st = statSync(target);
+    return { ok: true, path: target, size: st.size, mtime: st.mtimeMs };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * 回退一条改动记录（编辑器审查面板的「回退」按钮）。
+ *
+ * 与 agent 进程内的 undo_patch 工具不同：那条路径依赖内存撤销栈，跨进程不可达。
+ * 这里直接读工作区的 .seek-agent/history/*.diff，按逆向 diff 还原文件内容，
+ * 然后把该记录归档为 .reverted（.diff 后缀消失即不再出现在改动列表里）。
+ *
+ * payload.recordId 省略时取最近一条记录。
+ */
+registerRpc('history:undo', async (payload = {}) => {
+  try {
+    const historyDir = join(currentWorkDir, '.seek-agent', 'history');
+    if (!existsSync(historyDir)) return { ok: false, error: '没有改动历史' };
+
+    let names = readdirSync(historyDir).filter(n => n.endsWith('.diff')).sort();
+    if (names.length === 0) return { ok: false, error: '没有可回退的改动' };
+    const recordId = typeof payload?.recordId === 'string' ? payload.recordId : '';
+    if (recordId) {
+      const hit = names.find(n => n.replace(/\.diff$/, '') === recordId);
+      if (!hit) return { ok: false, error: '指定的改动记录不存在（可能已被回退）' };
+      names = [hit];
+    }
+
+    // 从最近往回找第一条能成功还原的记录：定位失败的（内容已被后续改动覆盖）跳过
+    const skipped = [];
+    for (let i = names.length - 1; i >= 0; i--) {
+      const name = names[i];
+      const full = join(historyDir, name);
+      let raw;
+      try { raw = readFileSync(full, 'utf8'); } catch { continue; }
+      const meta = parsePatchMeta(raw);
+      const diff = extractPatchBody(raw) ?? '';
+      if (!meta?.filePath || !diff.trim()) { skipped.push(name); continue; }
+
+      // 只动工作区内的文件（同编辑器 fs:writeFile 的沙箱口径）
+      let target;
+      try { target = resolveEditorPath(meta.filePath); } catch { skipped.push(name); continue; }
+      if (!existsSync(target)) { skipped.push(name); continue; }
+
+      let current;
+      try { current = readFileSync(target, 'utf8'); } catch { skipped.push(name); continue; }
+      // 编辑器内部统一 LF，还原后再按原文件行尾写回
+      const eol = current.includes('\r\n') ? '\r\n' : current.includes('\r') ? '\r' : '\n';
+      const normalized = current.replace(/\r\n?/g, '\n');
+
+      let reverted;
+      try {
+        reverted = revertContent(normalized, diff);
+      } catch (err) {
+        if (err instanceof RevertError) { skipped.push(name); continue; }
+        throw err;
+      }
+
+      writeFileSync(target, eol === '\n' ? reverted : reverted.replace(/\n/g, eol), 'utf8');
+      // 归档：改后缀而非删除，保留痕迹便于人工恢复
+      try { renameSync(full, `${full}.reverted`); } catch { /* 归档失败不影响回退结果 */ }
+
+      return {
+        ok: true,
+        recordId: name.replace(/\.diff$/, ''),
+        filePath: meta.filePath,
+        skipped: skipped.length,
+      };
+    }
+
+    return { ok: false, error: '找到的改动记录都无法对应当前文件内容，无法回退' };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/** 单条 diff 记录的正文上限（超出截断，避免整段历史撑爆 IPC 负载） */
+const MAX_PATCH_DIFF_CHARS = 20000;
+
+/** 单次查询的 diff 正文总预算：超出后只返回元信息（列表仍完整，差异视图降级为「无行级差异」） */
+const MAX_PATCH_DIFF_BUDGET = 400 * 1024;
+
+/** 历史文件名形如 20260628T173951-0buy.diff，前缀即时间戳；解析失败返回 0 */
+function parseHistoryTs(name) {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/.exec(name);
+  if (!m) return 0;
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+}
+
+/**
+ * 列出 AI 的文件改动记录（读取活跃工作区根的 .seek-agent/history/*.diff）。
+ * payload.since：毫秒时间戳，只返回其后的记录（「距上次审查」语义）；
+ * payload.limit：条数上限。历史文件名按时间倒序排列，扫到早于 since 的即可停止。
+ */
+registerRpc('fs:listPatches', async (payload = {}) => {
+  try {
+    const since = Number(payload?.since) || 0;
+    const limit = Math.min(Math.max(Number(payload?.limit) || 200, 1), 500);
+    const historyDir = join(currentWorkDir, '.seek-agent', 'history');
+    if (!existsSync(historyDir)) return { ok: true, entries: [] };
+
+    const names = readdirSync(historyDir).filter(n => n.endsWith('.diff')).sort().reverse();
+    const entries = [];
+    let diffBudget = MAX_PATCH_DIFF_BUDGET;
+    for (const name of names) {
+      if (entries.length >= limit) break;
+      const ts = parseHistoryTs(name);
+      if (since && ts && ts <= since) break; // 倒序扫描：更早的都不必再读
+      let raw;
+      try { raw = readFileSync(join(historyDir, name), 'utf8'); } catch { continue; }
+      // .diff 文件 = 元信息 JSON 头 + 分隔线 + unified diff 正文（见 patch-history.js）
+      const meta = parsePatchMeta(raw);
+      if (!meta || typeof meta.filePath !== 'string') continue;
+      const body = extractPatchBody(raw) ?? '';
+      const diff = diffBudget > 0 ? truncatePatchBody(body, Math.min(MAX_PATCH_DIFF_CHARS, diffBudget)) : '';
+      diffBudget -= diff.length;
+      entries.push({
+        id: name.replace(/\.diff$/, ''),
+        filePath: meta.filePath,
+        timestamp: meta.timestamp || ts,
+        type: meta.type || 'modify',
+        description: meta.description || '',
+        diff,
+      });
+    }
+    return { ok: true, entries };
+  } catch (err) {
+    return { ok: false, entries: [], error: err.message };
+  }
+});
+
 /** 递归构建文件树；depth 控制深入层数，depth=1 时文件夹不含 children（前端懒加载） */
 function buildFileTree(dir, relativePath, depth) {
   const entries = readdirSync(dir, { withFileTypes: true });
@@ -1289,6 +1482,11 @@ if (process.env.SEEK_RELAY_URL) {
     trustedDevicesFile: TRUSTED_DEVICES_FILE,
   });
 }
+
+
+
+
+
 
 
 

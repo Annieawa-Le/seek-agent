@@ -1,32 +1,13 @@
-import { useState, type ReactNode } from 'react';
+import { MODES } from './ModeSelector.tsx';
 
 /**
  * ModePicker — 新会话模式选择启动页
  *
  * 参照 DeepSeek 启动页：消息区为空时垂直居中显示
- * 「使用 {模式名} 开始对话」+ 胶囊模式按钮组。
- * 点击胶囊立即激活模式（经命令通道通知 agent 进程），标题联动。
+ * 「使用 {模式名} 开始对话」+ 模式说明。
+ * 切换入口在输入栏的模式选择器（ModeSelector，与工作区选择器并排），这里只做展示。
  */
 
-/** 统一的内联 SVG 图标容器（Feather Icons 风格，24x24 线性） */
-function Icon({ children, size = 16 }: { children: ReactNode; size?: number }) {
-  return (
-    <svg
-      className="mode-pill-icon"
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {children}
-    </svg>
-  );
-}
 
 /** 鲸鱼徽章（启动页 Logo，与 Header 图标同源 favicon.svg） */
 function WhaleBadge() {
@@ -37,102 +18,30 @@ function WhaleBadge() {
   );
 }
 
-interface ModeMeta {
-  name: string;
-  label: string;
-  icon: ReactNode;
-  desc: string;
-}
-
-/** 内置模式元数据（与 src/modes/index.ts 注册保持一致） */
-const MODES: ModeMeta[] = [
-  {
-    name: 'default',
-    label: '快速模式',
-    icon: <Icon><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" /></Icon>,
-    desc: '通用循环，不挂策略',
-  },
-  {
-    name: 'kb',
-    label: '知识库模式',
-    icon: <Icon><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></Icon>,
-    desc: '回答前强制检索知识库',
-  },
-  {
-    name: 'manager',
-    label: 'Manager 模式',
-    icon: (
-      <Icon>
-        <circle cx="18" cy="5" r="3" />
-        <circle cx="6" cy="12" r="3" />
-        <circle cx="18" cy="19" r="3" />
-        <path d="m8.59 13.51 6.83 3.98" />
-        <path d="m15.41 6.51 -6.82 3.98" />
-      </Icon>
-    ),
-    desc: '子 agent 编排，复杂任务并行',
-  },
-  {
-    name: 'worker',
-    label: '打工人模式',
-    icon: (
-      <Icon>
-        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-      </Icon>
-    ),
-    desc: '真正的打工人，开工前先创建开发引导员监督',
-  },
-  {
-    name: 'hallucination',
-    label: '100% AI 模式',
-    icon: (
-      <Icon>
-        <path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z" />
-      </Icon>
-    ),
-    desc: '万能工具幻觉世界，所有工具调用由后台 AI 圆梦',
-  }
-];
 
 interface Props {
-  /** 命令通道（复用 useElectronAPI 的 sendCommand） */
-  api: { sendCommand: (cmd: string) => void };
-  /** 会话标识：切换会话时重置选中态 */
-  sessionKey?: string;
+  /** 当前模式名（由输入栏的模式选择器驱动，这里只做展示） */
+  mode: string;
 }
 
-export function ModePicker({ api, sessionKey }: Props) {
-  const [active, setActive] = useState('default');
-
-  const select = (name: string) => {
-    setActive(name);
-    // 静默切换命令：只切模式不产生消息（/mode 指令会输出 agent 反馈导致启动页误退场）
-    api.sendCommand(`mode:set ${name}`);
-  };
-
-  const current = MODES.find((m) => m.name === active) ?? MODES[0];
+export function ModePicker({ mode }: Props) {
+  const current = MODES.find((m) => m.name === mode) ?? MODES[0];
 
   return (
-    <div className="mode-picker" key={sessionKey}>
+    <div className="mode-picker">
       <div className="mode-picker-badge"><WhaleBadge /></div>
       <h1 className="mode-picker-title">使用{current.label}开始对话</h1>
-      <div className="mode-picker-options">
-        {MODES.map((m) => (
-          <button
-            key={m.name}
-            type="button"
-            className={`mode-pill${m.name === active ? ' active' : ''}`}
-            onClick={() => select(m.name)}
-          >
-            <span className="mode-pill-icon">{m.icon}</span>
-            <span className="mode-pill-label">{m.label}</span>
-          </button>
-        ))}
-      </div>
       <p className="mode-picker-desc">{current.desc}</p>
     </div>
   );
 }
+
+
+
+
+
+
+
 
 
 

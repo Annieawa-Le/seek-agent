@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentStatus, CollabLogEntry, FileTreeNode, GitChange, RemoteDeviceInfo, RemotePairCode, RemoteStatus, SessionInfo, WorkdirState } from '@/types/index.ts';
+import type { AgentMessage, AgentStatus, CollabLogEntry, FileTreeNode, GitChange, ListPatchesResult, ReadFileResult, RemoteDeviceInfo, RemotePairCode, RemoteStatus, SessionInfo, UndoPatchResult, WorkdirState, WriteFileResult } from '@/types/index.ts';
 import { useEffect, useRef, useCallback, useMemo } from 'react';
 
 export function isElectron(): boolean {
@@ -118,6 +118,26 @@ export function useElectronAPI() {
   const readGitStatus = useCallback(async (): Promise<GitChange[]> => {
     if (!api) return [];
     return api.readGitStatus();
+  }, [api]);
+
+  const readFile = useCallback(async (filePath: string): Promise<ReadFileResult> => {
+    if (!api) return { ok: false, error: 'API 不可用' };
+    return api.readFile(filePath);
+  }, [api]);
+
+  const writeFile = useCallback(async (payload: { path: string; content: string }): Promise<WriteFileResult> => {
+    if (!api) return { ok: false, error: 'API 不可用' };
+    return api.writeFile(payload);
+  }, [api]);
+
+  const listPatches = useCallback(async (payload?: { since?: number; limit?: number }): Promise<ListPatchesResult> => {
+    if (!api) return { ok: false, entries: [], error: 'API 不可用' };
+    return api.listPatches(payload);
+  }, [api]);
+
+  const undoPatch = useCallback(async (payload?: { recordId?: string }): Promise<UndoPatchResult> => {
+    if (!api) return { ok: false, error: 'API 不可用' };
+    return api.undoPatch(payload);
   }, [api]);
 
   const listSessions = useCallback(async (): Promise<SessionInfo[]> => {
@@ -280,6 +300,10 @@ export function useElectronAPI() {
     getRecentDirs,
     readFileTree,
     readGitStatus,
+    readFile,
+    writeFile,
+    listPatches,
+    undoPatch,
     listSessions,
     onCollabEvent,
     onSessionError,
@@ -307,6 +331,7 @@ export function useElectronAPI() {
     onMaximizedChange,
   }), [api]);
 }
+
 
 
 

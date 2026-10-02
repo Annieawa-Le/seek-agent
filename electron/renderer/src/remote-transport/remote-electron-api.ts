@@ -26,6 +26,9 @@
 import type {
   ConnectionStatus,
   ElectronAPI,
+  ListPatchesResult,
+  UndoPatchResult,
+  ReadFileResult,
   RemoteElectronAPIConfig,
   StatusInfo,
   StatusListener,
@@ -34,6 +37,7 @@ import type {
   TrustRevokedPayload,
   Unsubscribe,
   WebSocketLike,
+  WriteFileResult,
 } from './types.ts';
 
 /** WebSocket.OPEN */
@@ -579,6 +583,12 @@ class RemoteTransport {
       readFileTree: (dirPath?: string) =>
         invoke('readFileTree', dirPath === undefined ? [] : [dirPath]),
       readGitStatus: () => invoke('readGitStatus'),
+      readFile: (filePath: string) => invoke<ReadFileResult>('readFile', [filePath]),
+      writeFile: (payload: { path: string; content: string }) => invoke<WriteFileResult>('writeFile', [payload]),
+      listPatches: (payload?: { since?: number; limit?: number }) =>
+        invoke<ListPatchesResult>('listPatches', payload === undefined ? [] : [payload]),
+      undoPatch: (payload?: { recordId?: string }) =>
+        invoke<UndoPatchResult>('undoPatch', payload === undefined ? [] : [payload]),
       getSkillsList: () => invoke('getSkillsList'),
 
       // ---- A 直通：会话 / 协作 ----
@@ -633,6 +643,7 @@ class RemoteTransport {
     };
   }
 }
+
 
 
 

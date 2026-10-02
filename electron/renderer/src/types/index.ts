@@ -1,3 +1,11 @@
+/** 标签页条目：会话标签（kind=session）与文件编辑器标签（kind=file）共存于标题栏 */
+export interface TabItem {
+  id: string;
+  title: string;
+  /** 标签类型；缺省视为 session（兼容既有会话标签构造点） */
+  kind?: 'session' | 'file';
+}
+
 /** 工作区状态：多根挂载 + 当前活跃根 */
 export interface WorkdirState {
   roots: string[];
@@ -31,6 +39,14 @@ export interface ElectronAPI {
   getRecentDirs: () => Promise<string[]>;
   readFileTree: (dirPath: string) => Promise<FileTreeNode[]>;
   readGitStatus: () => Promise<GitChange[]>;
+  /** 读取文本文件内容（内嵌编辑器用） */
+  readFile: (filePath: string) => Promise<ReadFileResult>;
+  /** 写入文本文件（内嵌编辑器保存用） */
+  writeFile: (payload: { path: string; content: string }) => Promise<WriteFileResult>;
+  /** 列出 AI 的文件改动记录（编辑器审查面板用；since 为毫秒时间戳下限） */
+  listPatches: (payload?: { since?: number; limit?: number }) => Promise<ListPatchesResult>;
+  /** 回退一条 AI 改动记录（审查面板「回退」；省略 recordId 即回退最近一条） */
+  undoPatch: (payload?: { recordId?: string }) => Promise<UndoPatchResult>;
   listSessions: () => Promise<SessionInfo[]>;
 
   /** 监听跨会话协作事件（collab:event） */
@@ -217,6 +233,60 @@ export interface FileTreeNode {
   children?: FileTreeNode[];
 }
 
+/** 读取文本文件结果：ok=true 时带内容，否则 error 说明原因（目录/二进制/超限/不存在） */
+export interface ReadFileResult {
+  ok: boolean;
+  path?: string;
+  name?: string;
+  content?: string;
+  size?: number;
+  mtime?: number;
+  error?: string;
+}
+
+/** 写入文本文件结果 */
+export interface WriteFileResult {
+  ok: boolean;
+  path?: string;
+  size?: number;
+  mtime?: number;
+  error?: string;
+}
+
+/** AI 改动记录（.seek-agent/history/*.diff 的解析结果，编辑器「审查」数据源） */
+export interface PatchRecord {
+  /** 记录 id（历史文件名去后缀） */
+  id: string;
+  /** 目标文件绝对路径 */
+  filePath: string;
+  /** 修改时间（毫秒） */
+  timestamp: number;
+  /** 操作类型 */
+  type: 'add' | 'del' | 'modify' | 'replace' | 'batch';
+  /** 操作描述（如「写入行（src/a.ts）」） */
+  description: string;
+  /** unified diff 正文：`-` 删除行 / `+` 新增行 / 空格 上下文行 */
+  diff: string;
+}
+
+/** 列出 AI 改动记录的结果 */
+export interface ListPatchesResult {
+  ok: boolean;
+  entries: PatchRecord[];
+  error?: string;
+}
+
+/** 回退一条 AI 改动记录的结果 */
+export interface UndoPatchResult {
+  ok: boolean;
+  /** 实际回退的记录 id（省略入参时由主进程挑选最近一条可还原的） */
+  recordId?: string;
+  filePath?: string;
+  /** 因定位不上而跳过、继续往前找的记录数 */
+  skipped?: number;
+  error?: string;
+}
+
 export interface GitChange {
   status: string;
   file: string;
@@ -298,6 +368,8 @@ export interface RemoteDeviceInfo {
   /** 信任时间（ISO 字符串） */
   trustedAt?: string | null;
 }
+
+
 
 
 

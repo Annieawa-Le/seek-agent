@@ -1,13 +1,29 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { isElectron } from '@/hooks/useElectronAPI.ts';
 import { FolderSelector } from './FolderSelector.tsx';
+import { ModeSelector } from './ModeSelector.tsx';
+import { buildFence, type ReviewContext } from './SelectionToolbar.tsx';
+import { baseName } from '@/utils/display-format.ts';
 
 interface Attachment {
   name: string;
+  /** 文件类附件：磁盘路径；代码片段附件：出处文件路径（仅用于展示与标注） */
   path: string;
-  /** 来源类型：拖拽时区分文件/文件夹，仅影响 chip 图标 */
-  type?: 'file' | 'folder';
+  /** 来源类型：拖拽区分文件/文件夹，snippet 为「审查时选中的代码片段」 */
+  type?: 'file' | 'folder' | 'snippet';
+  /** 仅 snippet：代码原文 */
+  code?: string;
+  /** 仅 snippet：在源文件中的起止行号（1 基） */
+  startLine?: number;
+  endLine?: number;
 }
+
+/**
+ * 附件的唯一标识：不能只用 path——同一文件的多个代码片段会共用路径，
+ * 按 path 当 key / 按 path 删除都会串到别的附件上。
+ */
+const attachmentId = (a: Attachment) =>
+  a.type === 'snippet' ? `snippet:${a.path}:${a.startLine}:${a.endLine}` : `file:${a.path}`;
 
 interface Props {
   processing: boolean;
@@ -17,6 +33,10 @@ interface Props {
   usageSummary: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cacheHitRate: number | null };
   /** 当前会话 id：输入栏草稿（文本/附件/技能选择）按会话独立保存与恢复 */
   sessionKey: string;
+  /** 当前模式名（受控于 App，与启动页标题联动） */
+  mode: string;
+  /** 切换模式（上层同步 agent 进程与状态） */
+  onSelectMode: (name: string) => void;
   thinking: boolean;
   kbEnabled: boolean;
   thinkingEnabled: boolean;
@@ -27,6 +47,21 @@ interface Props {
   onAbort: () => void;
   onToggleKb: () => void;
   onToggleSmartSearch: (enabled: boolean) => void;
+  /**
+   * 外部送入的待发送内容（审查模式下把选中代码拖到会话区触发）。
+   * 用递增的 id 而非纯文本做触发条件：同样的代码可以被追问第二次，
+   * 只看内容的话第二次不会生效。
+   */
+  /** 审查追问注入：追问语进正文，选中的代码片段挂成附件 chip */
+  injected?: { id: number; prompt: string; ctx: ReviewContext } | null;
+  /** 抑制挂载后的自动聚焦（右侧栏副本用：抢焦点会让编辑器选区丢失） */
+  suppressAutoFocus?: boolean;
+  /**
+   * 精简模式（右侧栏副本用）：隐藏模式选择与工作区选择。
+   * 二者都是「会话级」的设置，在主区已经是固定入口；右侧栏空间有限，
+   * 在那里重复暴露只会诱使人切换会话属性，反而绕。
+   */
+  compact?: boolean;
 }
 
 function inferSkillLabel(name: string, description: string): string {
@@ -74,6 +109,7 @@ function formatElapsed(ms: number): string {
 
 export function InputBar({
   sessionKey, processing, ctxTokens, usageSummary, thinking, kbEnabled, smartSearchEnabled, thinkingEnabled, skillsList,
+  mode, onSelectMode, injected, suppressAutoFocus, compact,
   onSend, onAbort, onToggleKb, onToggleSmartSearch, onToggleThinking,
 }: Props) {
   const [value, setValue] = useState('');
@@ -148,6 +184,43 @@ export function InputBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionKey]);
 
+  /*
+    外部注入（审查模式把选中代码拖到会话区）：
+    追加到当前草稿而不是覆盖——用户可能已经写了半句话。
+    以 id 变化为准，内容相同也会再次生效。
+  */
+  const lastInjectedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!injected || lastInjectedRef.current === injected.id) return;
+    lastInjectedRef.current = injected.id;
+
+    // 追问语进正文（用户可继续编辑），选中的代码片段挂成附件 chip——
+    // 直接铺在正文里的话，选中几十行时代码会把输入框撑得没法用
+    setValue(prev => (prev.trim() ? `${prev.trim()}\n\n${injected.prompt}` : injected.prompt));
+    const { ctx } = injected;
+    const snippet: Attachment = {
+      name: `${baseName(ctx.filePath)} · ${ctx.startLine === ctx.endLine ? `第 ${ctx.startLine} 行` : `第 ${ctx.startLine}-${ctx.endLine} 行`}`,
+      path: ctx.filePath,
+      type: 'snippet',
+      code: ctx.code,
+      startLine: ctx.startLine,
+      endLine: ctx.endLine,
+    };
+    // 同一段代码重复拖入时只留一份
+    setAttachments(prev => (
+      prev.some(a => a.type === 'snippet' && a.path === snippet.path
+        && a.startLine === snippet.startLine && a.endLine === snippet.endLine)
+        ? prev : [...prev, snippet]
+    ));
+
+    setTimeout(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = ta.value.length;
+    }, 0);
+  }, [injected]);
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -205,9 +278,9 @@ export function InputBar({
     });
   }, []);
 
-  // 移除附件
-  const removeAttachment = useCallback((path: string) => {
-    setAttachments(prev => prev.filter(a => a.path !== path));
+  // 移除附件（按唯一标识，同一文件的多个代码片段互不影响）
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments(prev => prev.filter(a => attachmentId(a) !== id));
   }, []);
 
   // ── 拖拽附件（从右侧文件树或系统文件管理器拖入）──
@@ -274,10 +347,23 @@ export function InputBar({
 
     let text = trimmed;
 
-    // 附件以 markdown 链接格式追加，AI 看到的是 [文件名](路径)
-    if (attachments.length > 0) {
+    // 文件类附件以 markdown 链接追加，AI 看到的是 [文件名](路径)；
+    // 代码片段附件则还原成围栏代码块——发送后气泡里照常渲染成代码块
+    const files = attachments.filter(a => a.type !== 'snippet');
+    const snippets = attachments.filter(a => a.type === 'snippet');
+
+    if (files.length > 0) {
       if (text) text += '\n\n';
-      text += attachments.map(a => `[${a.name}](${a.path})`).join('\n');
+      text += files.map(a => `[${a.name}](${a.path})`).join('\n');
+    }
+    for (const s of snippets) {
+      if (text) text += '\n\n';
+      text += buildFence({
+        code: s.code ?? '',
+        filePath: s.path,
+        startLine: s.startLine ?? 1,
+        endLine: s.endLine ?? (s.startLine ?? 1),
+      });
     }
 
     if (hasSelectedSkills) {
@@ -309,13 +395,21 @@ export function InputBar({
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }, [handleSend]);
 
-  useEffect(() => { setTimeout(() => textareaRef.current?.focus(), 300); }, []);
+  // 首次挂载后自动聚焦（主区输入框的顺手感）。
+  // suppressed：同一个会话视图可能被搬进右侧栏，那份不能抢焦点——
+  // 抢了会让编辑器里的选区失焦，选区工具栏立刻就收起来了。
+  useEffect(() => {
+    if (suppressAutoFocus) return;
+    setTimeout(() => textareaRef.current?.focus(), 300);
+  }, [suppressAutoFocus]);
 
   return (
     <div className="input-bar">
       <div className="input-bar-body">
         <div
           className={`input-wrapper${dragOver ? ' drag-over' : ''}`}
+          /* data-review-drop：审查工具栏靠它做命中检测，拖到输入框即视为「追问这个会话」 */
+          data-review-drop="1"
           onDragOver={handleDragOver}
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
@@ -371,7 +465,8 @@ export function InputBar({
             </div>
             <div className="input-toolbar-spacer" />
             <div className="input-actions">
-              <FolderSelector />
+              {!compact && <ModeSelector mode={mode} onSelect={onSelectMode} />}
+              {!compact && <FolderSelector />}
               <button
                 className="action-btn"
                 title="添加附件"
@@ -404,8 +499,14 @@ export function InputBar({
           {attachments.length > 0 && (
             <div className="attachment-bar">
               {attachments.map(a => (
-                <span key={a.path} className="attachment-chip">
-                  {a.type === 'folder' ? (
+                <span key={attachmentId(a)} className={`attachment-chip${a.type === 'snippet' ? ' attachment-chip-snippet' : ''}`}>
+                  {a.type === 'snippet' ? (
+                    /* 代码片段：用代码图标区分于文件/文件夹附件 */
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="attachment-chip-icon">
+                      <polyline points="16 18 22 12 16 6" />
+                      <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                  ) : a.type === 'folder' ? (
                     <span className="attachment-chip-icon attachment-chip-folder">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
@@ -419,7 +520,7 @@ export function InputBar({
                   <span className="attachment-chip-name" title={a.path}>{a.name}</span>
                   <button
                     className="attachment-chip-remove"
-                    onClick={() => removeAttachment(a.path)}
+                    onClick={() => removeAttachment(attachmentId(a))}
                     title="移除附件"
                   >
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -490,6 +591,8 @@ export function InputBar({
     </div>
   );
 }
+
+
 
 
 

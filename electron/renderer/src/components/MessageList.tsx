@@ -58,8 +58,8 @@ export const MessageList = memo(function MessageList({ messages, hasEarlier, onL
   };
 
   return (
-    <div id="message-area" ref={areaRef} onScroll={handleScroll}>
-      <div id="message-list">
+    <div id="message-area" className="message-area" ref={areaRef} onScroll={handleScroll}>
+      <div id="message-list" className="message-list">
         {messages.map(msg => (
           <MessageItem key={msg.id} msg={msg} />
         ))}

@@ -176,6 +176,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readGitStatus: async () => {
     return ipcRenderer.invoke('fs:readGitStatus');
   },
+
+  /** 读取文本文件内容（内嵌编辑器；返回 { ok, content } 或 { ok:false, error }） */
+  readFile: async (filePath) => {
+    return ipcRenderer.invoke('fs:readFile', filePath);
+  },
+
+  /** 写入文本文件（内嵌编辑器保存；payload: { path, content }） */
+  writeFile: async (payload) => {
+    return ipcRenderer.invoke('fs:writeFile', payload);
+  },
+
+  /** 列出 AI 的文件改动记录（编辑器「审查」用；payload: { since?, limit? }） */
+  listPatches: async (payload) => {
+    return ipcRenderer.invoke('fs:listPatches', payload);
+  },
+
+  /** 回退一条 AI 改动记录（审查面板「回退」；省略 recordId 即回退最近一条） */
+  undoPatch: async (payload) => {
+    return ipcRenderer.invoke('history:undo', payload);
+  },
+
   /** 打开系统对话框选择附件文件（支持多选） */
   openFileDialog: async () => {
     return ipcRenderer.invoke('dialog:openFiles');
@@ -278,6 +299,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('window:isMaximized');
   },
 });
+
 
 
 

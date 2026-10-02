@@ -54,10 +54,29 @@ function handleNodeDragStart(e: React.DragEvent, node: FileTreeNode) {
   window.addEventListener('dragend', cleanupDragImage, { once: true });
 }
 
-type PanelTab = 'files' | 'changes' | 'collab' | 'devices' | 'memory';
-export function RightPanel({ runtimeData, open }: { runtimeData: SidebarRuntimeData | null; open?: boolean }) {
+export type PanelTab = 'session' | 'files' | 'changes' | 'collab' | 'devices' | 'memory';
+export function RightPanel({ runtimeData, open, onOpenFile, onSwitchToSession, sessionPanel, tab, onTabChange }: {
+  runtimeData: SidebarRuntimeData | null;
+  open?: boolean;
+  /** 双击文件：在内嵌编辑器中打开（新标签页） */
+  onOpenFile?: (absPath: string) => void;
+  /** 面板内切换视图时收回编辑器（点文件才回到编辑器） */
+  onSwitchToSession?: () => void;
+  /**
+   * 「会话」Tab 的内容（消息列表 + 输入栏）。
+   * 由 App 注入而非本组件自渲染：消息状态与发送逻辑都活在 App 里，
+   * 这里只是换个位置把它显示出来。
+   */
+  sessionPanel?: React.ReactNode;
+  /** 受控 tab：切到文件编辑器时由 App 拨回会话视图，故状态必须放在宿主 */
+  tab?: PanelTab;
+  onTabChange?: (tab: PanelTab) => void;
+}) {
   const { readGitStatus } = useElectronAPI();
-  const [currentTab, setCurrentTab] = useState<PanelTab>('files');
+  const [innerTab, setInnerTab] = useState<PanelTab>('files');
+  // 受控优先：外部给了 tab 就以它为准，否则退回内部状态（保持旧调用点可用）
+  const currentTab = tab ?? innerTab;
+  const setCurrentTab = (next: PanelTab) => { setInnerTab(next); onTabChange?.(next); };
   const [gitChanges, setGitChanges] = useState<GitChange[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -75,18 +94,21 @@ export function RightPanel({ runtimeData, open }: { runtimeData: SidebarRuntimeD
   return (
     <aside id="info-panel" className={open === false ? 'info-panel-closed' : open ? 'info-panel-open' : undefined}>
       <div className="panel-tabs">
-        <span className={`panel-tab${currentTab === 'files' ? ' active' : ' inactive'}`} onClick={() => setCurrentTab('files')}>文件</span>
-        <span className={`panel-tab${currentTab === 'changes' ? ' active' : ' inactive'}`} onClick={() => setCurrentTab('changes')}>改动</span>
-        <span className={`panel-tab${currentTab === 'collab' ? ' active' : ' inactive'}`} onClick={() => setCurrentTab('collab')}>协作</span>
-        <span className={`panel-tab${currentTab === 'devices' ? ' active' : ' inactive'}`} onClick={() => setCurrentTab('devices')}>设备</span>
-        <span className={`panel-tab${currentTab === 'memory' ? ' active' : ' inactive'}`} onClick={() => setCurrentTab('memory')}>记忆</span>
+        {/* 「会话」Tab：把主消息界面搬到这里（切到文件编辑器后仍能看会话进展/继续发消息） */}
+        <span className={`panel-tab${currentTab === 'session' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('session'); onSwitchToSession?.(); }}>会话</span>
+        <span className={`panel-tab${currentTab === 'files' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('files'); onSwitchToSession?.(); }}>文件</span>
+        <span className={`panel-tab${currentTab === 'changes' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('changes'); onSwitchToSession?.(); }}>改动</span>
+        <span className={`panel-tab${currentTab === 'collab' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('collab'); onSwitchToSession?.(); }}>协作</span>
+        <span className={`panel-tab${currentTab === 'devices' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('devices'); onSwitchToSession?.(); }}>设备</span>
+        <span className={`panel-tab${currentTab === 'memory' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('memory'); onSwitchToSession?.(); }}>记忆</span>
         <div className="panel-tab-actions">
           <button className="panel-tab-btn" title="搜索"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
           <button className="panel-tab-btn" title="面板布局"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button>
         </div>
       </div>
-      <div id="panel-content">
-        {currentTab === 'files' && <FileTabContent />}
+      <div id="panel-content" className={currentTab === 'session' ? 'panel-content-session' : undefined}>
+        {currentTab === 'session' && sessionPanel}
+        {currentTab === 'files' && <FileTabContent onOpenFile={onOpenFile} />}
         {currentTab === 'changes' && (loading ? <div className="file-tree-loading">加载中…</div> : <GitChangesContent changes={gitChanges} />)}
         {currentTab === 'collab' && <CollabContent runtimeData={runtimeData} />}
         {currentTab === 'devices' && <DevicesContent />}
@@ -117,7 +139,7 @@ function pathBase(p: string): string {
   return parts[parts.length - 1] || p;
 }
 
-function FileTabContent() {
+function FileTabContent({ onOpenFile }: { onOpenFile?: (absPath: string) => void }) {
   const { readFileTree, getWorkdir, onWorkdirChanged } = useElectronAPI();
   const [roots, setRoots] = useState<WorkspaceRootEntry[]>([]);
   /** 当前展开的工作区根（默认全部收起） */
@@ -171,6 +193,12 @@ function FileTabContent() {
   };
   const backToRoots = () => { setMoveDir('back'); setPos(null); };
 
+  /** 双击文件：交给宿主在内嵌编辑器中以新标签页打开（文件夹双击仍是进入） */
+  const handleFileDoubleClick = (node: FileTreeNode) => {
+    if (node.type !== 'file') return;
+    onOpenFile?.(node.absPath || node.path);
+  };
+
   // 浏览视图内容：位置变化时按需读取该目录（单层）
   useEffect(() => {
     if (!pos) return;
@@ -219,7 +247,7 @@ function FileTabContent() {
                             <span className="browser-enter-icon">›</span>
                           </div>
                         ) : (
-                          <div key={node.path} className="tree-item file" draggable onDragStart={e => handleNodeDragStart(e, node)} title={node.absPath || node.path}>
+                          <div key={node.path} className="tree-item file" draggable onDragStart={e => handleNodeDragStart(e, node)} onDoubleClick={() => handleFileDoubleClick(node)} title={node.absPath || node.path}>
                             {tagClassMap[node.ext || ''] ? <span className={`tree-tag ${tagClassMap[node.ext || '']}`}>{(tagLabelMap[node.ext || ''] || node.ext || '').toUpperCase()}</span>
                               : <span className="tree-icon">≡</span>}
                             <span className="tree-name">{node.name}</span>
@@ -264,7 +292,7 @@ function FileTabContent() {
                   <span className="browser-enter-icon">›</span>
                 </div>
               ) : (
-                <div key={node.path} className="tree-item file" draggable onDragStart={e => handleNodeDragStart(e, node)} title={node.absPath || node.path}>
+                <div key={node.path} className="tree-item file" draggable onDragStart={e => handleNodeDragStart(e, node)} onDoubleClick={() => handleFileDoubleClick(node)} title={node.absPath || node.path}>
                   {tagClassMap[node.ext || ''] ? <span className={`tree-tag ${tagClassMap[node.ext || '']}`}>{(tagLabelMap[node.ext || ''] || node.ext || '').toUpperCase()}</span>
                     : <span className="tree-icon">≡</span>}
                   <span className="tree-name">{node.name}</span>
@@ -585,6 +613,7 @@ function ChatView({ peer, peerType, thread, streams, api, onBack }: {
     </div>
   );
 }
+
 
 
 

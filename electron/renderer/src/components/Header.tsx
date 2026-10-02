@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
 import type { AgentStatusState } from '@/hooks/useAgentStatus.ts';
-import { Tabs, type TabItem } from './Tabs.tsx';
+import { Tabs } from './Tabs.tsx';
+import type { TabItem } from '@/types/index.ts';
 
 interface Props {
   status: AgentStatusState;
@@ -18,6 +19,8 @@ interface Props {
   onTabSelect: (id: string) => void;
   onTabClose: (id: string) => void;
   onTabNew: () => void;
+  /** 文件拖入标签页栏：在内嵌编辑器中打开（新标签页） */
+  onDropFile?: (file: { path: string; name: string; type: 'file' | 'folder' }) => void;
 }
 
 const dotClass: Record<string, string> = {
@@ -26,7 +29,7 @@ const dotClass: Record<string, string> = {
   connecting: 'status-dot disconnected',
 };
 
-export function Header({ status, theme, onToggleTheme, onOpenSettings, onToggleSidebar, sidebarOpen, panelOpen, onTogglePanel, tabs, activeTabId, onTabSelect, onTabClose, onTabNew }: Props) {
+export function Header({ status, theme, onToggleTheme, onOpenSettings, onToggleSidebar, sidebarOpen, panelOpen, onTogglePanel, tabs, activeTabId, onTabSelect, onTabClose, onTabNew, onDropFile }: Props) {
   const api = useElectronAPI();
   const { minimizeWindow, maximizeWindow, closeWindow, onMaximizedChange, isWindowMaximized } = api;
   const [isMaximized, setIsMaximized] = useState(false);
@@ -57,6 +60,7 @@ export function Header({ status, theme, onToggleTheme, onOpenSettings, onToggleS
           onSelect={onTabSelect}
           onClose={onTabClose}
           onNew={onTabNew}
+          onDropFile={onDropFile}
         />
       </div>
 

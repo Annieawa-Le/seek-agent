@@ -175,6 +175,52 @@ export interface GitChange {
   [key: string]: unknown;
 }
 
+/** 读取文本文件结果（与 renderer types/index.ts 契约一致） */
+export interface ReadFileResult {
+  ok: boolean;
+  path?: string;
+  name?: string;
+  content?: string;
+  size?: number;
+  mtime?: number;
+  error?: string;
+}
+
+/** 写入文本文件结果 */
+export interface WriteFileResult {
+  ok: boolean;
+  path?: string;
+  size?: number;
+  mtime?: number;
+  error?: string;
+}
+
+/** AI 改动记录（.seek-agent/history/*.diff 解析结果；与 renderer types/index.ts 契约一致） */
+export interface PatchRecord {
+  id: string;
+  filePath: string;
+  timestamp: number;
+  type: 'add' | 'del' | 'modify' | 'replace' | 'batch';
+  description: string;
+  diff: string;
+}
+
+/** 列出 AI 改动记录的结果 */
+export interface ListPatchesResult {
+  ok: boolean;
+  entries: PatchRecord[];
+  error?: string;
+}
+
+/** 回退一条 AI 改动记录的结果 */
+export interface UndoPatchResult {
+  ok: boolean;
+  recordId?: string;
+  filePath?: string;
+  skipped?: number;
+  error?: string;
+}
+
 export interface Skill {
   name: string;
   [key: string]: unknown;
@@ -290,6 +336,10 @@ export interface ElectronAPI {
   // ---- 文件系统（A 直通 3 个 + B 降级 1 个） ----
   readFileTree(dirPath?: string): Promise<FileTreeNode[]>;
   readGitStatus(): Promise<GitChange[]>;
+  readFile(filePath: string): Promise<ReadFileResult>;
+  writeFile(payload: { path: string; content: string }): Promise<WriteFileResult>;
+  listPatches(payload?: { since?: number; limit?: number }): Promise<ListPatchesResult>;
+  undoPatch(payload?: { recordId?: string }): Promise<UndoPatchResult>;
   openFileDialog(): Promise<OpenFileDialogResult>;
   getSkillsList(): Promise<Skill[]>;
 
@@ -324,6 +374,8 @@ export interface ElectronAPI {
   sendTrustRequest(relayDeviceId: string, remoteId: string, label?: string): void;
   sendTrustRevoke(relayDeviceId: string, remoteId: string): void;
 }
+
+
 
 
 
