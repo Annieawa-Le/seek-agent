@@ -19,7 +19,16 @@ export class ToolCache {
   wasCacheHit = false;
   /** 每个 key 最近一次执行的时间戳（毫秒） */
   private lastExecTime = new Map<string, number>();
-  /** 时间相近阈值（毫秒）：同一 key 在此时间内连续调用才命中缓存 */
+  /** 豁免缓存名单：这些工具往往有实时副作用（后台任务/命令执行/闹钟/任务段标记），
+   *  相同参数反复调用也应每次真实执行，否则会拿到过期结果（如 task_switch 轮询）。
+   *  ALARM_* / MISSION-* 为通配前缀：alarm_* 与 mission-* 全部豁免（任务段状态有唯一性，缓存会跳过真实裁剪）。 */
+  private static readonly NO_CACHE_TOOLS = new Set<string>([
+    'task_execute', 'task_switch', 'task_kill', 'task_list',
+    'execute_command',
+    'ALARM_*',
+    'MISSION-*',
+  ]);
+
   private static readonly PROXIMITY_MS = 600;
   /** 全局上一次调用的工具名（用于连续性检测） */
   private lastToolName: string | null = null;
@@ -46,6 +55,14 @@ export class ToolCache {
     execute: (args: TArgs, options?: any) => Promise<unknown>,
   ): (args: TArgs, options?: any) => Promise<unknown> {
     return async (args: TArgs, options?: any): Promise<unknown> => {
+      // 豁免名单内的工具每次真实执行（实时副作用，缓存会拿到过期结果）
+      if (ToolCache.isNoCache(toolName)) {
+        this.wasCacheHit = false;
+        this.lastToolName = toolName;
+        const result = await execute(args, options);
+        return result;
+      }
+
       const key = this.makeKey(toolName, args);
 
       const cached = this.cache.get(key);
@@ -78,8 +95,24 @@ export class ToolCache {
     const sortedKeys = Object.keys(args).sort();
     return `${toolName}:${JSON.stringify(args, sortedKeys)}`;
   }
+
+  /** 判断工具是否命中豁免名单（支持 * 通配后缀，如 ALARM_*；比较不区分大小写） */
+  private static isNoCache(toolName: string): boolean {
+    if (ToolCache.NO_CACHE_TOOLS.has(toolName)) return true;
+    const upper = toolName.toUpperCase();
+    for (const pattern of ToolCache.NO_CACHE_TOOLS) {
+      if (pattern.endsWith('*') && upper.startsWith(pattern.slice(0, -1))) return true;
+    }
+    return false;
+  }
 }
 
 /** 全局单例 */
 export const toolCache = new ToolCache();
+
+
+
+
+
+
 

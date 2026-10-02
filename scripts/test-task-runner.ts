@@ -47,9 +47,16 @@ async function main() {
   const bulkList = (lst as any).rawBulk;
   ok('task_list bulk tasks 长度 2', Array.isArray(bulkList.tasks) && bulkList.tasks.length === 2);
 
-  console.log('── 同名拒绝 ──');
-  const dup = await taskExecuteTool.execute({ command: 'node -e "console.log(1)"', taskName: 'echo-test' });
-  ok('同名任务被拒绝', dup.toString().includes('已存在'));
+  console.log('── 同名复用与拒绝 ──');
+  // 已结束任务（echo-test 为 done）允许同名复用重建
+  const reuse = await taskExecuteTool.execute({ command: 'node -e "console.log(3)"', taskName: 'echo-test' });
+  ok('已结束同名任务可复用', reuse.toString().includes('后台任务已启动'));
+  // 复用后正在运行 → 同名仍拒绝
+  const dup = await taskExecuteTool.execute({ command: 'node -e "console.log(4)"', taskName: 'echo-test' });
+  ok('running 同名任务被拒绝', dup.toString().includes('正在运行'));
+  await sleep(1000);
+  const t1r = taskRunner.get('echo-test')!;
+  ok('复用任务正常完成且输出正确', t1r.status === 'done' && t1r.stdout.includes('3'));
 
   console.log('── 错误路径 ──');
   const miss = await taskSwitchTool.execute({ taskName: 'nope' });
@@ -59,7 +66,26 @@ async function main() {
   const killMiss = await taskKillTool.execute({ taskName: 'nope' });
   ok('kill 不存在任务报错', killMiss.toString().includes('未找到任务'));
 
+  console.log('── wait 等待 ──');
+  const w1 = await taskExecuteTool.execute({ command: 'node -e "setTimeout(()=>console.log(\'waited-done\'), 1200)"', taskName: 'wait-test' });
+  ok('wait 任务启动', w1.toString().includes('后台任务已启动'));
+  const sw2 = await taskSwitchTool.execute({ taskName: 'wait-test', wait: 5 });
+  const sw2Text = sw2.toString();
+  ok('wait 后任务 done', sw2Text.includes('done'));
+  ok('wait 后拿到完整输出', sw2Text.includes('waited-done'));
+  const sw2Bulk = (sw2 as any).rawBulk;
+  ok('wait 未超时无标记', sw2Bulk.waitTimedOut === false && sw2Bulk.status === 'done');
+
+  console.log('── wait 超时 ──');
+  const w2 = await taskExecuteTool.execute({ command: 'node -e "setInterval(()=>{}, 1000)"', taskName: 'wait-timeout' });
+  const sw3 = await taskSwitchTool.execute({ taskName: 'wait-timeout', wait: 1 });
+  const sw3Bulk = (sw3 as any).rawBulk;
+  ok('wait 超时带标记且仍 running', sw3Bulk.waitTimedOut === true && sw3Bulk.status === 'running');
+  await taskKillTool.execute({ taskName: 'wait-timeout' });
+  await sleep(500);
+
   console.log(`\n🎉 全部通过（${pass} 项断言）`);
 }
 
 main().catch(e => { console.error('❌ 失败:', e.message); process.exit(1); });
+

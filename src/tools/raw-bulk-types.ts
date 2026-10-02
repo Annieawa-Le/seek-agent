@@ -125,6 +125,8 @@ export interface TaskBulk {
   outputTruncated?: boolean;
   /** 完整 stdout 字符数 */
   stdoutChars?: number;
+  /** switch 使用 wait 参数等待超时（任务仍运行） */
+  waitTimedOut?: boolean;
   /** list 时返回的任务摘要列表 */
   tasks?: Array<{
     name: string;
@@ -194,6 +196,23 @@ export interface MemoryBulk {
   error?: string;
 }
 
+/** 任务段（mission）上下文归档结果 */
+export interface MissionBulk {
+  type: 'mission';
+  action: 'start' | 'accomplish' | 'cancel';
+  /** 任务段名称（归档标题） */
+  name: string;
+  /** 归档的 Worklog id（accomplish 时） */
+  worklogId?: string;
+  /** 归档标题（accomplish 时） */
+  title?: string;
+  /** 移出上下文的消息条数（accomplish 时） */
+  messagesRemoved?: number;
+  /** 归档梗概（accomplish 时） */
+  summary?: string;
+  error?: string;
+}
+
 // ============================================================
 // 统一 RawBulk 联合类型
 // ============================================================
@@ -209,7 +228,9 @@ export type RawBulk =
   | TaskBulk
   | TodoBulk
   | MemoryBulk
-  | WorklogBulk;
+  | MissionBulk
+  | WorklogBulk
+  | CmdLogBulk;
 // ============================================================
 // 格式化器接口
 // ============================================================
@@ -248,6 +269,25 @@ export interface WorklogBulk {
   size?: number;
   msg: string;
 }
+
+/** 命令日志召回结果（command_log） */
+export interface CmdLogBulk {
+  type: 'cmd-log';
+  action: 'read';
+  /** 是否命中（日志文件存在） */
+  found: boolean;
+  /** 日志文件路径 */
+  filePath: string;
+  /** 日志总字符数 */
+  size: number;
+  /** 返回内容是否因超过 maxChars 被截断 */
+  truncated: boolean;
+  /** 返回内容（正文） */
+  content?: string;
+  error?: string;
+}
+
+
 
 
 

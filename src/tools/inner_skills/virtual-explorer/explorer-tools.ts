@@ -119,10 +119,10 @@ export const explorerSearchContent = tool({
 // ═════════════════════════════════════════════════════
 export const explorerCreateFile = tool({
   description: '相对于 virtual-explorer 当前目录创建新文件。filePath 是目录（相对 explorer 当前目录），fileName 是文件名。',
-  inputSchema: z.object({ filePath: z.string(), fileName: z.string(), fileContent: z.string() }),
-  execute: async ({ filePath, fileName, fileContent }) => {
+  inputSchema: z.object({ filePath: z.string(), fileName: z.string(), content: z.string() }),
+  execute: async ({ filePath, fileName, content }) => {
     const targetPath = path.join(resolveExplorerPath(filePath), fileName);
-    return callExecute(createFile, { filePath: targetPath, fileContent });
+    return callExecute(createFile, { filePath: targetPath, content });
   },
 });
 
@@ -131,9 +131,9 @@ export const explorerCreateFile = tool({
 // ═════════════════════════════════════════════════════
 export const explorerReplaceFile = tool({
   description: '相对于 virtual-explorer 当前目录替换文件内容。filePath 相对 explorer 当前目录。',
-  inputSchema: z.object({ filePath: z.string(), fileContent: z.string() }),
-  execute: async ({ filePath, fileContent }) => {
-    return callExecute(replaceFile, { filePath: resolveExplorerPath(filePath), fileContent });
+  inputSchema: z.object({ filePath: z.string(), content: z.string() }),
+  execute: async ({ filePath, content }) => {
+    return callExecute(replaceFile, { filePath: resolveExplorerPath(filePath), content });
   },
 });
 

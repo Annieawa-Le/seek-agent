@@ -58,32 +58,39 @@ export async function chunkProject(projectRoot: string): Promise<RawChunk[]> {
 /**
  * 递归扫描项目中所有需要索引的文件
  */
-async function scanFiles(dir: string, root: string = dir): Promise<string[]> {
-  const result: string[] = [];
+/** 单次扫描允许的文件数上限：防止工作区指向盘根/系统目录时把整块盘拉进内存 */
+const MAX_SCAN_FILES = (() => {
+  const v = Number(process.env.KB_MAX_FILES);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : 20000;
+})();
+
+async function scanFiles(dir: string, root: string = dir, acc: string[] = []): Promise<string[]> {
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {
-    return result;
+    return acc;
   }
 
   for (const entry of entries) {
+    if (acc.length > MAX_SCAN_FILES) {
+      throw new Error(`待索引文件数超过上限 ${MAX_SCAN_FILES}（当前工作区疑似为磁盘根目录或包含大量系统文件），已中止扫描以避免内存溢出。请缩小工作区范围，或设置环境变量 KB_MAX_FILES 调整上限。`);
+    }
     const fullPath = path.join(dir, entry.name);
-    const relPath = path.relative(root, fullPath);
 
     if (entry.isDirectory()) {
       if (!IGNORE_DIRS.has(entry.name) && !entry.name.startsWith('.')) {
-        result.push(...(await scanFiles(fullPath, root)));
+        await scanFiles(fullPath, root, acc);
       }
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();
       if ((SOURCE_EXTS.has(ext) || DOC_EXTS.has(ext)) && !IGNORE_FILES.has(entry.name)) {
-        result.push(fullPath);
+        acc.push(fullPath);
       }
     }
   }
 
-  return result;
+  return acc;
 }
 
 /**

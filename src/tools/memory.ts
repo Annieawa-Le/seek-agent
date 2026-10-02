@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { ToolOutput } from './tool-output';
 import type { MemoryBulk } from './raw-bulk-types';
 import { getModel, getSystemPrompt } from '../model-provider';
+import { isWorklogMessage, isSystemInjectMessage } from '../context-compactor';
 
 // ═════════════════════════════════════════════════════
 // 辅助：识别轮次边界
@@ -37,6 +38,9 @@ function findRounds(messages: ModelMessage[]): RoundBoundary[] {
     const msg = messages[i];
 
     if (msg.role === 'user' && typeof msg.content === 'string') {
+      // 系统注入消息（[工作记忆]/[知识库检索]/[长期记忆]/【子模型提交）与 Worklog 条目
+      // 均为 user 身份的非对话内容，不构成真实轮次边界
+      if (isWorklogMessage(msg) || isSystemInjectMessage(msg)) continue;
       if (current) {
         current.end = i - 1;
         rounds.push(current);

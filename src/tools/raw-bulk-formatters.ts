@@ -6,7 +6,7 @@
  *   toTUIText → 终端显示（带 ANSI 颜色、摘要、省略）
  *   toWebUI   → Electron 结构化数据
  */
-import type { RawBulk, ReadFileBulk, SearchBulk, SearchContentBulk, ExecBulk, FileWriteBulk, PatchBulk, DeskBulk, TaskBulk, TodoBulk, MemoryBulk } from './raw-bulk-types';
+import type { RawBulk, ReadFileBulk, SearchBulk, SearchContentBulk, ExecBulk, FileWriteBulk, PatchBulk, DeskBulk, TaskBulk, TodoBulk, MemoryBulk, MissionBulk, CmdLogBulk } from './raw-bulk-types';
 
 
 // ═════════════════════════════════════════════════════
@@ -25,6 +25,8 @@ export function toAIText(bulk: RawBulk): string {
     case 'task': return formatTaskAIText(bulk);
     case 'todo': return formatTodoAIText(bulk);
     case 'memory': return formatMemoryAIText(bulk);
+    case 'mission': return formatMissionAIText(bulk);
+    case 'cmd-log': return formatCmdLogAIText(bulk);
     default: return JSON.stringify(bulk);
   }
 }
@@ -108,7 +110,8 @@ function formatTaskAIText(bulk: TaskBulk): string {
     case 'execute':
       return `🚀 后台任务已启动：${bulk.taskName}（${bulk.status}${bulk.pid != null ? `，PID ${bulk.pid}` : ''}）\n命令：${bulk.command}`;
     case 'switch': {
-      const head = `📡 任务 "${bulk.taskName}"：${bulk.status}${bulk.exitCode != null ? `（退出码 ${bulk.exitCode}）` : ''}，stdout ${bulk.stdoutChars ?? 0} 字符`;
+      const waitNote = bulk.waitTimedOut ? '（等待超时仍未结束）' : '';
+      const head = `📡 任务 "${bulk.taskName}"：${bulk.status}${waitNote}${bulk.exitCode != null ? `（退出码 ${bulk.exitCode}）` : ''}，stdout ${bulk.stdoutChars ?? 0} 字符`;
       return bulk.output ? `${head}\n--- 输出（${bulk.outputTruncated ? '尾部截断' : '全部'}）---\n${bulk.output}` : head;
     }
     case 'kill':
@@ -155,6 +158,23 @@ function formatMemoryAIText(bulk: MemoryBulk): string {
   return bulk.content || bulk.skipReason || `操作完成（${bulk.action}）。`;
 }
 
+function formatMissionAIText(bulk: MissionBulk): string {
+  if (bulk.error) return `⚠ ${bulk.error}`;
+  switch (bulk.action) {
+    case 'start':
+      return `🚩 已标记任务段起点「${bulk.name}」。`;
+    case 'accomplish':
+      return [`📦 任务段「${bulk.title ?? bulk.name}」已归档为 ${bulk.worklogId ?? '?'}（${bulk.messagesRemoved ?? 0} 条消息移出上下文）。`, bulk.summary || ''].filter(Boolean).join('\n');
+    case 'cancel':
+      return `🚩 已取消任务段「${bulk.name}」的标记，上下文保持原样。`;
+  }
+}
+
+function formatCmdLogAIText(bulk: CmdLogBulk): string {
+  if (!bulk.found) return bulk.error ?? '📭 暂无命令日志。';
+  return bulk.content ?? '';
+}
+
 // ═════════════════════════════════════════════════════
 // TUI Renderer — 带 ANSI 颜色、摘要、截断
 // ═════════════════════════════════════════════════════
@@ -175,6 +195,8 @@ export function toTUIText(bulk: RawBulk): string {
     case 'task': return formatTaskTUI(bulk);
     case 'todo': return formatTodoTUI(bulk);
     case 'memory': return formatMemoryTUI(bulk);
+    case 'mission': return formatMissionTUI(bulk);
+    case 'cmd-log': return formatCmdLogTUI(bulk);
     default: return JSON.stringify(bulk);
   }
 }
@@ -234,7 +256,8 @@ function formatTaskTUI(bulk: TaskBulk): string {
   if (bulk.action === 'execute') return `● 后台启动: ${bulk.taskName}${bulk.pid != null ? ` (PID ${bulk.pid})` : ''}`;
   // switch
   const status = bulk.status ?? '?';
-  const head = `● 任务 ${bulk.taskName}: ${status}${bulk.exitCode != null ? ` (码 ${bulk.exitCode})` : ''}`;
+  const waitNote = bulk.waitTimedOut ? '（等待超时仍未结束）' : '';
+  const head = `● 任务 ${bulk.taskName}: ${status}${waitNote}${bulk.exitCode != null ? ` (码 ${bulk.exitCode})` : ''}`;
   if (!bulk.output) return head;
   const lines = bulk.output.split('\n');
   const headLines = lines.slice(0, 6).map(l => `  ${l}`).join('\n');
@@ -277,6 +300,18 @@ function formatMemoryTUI(bulk: MemoryBulk): string {
   return bulk.skipped ? `● ${bulk.skipReason || '重复，已跳过'}` : `${head}: ${bulk.itemCount ?? ''}`.trim();
 }
 
+function formatMissionTUI(bulk: MissionBulk): string {
+  if (bulk.error) return `● 错误: ${bulk.error}`;
+  if (bulk.action === 'start') return `● 标记任务段起点: ${PURPLE}${bulk.name}\x1b[0m`;
+  if (bulk.action === 'cancel') return `● 取消任务段: ${bulk.name}`;
+  return `● 任务段归档: ${PURPLE}${bulk.worklogId ?? '?'}\x1b[0m「${bulk.title ?? bulk.name}」（${bulk.messagesRemoved ?? 0} 条消息移出上下文）`;
+}
+
+function formatCmdLogTUI(bulk: CmdLogBulk): string {
+  if (!bulk.found) return '● 暂无命令日志';
+  return `● 命令日志: ${bulk.filePath}（${PURPLE}${bulk.size}\x1b[0m 字符）`;
+}
+
 // ═════════════════════════════════════════════════════
 // WebUI Renderer — 生成 HTML 供 Electron 前端渲染
 // ═════════════════════════════════════════════════════
@@ -298,6 +333,8 @@ export function toWebUI(bulk: RawBulk): Record<string, unknown> {
     case 'desk': return formatDeskWebUI(bulk);
     case 'todo': return formatTodoWebUI(bulk);
     case 'memory': return formatMemoryWebUI(bulk);
+    case 'mission': return formatMissionWebUI(bulk);
+    case 'cmd-log': return formatCmdLogWebUI(bulk);
     default: return { html: `<pre>${esc(JSON.stringify(bulk))}</pre>` };
   }
 }
@@ -423,7 +460,8 @@ function formatTaskWebUI(bulk: TaskBulk): Record<string, unknown> {
     return { html: `<div class="task-result"><span class="label">后台启动</span><code>${esc(bulk.taskName || '')}</code><span class="meta">${esc(bulk.command || '')}</span></div>` };
   }
   // switch
-  const statusHtml = `<span class="task-status">${bulk.status ?? '?'}${bulk.exitCode != null ? `（退出码 ${bulk.exitCode}）` : ''}</span>`;
+  const waitNote = bulk.waitTimedOut ? '<span class="task-meta">等待超时仍未结束</span>' : '';
+  const statusHtml = `<span class="task-status">${bulk.status ?? '?'}${waitNote}${bulk.exitCode != null ? `（退出码 ${bulk.exitCode}）` : ''}</span>`;
   const out = bulk.output ? `<pre class="exec-output">${esc(bulk.output)}</pre>` : '<div class="empty">暂无输出</div>';
   return { html: `<div class="task-result"><span class="label">任务 ${esc(bulk.taskName || '')}</span>${statusHtml}<span class="meta">stdout ${bulk.stdoutChars ?? 0} 字符${bulk.outputTruncated ? '（尾部截断）' : ''}</span>${out}</div>` };
 }
@@ -516,4 +554,26 @@ function formatMemoryWebUI(bulk: MemoryBulk): Record<string, unknown> {
 
 
 
+
+
+
+
+// ── MissionBulk ──
+function formatMissionWebUI(bulk: MissionBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  if (bulk.action === 'start') {
+    return { html: `<div class="mission-result"><span class="label">标记任务段</span><code>${esc(bulk.name)}</code></div>` };
+  }
+  if (bulk.action === 'cancel') {
+    return { html: `<div class="mission-result"><span class="label">取消任务段</span><code>${esc(bulk.name)}</code></div>` };
+  }
+  const summary = bulk.summary ? `<pre class="mission-summary">${esc(bulk.summary)}</pre>` : '';
+  return { html: `<div class="mission-result"><span class="label">任务段归档</span><code>${esc(bulk.worklogId ?? '?')}</code><span class="meta">${esc(bulk.title ?? bulk.name)} · ${bulk.messagesRemoved ?? 0} 条消息移出上下文</span>${summary}</div>` };
+}
+
+// ── CmdLogBulk ──
+function formatCmdLogWebUI(bulk: CmdLogBulk): Record<string, unknown> {
+  if (!bulk.found) return { html: `<div class="empty">${esc(bulk.error ?? '暂无命令日志')}</div>` };
+  return { html: `<div class="cmd-log"><div class="meta">${esc(bulk.filePath)} · ${bulk.size} 字符</div><pre class="exec-output">${esc(bulk.content ?? '')}</pre></div>` };
+}
 

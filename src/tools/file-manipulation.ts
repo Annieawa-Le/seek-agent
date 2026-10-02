@@ -172,23 +172,23 @@ function locateDelRanges(
 // 1. create_file
 // ============================================================
 export const createFile = tool({
-  description: `创建一个新文件，并写入 fileContent。
+  description: `创建一个新文件，并写入 content。
   filePath 是要创建的文件的完整路径（绝对路径或相对当前工作目录的路径）。
   这是独占的写入方式（文件已存在会报错）。注意：此工具直接执行，不会进入暂存区。`,
   inputSchema: z.object({
     filePath: z.string().describe('要创建的文件的完整路径（绝对或相对当前工作目录的路径）'),
-    fileContent: z.string().describe('要写入的文件内容'),
+    content: z.string().describe('要写入的文件内容'),
   }),
-  execute: async ({ filePath, fileContent }) => {
+  execute: async ({ filePath, content }) => {
     try {
       const targetPath = resolvePath(filePath);
       assertPathInWorkspace(targetPath);
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
       const fileHandle = await fs.open(targetPath, 'wx');
-      await fileHandle.writeFile(fileContent, 'utf8');
+      await fileHandle.writeFile(content, 'utf8');
       await fileHandle.close();
-      const msg = `✅ 文件创建成功：${targetPath}\n📝 写入内容长度：${fileContent.length} 字符`;
-      const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: targetPath, charCount: fileContent.length };
+      const msg = `✅ 文件创建成功：${targetPath}\n📝 写入内容长度：${content.length} 字符`;
+      const bulk: FileWriteBulk = { type: 'file-write', action: 'create', filePath: targetPath, charCount: content.length };
       return new ToolOutput(bulk, msg);
     } catch (error: any) {
       if (error.code === 'EEXIST') {
@@ -207,26 +207,26 @@ export const createFile = tool({
 // 2. replace_file
 // ============================================================
 export const replaceFile = tool({
-  description: `向一个文件中写入 fileContent。
+  description: `向一个文件中写入 content。
   filePath 是文件的绝对路径或相对当前工作目录的路径，会替换原本的所有内容。
   force 为 true 时跳过语法检查。注意：此工具直接执行，不会进入暂存区。`,
   inputSchema: z.object({
     filePath: z.string().describe('文件的绝对路径或相对当前工作目录的路径'),
-    fileContent: z.string().describe('要写入的文件内容'),
+    content: z.string().describe('要写入的文件内容'),
     force: z.boolean().optional().default(false).describe('跳过语法检查'),
   }),
-  execute: async ({ filePath, fileContent, force }) => {
+  execute: async ({ filePath, content, force }) => {
     try {
       const targetPath = resolvePath(filePath);
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
 
       const oldContent = await readFileContent(targetPath);
       const oldLines = oldContent ? oldContent.split(/\r?\n/) : [];
-      const newLines = fileContent.split(/\r?\n/);
+      const newLines = content.split(/\r?\n/);
       const { hasTrailingNewline, lineEnding } = await readFileLines(targetPath);
 
       if (!force) {
-        const checkResult = checkSyntax(targetPath, fileContent);
+        const checkResult = checkSyntax(targetPath, content);
         if (!checkResult.ok) {
           const errMsg = formatSyntaxErrors(checkResult, {
             oldLines, newLines,
@@ -238,19 +238,19 @@ export const replaceFile = tool({
       }
 
       const record = await undoStack.executeWrite(
-        targetPath, 'modify', `覆写文件（${fileContent.length} 字符）`,
+        targetPath, 'modify', `覆写文件（${content.length} 字符）`,
         oldLines, newLines, hasTrailingNewline, lineEnding,
         async (nl: string[]) => {
-          const content = nl.join(lineEnding) + (hasTrailingNewline && nl.length > 0 ? lineEnding : '');
-          await fs.writeFile(targetPath, content, 'utf8');
+          const finalContent = nl.join(lineEnding) + (hasTrailingNewline && nl.length > 0 ? lineEnding : '');
+          await fs.writeFile(targetPath, finalContent, 'utf8');
         },
       );
 
-      let msg = `✅ 写入成功：${targetPath}\n📝 写入内容长度：${fileContent.length} 字符`;
+      let msg = `✅ 写入成功：${targetPath}\n📝 写入内容长度：${content.length} 字符`;
       if (record.diff) msg += `\n\n--- diff ---\n${record.diff}`;
       msg += `\n💡 如需撤销：undo_patch()`;
 
-      const bulk: FileWriteBulk = { type: 'file-write', action: 'replace', filePath: targetPath, charCount: fileContent.length };
+      const bulk: FileWriteBulk = { type: 'file-write', action: 'replace', filePath: targetPath, charCount: content.length };
       return new ToolOutput(bulk, msg);
     } catch (error: any) {
       const errMsg = `❌ 写入失败：${error.message}`;

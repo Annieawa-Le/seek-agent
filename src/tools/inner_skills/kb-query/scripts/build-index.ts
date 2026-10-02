@@ -174,28 +174,42 @@ const IGNORE_DIRS = new Set([
   'packages', 'test', 'ai-ide',
 ]);
 
-async function collectFiles(dir: string): Promise<string[]> {
-  const result: string[] = [];
+/** 单次索引允许扫描的文件数上限：防止工作区指向盘根/系统目录时把整块盘拉进内存 */
+const MAX_SCAN_FILES = (() => {
+  const v = Number(process.env.KB_MAX_FILES);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : 20000;
+})();
+
+/** 待扫描文件数超上限时抛出，交由上层显式中止索引 */
+class ScanLimitExceededError extends Error {
+  constructor(limit: number) {
+    super(`待索引文件数超过上限 ${limit}（当前工作区疑似为磁盘根目录或包含大量系统文件），已中止索引以避免内存溢出。请缩小工作区范围，或设置环境变量 KB_MAX_FILES 调整上限。`);
+    this.name = 'ScanLimitExceededError';
+  }
+}
+
+async function collectFiles(dir: string, acc: string[] = []): Promise<string[]> {
   let entries;
   try {
     entries = await import('node:fs/promises').then(fs => fs.readdir(dir, { withFileTypes: true }));
   } catch {
-    return result;
+    return acc;
   }
   for (const entry of entries) {
+    if (acc.length > MAX_SCAN_FILES) throw new ScanLimitExceededError(MAX_SCAN_FILES);
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (!IGNORE_DIRS.has(entry.name) && !entry.name.startsWith('.')) {
-        result.push(...(await collectFiles(fullPath)));
+        await collectFiles(fullPath, acc);
       }
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();
       if (SOURCE_EXTS.has(ext) || DOC_EXTS.has(ext)) {
-        result.push(fullPath);
+        acc.push(fullPath);
       }
     }
   }
-  return result;
+  return acc;
 }
 
 /** 对单个文件分块（复用 chunker 的逻辑但只处理一个文件）

@@ -27,6 +27,8 @@ const MANAGER_ALLOW_TOOLS = [
   'memory_add', 'memory_update', 'memory_touch', 'memory_remove', 'memory_list',
   'memory_remember', 'memory_recall', 'memory_clear', 'memory_stats',
   'memory_focus', 'memory_shorten',
+  // 任务段归档（配合 todo：一段工作收尾时把过程移出上下文，仅落盘到 Worklog）
+  'mission-start', 'mission-accomplish', 'mission-cancel',
   // 待办（任务拆解与进度跟踪）
   'create_todo', 'finish_step', 'finish_to_step', 'undo_step', 'reroll_step', 'del_step', 'read_todo', 'del_todo', 'active_todo',
   'todo_save', 'todo_load', 'todo_list_saved', 'todo_delete_saved',

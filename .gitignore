@@ -63,3 +63,10 @@ benchmarks/run-output/
 
 # 本地启动器（硬编码本机路径，仅本机使用）
 Seek Launcher.vbs
+
+
+# TypeScript 增量编译缓存
+*.tsbuildinfo
+
+# 临时产物目录
+tmp/

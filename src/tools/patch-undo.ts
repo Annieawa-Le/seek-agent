@@ -102,7 +102,9 @@ async function readDiffFile(diffFilePath: string): Promise<DiffRecord | null> {
     if (sepLine === -1) return null;
 
     const header = content.slice(0, sepLine).trim();
-    const diff = content.slice(sepLine + 60).trim();
+    // 正文只剥两端换行、绝不能用 trim()：每行都带 ' ' / '+' / '-' 前缀，
+    // 首行是上下文行、前缀就是一个空格，被吃掉后整条记录会被解析器判为非法
+    const diff = content.slice(sepLine + 60).replace(/^[\r\n]+/, '').replace(/[\r\n]+$/, '');
     const { meta } = JSON.parse(header);
 
     return {

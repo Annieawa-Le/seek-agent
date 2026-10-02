@@ -81,6 +81,7 @@ async function main() {
     'read_file', 'read_lines', 'scan_file',
     'execute_command', 'search_all_file', 'search_sub_file', 'search_directory', 'search_content',
     'create_file', 'replace_file', 'add_patch', 'del_patch', 'modify_patch', 'undo_patch', 'history_patch',
+    'replace_str', 'command_log',
     'desk_add', 'desk_list', 'desk_remove', 'desk_clear',
     'create_todo', 'finish_step', 'undo_step', 'reroll_step', 'del_step', 'read_todo', 'del_todo', 'active_todo',
     'memory_add', 'memory_update', 'memory_touch', 'memory_remove', 'memory_list',

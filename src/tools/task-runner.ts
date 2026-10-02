@@ -38,16 +38,30 @@ class TaskRunner {
   private tasks = new Map<string, TaskInfo>();
   private children = new Map<string, import('child_process').ChildProcess>();
 
-  /** 启动一个后台任务；同名任务已存在时拒绝（避免覆盖正在运行的输出） */
+  /** 清理一条已结束任务的残留记录（允许同名复用名字）。
+   *  只处理非 running 任务；若此处仍有未 close 的子进程句柄（如刚 task_kill、
+   *  close 事件尚未到达的窗口期），摘除其事件监听并释放引用，
+   *  避免迟到的 close 事件误删同名新任务的句柄。 */
+  private dispose(name: string) {
+    const task = this.tasks.get(name);
+    if (!task || task.status === 'running') return;
+    this.tasks.delete(name);
+    const child = this.children.get(name);
+    if (child) {
+      child.removeAllListeners();
+      this.children.delete(name);
+    }
+  }
+
+  /** 启动后台任务：running 同名拒绝，已结束的同名任务清理后复用名字重建 */
   start(name: string, command: string): { ok: true; task: TaskInfo } | { ok: false; error: string } {
     const existed = this.tasks.get(name);
     if (existed) {
-      return {
-        ok: false,
-        error: existed.status === 'running'
-          ? `任务 "${name}" 正在运行中（${existed.command}），请先 task_kill 或换一个任务名`
-          : `任务 "${name}" 已存在（状态 ${existed.status}），请换一个任务名`,
-      };
+      // running 任务禁止重名（避免覆盖正在运行的输出）；已结束任务允许同名复用，先清理旧记录
+      if (existed.status === 'running') {
+        return { ok: false, error: `任务 "${name}" 正在运行中（${existed.command}），请先 task_kill 或换一个任务名` };
+      }
+      this.dispose(name);
     }
 
     const task: TaskInfo = {
@@ -63,8 +77,9 @@ class TaskRunner {
     const child = spawn(command, {
       shell: true,
       cwd: getCwd(),
-      // 与 execute_command 一致：让 Python 子进程输出 UTF-8，配合智能解码
-      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+      // 与 execute_command 一致：让 Python 子进程输出 UTF-8（配合智能解码）且无缓冲，
+      // 否则长任务（如 Python 脚本）运行期间输出滞留进程内，task_switch 看不到中间进度
+      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
     });
     task.pid = child.pid ?? undefined;
     this.children.set(name, child);
@@ -176,6 +191,41 @@ class TaskRunner {
     task.status = 'killed';
     return { ok: true };
   }
+
+  /** 等待任务结束，最多 timeoutMs 毫秒。
+   *  返回 true=任务已结束/不存在；false=等待超时仍在运行。
+   *  close 事件监听为主 + 周期性状态兜底，避免监听注册前进程已退出的竞态。 */
+  waitForDone(name: string, timeoutMs: number): Promise<boolean> {
+    const task = this.tasks.get(name);
+    if (!task || task.status !== 'running') return Promise.resolve(true);
+    const child = this.children.get(name);
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout>;
+      let iv: ReturnType<typeof setInterval>;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearInterval(iv);
+        child?.removeListener('close', onClose);
+        child?.removeListener('error', onError);
+        resolve(ok);
+      };
+      const onClose = () => finish(true);
+      const onError = () => finish(true);
+      timer = setTimeout(() => finish(false), timeoutMs);
+      iv = setInterval(() => {
+        const cur = this.tasks.get(name);
+        if (!cur || cur.status !== 'running') finish(true);
+      }, 150);
+      child?.once('close', onClose);
+      child?.once('error', onError);
+      // 兜底：状态检查与监听注册之间的窗口期任务可能已结束
+      const cur = this.tasks.get(name);
+      if (!cur || cur.status !== 'running') finish(true);
+    });
+  }
 }
 
 function appendOutput(current: string, chunk: Buffer): string {
@@ -247,23 +297,33 @@ export const taskSwitchTool = tool({
   inputSchema: z.object({
     taskName: z.string().describe('要查看的任务名称（task_execute 时指定的 taskName）'),
     tail: z.number().int().min(100).max(20000).optional().describe('返回输出尾部字符数，默认 3000'),
+    wait: z.number().int().min(1).max(60).optional()
+      .describe('（可选）强制等待秒数：任务仍在运行则阻塞等待其结束（封顶 60 秒）后返回完整输出；等待超时则返回当前进度并在结果中标注。用于拿不到输出时一次等到底'),
   }),
-  execute: async ({ taskName, tail }) => {
-    const t = taskRunner.get(taskName);
+  execute: async ({ taskName, tail, wait }) => {
+    let t = taskRunner.get(taskName);
     if (!t) {
       const bulk: TaskBulk = { type: 'task', action: 'switch', taskName, error: `未找到任务 "${taskName}"` };
       return new ToolOutput(bulk, `❌ 未找到任务 "${taskName}"，可用 task_list 查看全部任务。`);
+    }
+    // 强制等待：任务仍在运行时阻塞至其结束（最多 wait 秒，封顶 60），期间 Agent 主进程暂停
+    let waitTimedOut = false;
+    if (wait && wait > 0 && t.status === 'running') {
+      waitTimedOut = !(await taskRunner.waitForDone(taskName, Math.min(wait, 60) * 1000));
+      t = taskRunner.get(taskName)!;
     }
     const tailLen = tail ?? 3000;
     const { text, truncated } = tailOutput(t, tailLen);
     const durationMs = t.endedAt ? t.endedAt - t.startedAt : Date.now() - t.startedAt;
     const statusIcon = t.status === 'running' ? '🔄' : t.status === 'done' ? '✅' : t.status === 'killed' ? '⏹' : '❌';
-    const head = `${statusIcon} 任务 "${taskName}"：${t.status}（时长 ${(durationMs / 1000).toFixed(1)}s${t.exitCode != null ? `，退出码 ${t.exitCode}` : ''}，stdout ${t.stdout.length} 字符）`;
+    const waitNote = waitTimedOut ? '，等待超时仍未结束' : '';
+    const head = `${statusIcon} 任务 "${taskName}"：${t.status}（时长 ${(durationMs / 1000).toFixed(1)}s${t.exitCode != null ? `，退出码 ${t.exitCode}` : ''}${waitNote}，stdout ${t.stdout.length} 字符）`;
     const body = text ? `\n--- 输出（尾部 ${truncated ? '截断' : '全部'}）---\n${text}` : '\n（暂无输出）';
     const bulk: TaskBulk = {
       type: 'task', action: 'switch', taskName,
       status: t.status, exitCode: t.exitCode ?? null,
       output: text, outputTruncated: truncated, stdoutChars: t.stdout.length,
+      waitTimedOut,
     };
     return new ToolOutput(bulk, head + body);
   },
@@ -305,6 +365,10 @@ export const taskKillTool = tool({
     return new ToolOutput(bulk, `⏹ 已发送终止信号给任务 "${taskName}"（退出后状态会变为 killed）。`);
   },
 });
+
+
+
+
 
 
 

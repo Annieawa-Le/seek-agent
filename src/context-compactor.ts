@@ -78,6 +78,9 @@ export function findRounds(messages: ModelMessage[]): RoundBoundary[] {
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     if (m.role === 'user' && typeof m.content === 'string') {
+      // 非真实轮次边界：系统注入消息（[工作记忆]/[知识库检索]/[长期记忆]/【子模型提交）
+      // 与 Worklog 条目（user 身份）都在头部随轮次重新注入/回填，不构成用户轮次
+      if (isSystemInjectMessage(m) || isWorklogMessage(m)) continue;
       if (start !== -1) rounds.push({ start, end: i - 1 });
       start = i;
     }
@@ -333,7 +336,8 @@ export async function compactMessages(
     const oldEntry = oldId ? store.get(oldId) : undefined;
     const oldTitle = oldEntry?.title ?? '工作记录';
     headArchiveLine = {
-      role: 'assistant',
+      // 归档行同样以 user 身份插入（与 Worklog 条目一致，属系统提供的上下文，不是模型发言）
+      role: 'user',
       content: `[Worklog#${oldId ?? ''}]已归档：${oldTitle}，使用 worklog_recall ${oldId ?? ''} 查看梗概，work_recall ${oldId ?? ''} 查看原文`,
     } as ModelMessage;
   }
@@ -364,13 +368,15 @@ export async function compactMessages(
   ];
   if (headArchiveLine) insertMessages.push(headArchiveLine);
   insertMessages.push({
-    role: 'assistant',
+    // Worklog 条目以 user 身份插入：它是系统压缩后回填给模型的上下文，而非模型自己的发言
+    role: 'user',
     content: `[Worklog#${id}] ${title}\n${summary}`,
   } as ModelMessage);
 
   return { removeCount, insertMessages, roundsRemoved: roundsToRemove, worklog: entry };
 
 }
+
 
 
 

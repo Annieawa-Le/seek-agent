@@ -16,6 +16,12 @@ const KB_DIR = '.seek-agent/kb';
 const CHUNKS_FILE = 'chunks.json';
 const META_FILE = 'meta.json';
 
+/** 单库最大 chunk 数：本存储为纯 JSON + 全内存向量搜索，超限会拖垮进程，故显式拒绝写入 */
+const MAX_CHUNKS = (() => {
+  const v = Number(process.env.KB_MAX_CHUNKS);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : 10_000;
+})();
+
 interface Meta {
   embeddingDim: number;
   totalChunks: number;
@@ -89,6 +95,15 @@ export class JsonFileVectorStore implements VectorStore {
   }
 
   async insertBatch(chunks: Chunk[]): Promise<void> {
+    if (!this.loaded) await this.loadFromDisk();
+    if (this.chunks.length + chunks.length > MAX_CHUNKS) {
+      throw new Error(
+        `知识库块数将超过上限 ${MAX_CHUNKS}（当前 ${this.chunks.length}，本次新增 ${chunks.length}）：` +
+        `JsonFileVectorStore 为全内存向量搜索，超限会拖垮进程，已拒绝写入。` +
+        `请缩小工作区范围（避免指向盘根/系统目录），或改用 SQLite/PostgreSQL 后端；` +
+        `亦可设置环境变量 KB_MAX_CHUNKS 调整上限。`
+      );
+    }
     for (const c of chunks) {
       await this.insert(c);
     }

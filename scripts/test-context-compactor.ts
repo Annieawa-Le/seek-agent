@@ -62,10 +62,13 @@ if (oldMax !== undefined) process.env.MAX_CONTEXT_TOKENS = oldMax;
 // ── 2. 轮次 / Worklog 识别 ──
 const msgs = buildMessages(4);
 check('findRounds 识别 4 轮', findRounds(msgs).length === 4);
-const wlMsg = { role: 'assistant', content: '[Worklog#W1] 测试标题\n梗概' } as ModelMessage;
-check('isWorklogMessage 识别', isWorklogMessage(wlMsg));
+// Worklog 条目 / 系统注入消息均为 user 身份，不应被当作真实轮次边界
+const wlMsg = { role: 'user', content: '[Worklog#W1] 测试标题\n梗概' } as ModelMessage;
+check('isWorklogMessage 识别 user Worklog', isWorklogMessage(wlMsg));
 check('extractWorklogId 提取 W1', extractWorklogId(wlMsg.content as string) === 'W1');
 check('普通消息非 Worklog', !isWorklogMessage({ role: 'user', content: 'hi' } as ModelMessage));
+check('findRounds 排除 user Worklog 条目', findRounds([wlMsg, ...buildMessages(2)]).length === 2);
+check('findRounds 排除系统注入消息', findRounds([{ role: 'user', content: '[工作记忆] x' } as ModelMessage, ...buildMessages(2)]).length === 2);
 
 // ── 3. worklogStore 基础 ──
 worklogStore.setSessionId(TEST_SESSION);
@@ -91,6 +94,7 @@ if (plan) {
   check('归档保留原文消息', (plan.worklog.archivedMessages as any[]).length > 0);
   check('removeCount 与归档消息数一致', plan.removeCount === plan.worklog.archivedMessages.length);
   check('无旧 Worklog 时仅插入 1 条', plan.insertMessages.length === 1);
+  check('插入的新 Worklog 为 user 身份', plan.insertMessages.every((m) => m.role === 'user'));
 
   // 应用逻辑模拟（与 agent.applyPendingCompaction 同构）
   const applied = [...msgs];
@@ -101,7 +105,7 @@ if (plan) {
 
 // ── 6. 头部旧 Worklog 二级消退 ──
 worklogStore.setSessionId(TEST_SESSION);
-const headOld = { role: 'assistant', content: '[Worklog#W1] 归档一\n旧的梗概内容' } as ModelMessage;
+const headOld = { role: 'user', content: '[Worklog#W1] 归档一\n旧的梗概内容' } as ModelMessage;
 const msgs2 = [headOld, ...buildMessages(4)];
 const plan2 = await compactMessages(msgs2, TEST_SESSION, 10000, fakeSummarize);
 check('旧 Worklog 场景返回计划', plan2 !== null);
@@ -109,6 +113,7 @@ if (plan2) {
   const texts = plan2.insertMessages.map((m) => (m.content as string).slice(0, 80));
   check('时间线顺序：归档行在前、新 Worklog 在后', texts[0].includes('已归档') && texts[texts.length - 1].startsWith(`[Worklog#${plan2.worklog.id}]`));
   check('旧 Worklog 降级为归档行', texts.some((t) => t.includes('已归档：归档一')));
+  check('归档行与新 Worklog 均为 user 身份', plan2.insertMessages.every((m) => m.role === 'user'));
   check('归档行带召回提示', texts.some((t) => t.includes('worklog_recall') && t.includes('work_recall')));
   // 新 Worklog 的归档内容应排除旧 Worklog 消息（不重复压缩/归档梗概本身）
   const archivedTexts = (plan2.worklog.archivedMessages as any[]).map((m: any) => (typeof m.content === 'string' ? m.content : ''));
@@ -160,6 +165,7 @@ for (const a of asserts) {
 }
 console.log(failed === 0 ? `\n全部通过（${asserts.length} 项）` : `\n${failed} 项失败`);
 process.exit(failed === 0 ? 0 : 1);
+
 
 
 
