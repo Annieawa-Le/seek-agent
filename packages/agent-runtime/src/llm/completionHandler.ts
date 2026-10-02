@@ -6,7 +6,7 @@
  */
 
 import { generateText } from 'ai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { createProvider } from './provider';
 import 'dotenv/config';
 
 // ── 类型 ──
@@ -28,16 +28,6 @@ export interface CompletionCandidate {
   filterText?: string;
 }
 
-// ── 模型提供者 ──
-
-function createProvider() {
-  const baseUrl = process.env.OPENAI_BASE_URL || '';
-  return createOpenAICompatible({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseURL: baseUrl,
-    name: 'opencode',
-  });
-}
 
 // ── 补全提示 ──
 
@@ -113,3 +103,4 @@ export async function generateCompletion(
     },
   ];
 }
+

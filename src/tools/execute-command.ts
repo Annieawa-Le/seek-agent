@@ -6,6 +6,23 @@ import { spawn } from 'child_process';
 import iconv from 'iconv-lite';
 import { getCwd } from '../workdir.js';
 import { taskRunner } from './task-runner';
+import { cmdLogStore, combineOutput } from './cmd-log-store';
+
+/**
+ * execute_command 返回给模型的文本上限（字符）。
+ * 超出部分截断，完整结果落盘到会话的 latest-cmd.log，可用 command_log 工具取回。
+ */
+export const EXEC_OUTPUT_MAX_CHARS = 10_000;
+
+/** 截断 AI 可见文本，超出上限时附加提示（附完整字符数） */
+export function limitExecText(text: string): { text: string; truncated: boolean } {
+  if (text.length <= EXEC_OUTPUT_MAX_CHARS) return { text, truncated: false };
+  return {
+    text: text.slice(0, EXEC_OUTPUT_MAX_CHARS)
+      + `\n…（输出已截断，共 ${text.length} 字符；完整结果可用 command_log 工具查看）`,
+    truncated: true,
+  };
+}
 
 /**
  * 智能解码：Windows 下 cmd 命令输出编码不统一——
@@ -46,7 +63,7 @@ function genDeferredTaskName(): string {
 }
 
 export const executeCommandTool = tool({
-  description: '在终端执行一条系统命令（仅限于工作区目录内），并返回输出。命令默认最多等待 60 秒，超时未结束会自动转入后台任务（与 task_execute 一致的管理），可继续用 task_switch 查看输出、task_kill 终止。',
+  description: '在终端执行一条系统命令（仅限于工作区目录内），并返回输出。返回文本最长 10000 字符，超出部分会截断（完整输出会落盘到会话的 latest-cmd.log，可用 command_log 工具取回完整结果）。命令默认最多等待 60 秒，超时未结束会自动转入后台任务（与 task_execute 一致的管理），可继续用 task_switch 查看输出、task_kill 终止。',
   inputSchema: z.object({ command: z.string() }),
   execute: async ({ command }) => {
     const timeoutMs = execTimeoutMs();
@@ -69,21 +86,22 @@ export const executeCommandTool = tool({
         const stdoutText = decode(Buffer.concat(stdoutChunks));
         const stderrText = decode(Buffer.concat(stderrChunks));
         if (code === 0) {
-          let output = stdoutText;
-          if (stderrText) output += (output ? '\n[stderr]: ' : '') + stderrText;
+          cmdLogStore.save({ command, stdout: stdoutText, stderr: stderrText, exitCode: 0, createdAt: new Date().toISOString() });
+          const { text, truncated } = limitExecText(combineOutput(stdoutText, stderrText));
           const bulk: ExecBulk = {
             type: 'exec',
             command,
             stdout: stdoutText,
             stderr: stderrText,
             exitCode: 0,
-            truncated: output.length > 5000,
+            truncated,
           };
-          resolve(new ToolOutput(bulk));
+          resolve(new ToolOutput(bulk, text));
         } else {
-          let errorOutput = stdoutText;
-          if (stderrText) errorOutput += (errorOutput ? '\n[stderr]: ' : '') + stderrText;
+          let errorOutput = combineOutput(stdoutText, stderrText);
           if (!errorOutput) errorOutput = signal ? `命令被信号 ${signal} 终止` : `命令退出码 ${code}`;
+          cmdLogStore.save({ command, stdout: stdoutText, stderr: stderrText, exitCode: code ?? undefined, createdAt: new Date().toISOString() });
+          const { text } = limitExecText(errorOutput);
           const bulk: ExecBulk = {
             type: 'exec',
             command,
@@ -91,7 +109,7 @@ export const executeCommandTool = tool({
             stderr: stderrText,
             exitCode: code ?? undefined,
             truncated: true,
-            error: errorOutput.slice(0, 5000),
+            error: text,
           };
           resolve(new ToolOutput(bulk));
         }
@@ -101,16 +119,17 @@ export const executeCommandTool = tool({
       const finishError = (errorText: string) => {
         const stdoutText = decode(Buffer.concat(stdoutChunks));
         const stderrText = decode(Buffer.concat(stderrChunks));
-        let errorOutput = stdoutText;
-        if (stderrText) errorOutput += (errorOutput ? '\n[stderr]: ' : '') + stderrText;
+        let errorOutput = combineOutput(stdoutText, stderrText);
         if (!errorOutput) errorOutput = errorText || '未知错误';
+        cmdLogStore.save({ command, stdout: stdoutText, stderr: stderrText, createdAt: new Date().toISOString() });
+        const { text } = limitExecText(errorOutput);
         const bulk: ExecBulk = {
           type: 'exec',
           command,
           stdout: stdoutText,
           stderr: stderrText,
           truncated: true,
-          error: errorOutput.slice(0, 5000),
+          error: text,
         };
         resolve(new ToolOutput(bulk));
       };
@@ -120,14 +139,20 @@ export const executeCommandTool = tool({
         if (settled) return;
         settled = true;
         const taskName = genDeferredTaskName();
+        const seedStdout = decode(Buffer.concat(stdoutChunks));
+        const seedStderr = decode(Buffer.concat(stderrChunks));
         const adopted = taskRunner.adopt(taskName, command, child, {
-          stdout: decode(Buffer.concat(stdoutChunks)),
-          stderr: decode(Buffer.concat(stderrChunks)),
+          stdout: seedStdout,
+          stderr: seedStderr,
         });
         if (!adopted.ok) {
           finishError(`命令已运行超过 ${Math.round(timeoutMs / 1000)} 秒，转入后台任务失败：${adopted.error}`);
           return;
         }
+        cmdLogStore.save({
+          command, stdout: seedStdout, stderr: seedStderr,
+          deferred: true, taskName, createdAt: new Date().toISOString(),
+        });
         const bulk: ExecBulk = {
           type: 'exec',
           command,
@@ -159,6 +184,7 @@ export const executeCommandTool = tool({
     });
   },
 });
+
 
 
 

@@ -6,7 +6,7 @@
  */
 
 import { streamText } from 'ai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { createProvider } from './provider';
 import 'dotenv/config';
 
 // ── 类型 ──
@@ -18,18 +18,6 @@ export interface ChatMessage {
 
 /** 流式回调：每产生一个 token 时调用 */
 export type TokenCallback = (token: string) => void | Promise<void>;
-
-// ── 模型提供者 ──
-
-function createProvider() {
-  const baseUrl = process.env.OPENAI_BASE_URL || '';
-
-  return createOpenAICompatible({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseURL: baseUrl,
-    name: 'opencode',
-  });
-}
 
 // ── 流式聊天 ──
 
@@ -78,3 +66,5 @@ export async function streamChat(
 
   return { fullText };
 }
+
+

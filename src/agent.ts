@@ -1,5 +1,5 @@
 import { getMcpManager } from './mcp';
-import { streamText, type TextPart, type ToolCallPart, type ModelMessage, NoOutputGeneratedError } from 'ai';
+import { streamText, type TextPart, type ToolCallPart, type ModelMessage, NoOutputGeneratedError, APICallError, RetryError } from 'ai';
 import { tools, stripToolExecutes, resolveLazyTool, sanitizeToolInput, unwrapToolArgs } from './tools';
 import { checkToolGate, getActiveModes, getActiveModeNames, filterToolsForActiveModes } from './modes/registry';
 import { drainPendingInjections, hasPendingInjections, subAgentManager, setSubmissionListener } from './tools/inner_skills/sub-agent/manager';
@@ -13,7 +13,7 @@ import path from 'node:path';
 import { getWorkspaceRoot, getWorkspaceRoots, getSessionsRoot, resolvePath } from './workdir';
 import { deskEditManager, DESK_EDIT_TOOLS } from './tools/desk-edit';
 import { setAlarmListener } from './tools/alarm';
-import { getModel, setSystemPrompt } from './model-provider';
+import { getModel, setSystemPrompt, setOpenCodeSessionId } from './model-provider';
 import {
   friendlyToolCallLabel,
   friendlyToolResultLabel,
@@ -31,6 +31,36 @@ const __dirname = dirname(__filename);
 /** 内部触发标记：子模型提交后空闲时触发新一轮（不显示为 user 消息） */
 const INTERNAL_SUBMISSION_TRIGGER = '__internal_submission__';
 
+// ── 上游错误（错误码）重试策略 ──
+/** 上游请求失败时的最大自动重试次数（最多重试 N 次，即最多发起 N+1 次请求） */
+const MAX_UPSTREAM_RETRIES = 5;
+/** 退避基数（ms）：第 n 次重试等待 n × 基数，并封顶 UPSTREAM_RETRY_MAX_MS */
+const UPSTREAM_RETRY_BASE_MS = 1000;
+const UPSTREAM_RETRY_MAX_MS = 5000;
+
+/** 延时辅助（用于上游重试退避） */
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 判断是否为「上游返回错误码」类错误。
+ * AI SDK 请求失败时通常不抛异常，而是把错误交给 onError 回调（textStream 空结束），
+ * 因此这里同时兼容 APICallError、RetryError（内部重试耗尽）以及任何带 statusCode 的错误。
+ */
+function isUpstreamError(error: any): boolean {
+  if (!error) return false;
+  if (APICallError.isInstance(error)) return true;
+  if (RetryError.isInstance(error)) return true;
+  return typeof error.statusCode === 'number';
+}
+
+/** 提取上游错误的可读描述（优先取 RetryError 包裹的最后一层错误） */
+function describeUpstreamError(error: any): string {
+  const inner = error?.lastError ?? error;
+  const code = inner?.statusCode ?? error?.statusCode;
+  const msg = String(inner?.message || error?.message || error || '未知错误').slice(0, 200);
+  return code != null ? `${code} ${msg}` : msg;
+}
+
 /** 把 provider 上报的 token 数值规整为非负整数（非法值视为 undefined） */
 function normalizeToken(v: unknown): number | undefined {
   if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return undefined;
@@ -42,6 +72,7 @@ import { worklogStore } from './tools/worklog-store';
 import { subagentContextStore } from './tools/subagent-context-store';
 import { subagentRegistryStore } from './tools/subagent-registry-store';
 import { docPoolStore } from './tools/doc-pool-store';
+import { cmdLogStore } from './tools/cmd-log-store';
 import { maybeDistillActions } from './tools/action-memory';
 // 类型定义
 // ═════════════════════════════════════════════════════
@@ -136,6 +167,8 @@ export class CLIAAgent {
     // Electron 多会话模式下与主进程身份对齐（渲染层/主进程按此 ID 关联会话与自动保存文件）；
     // TUI 单会话模式无 AGENT_SESSION_ID，退化为随机生成。
     this.sessionId = process.env.AGENT_SESSION_ID || this.generateSessionId();
+    // OpenCode Go/Zen 的 x-opencode-session 头跟随会话，便于上游路由与提示词缓存
+    setOpenCodeSessionId(this.sessionId);
     // 归档存储绑定当前会话（记忆消退路径的 worklog_recall / work_recall 按会话分区）
     worklogStore.setSessionId(this.sessionId);
     // 子 Agent 上下文本地化存储同样按会话分区
@@ -143,6 +176,8 @@ export class CLIAAgent {
     subagentContextStore.setSessionId(this.sessionId);
     // 子 Agent 注册状态存储按会话分区
     subagentRegistryStore.setSessionId(this.sessionId);
+    // 命令日志（latest-cmd.log）落盘位置跟随会话
+    cmdLogStore.setSessionId(this.sessionId);
     // 文件池（doc_pool）落盘位置跟随会话
     docPoolStore.setSessionId(this.sessionId);
     this.ui = ui;
@@ -206,14 +241,14 @@ export class CLIAAgent {
 
   /**
    * 构建会话开场指令（随思考模式注入，仅每轮第一次 AI 调用时生效）。
-   * 包含：思考模式要求 + 工作流程要点 + 可用工具列表 + 记忆系统提醒。
+   * 包含：工作流程要点 + 可用工具列表 + 记忆系统提醒。
    */
   private static buildSessionInstruction(): string {
     // 核心工具分组（精确列出，随 tools 容器动态校验存在性）
     const coreGroups: [string, string[]][] = [
       ['文件', ['read_file', 'read_lines', 'scan_file', 'create_file', 'replace_file', 'add_patch', 'del_patch', 'undo_patch', 'history_patch']],
       ['搜索/执行', ['search_all_file', 'search_sub_file', 'search_directory', 'search_content', 'execute_command']],
-      ['任务', ['create_todo', 'finish_step', 'undo_step', 'reroll_step', 'del_step', 'read_todo', 'del_todo', 'active_todo']],
+      ['任务', ['create_todo', 'finish_step', 'undo_step', 'reroll_step', 'del_step', 'read_todo', 'del_todo', 'active_todo', 'mission-start', 'mission-accomplish', 'mission-cancel']],
       ['记忆', ['memory_add', 'memory_update', 'memory_touch', 'memory_remove', 'memory_list', 'memory_remember', 'memory_recall', 'memory_stats', 'memory_clear']],
       ['桌面/上下文', ['desk_add', 'desk_list', 'desk_remove', 'desk_clear', 'memory_focus', 'memory_shorten']],
     ];
@@ -253,8 +288,6 @@ export class CLIAAgent {
       .join('、');
 
     return [
-      '当前处于【思考模式】。在回答任何问题之前，你必须先在 <thinking> 标签内完整展开推理过程（选择合适的工具，分步分析问题、评估可能的方案、检查潜在错误），然后再给出最终答案。思考内容写在 <thinking>...</thinking> 中，最终答案在标签外输出。禁止在最终答案中重复思考过程。',
-      '',
       '工作流程：先理解后修改，先计划后执行，每步可回溯。接到任务先阅读相关代码，多步任务用 create_todo 跟踪进度，每轮修改后编译验证。',
       `可用工具：核心 ${coreCounts}${skillLine ? '；技能 ' + skillLine : ''}（完整定义见各工具 schema）`,
       '',
@@ -586,6 +619,30 @@ export class CLIAAgent {
     // 思考模式：仅本轮第一次模型调用（处理用户输入后）主动触发思考，工具循环中间的调用不思考
     let isFirstModelCall = true;
 
+    // ── 上游错误（错误码）重试：一次上游抖动不再中断整轮对话 ──
+    // AI SDK 的 streamText 请求失败时不抛异常，而是把错误交给 onError 回调、
+    // 让 textStream 空结束；因此显式捕获该错误并在本层重发请求，最多重试 MAX_UPSTREAM_RETRIES 次。
+    let upstreamRetries = 0;
+    /**
+     * 处理一次上游失败：清理半截输出，退避后返回是否应重发。
+     * @returns true=已等待可 continue 重发；false=重试耗尽，调用方应结束本轮
+     */
+    const handleUpstreamFailure = async (error: any, agentBubbleOpen: boolean): Promise<boolean> => {
+      this.ui.stopThinkingSpinner();
+      if (this.ui.isThinkingActive()) this.ui.endThinking();
+      if (agentBubbleOpen) this.ui.removeLastAgent();
+      const detail = describeUpstreamError(error);
+      if (upstreamRetries >= MAX_UPSTREAM_RETRIES) {
+        this.ui.addToolMessage(`❌ 上游持续返回错误（${detail}），已重试 ${MAX_UPSTREAM_RETRIES} 次，终止本轮`);
+        return false;
+      }
+      upstreamRetries++;
+      const wait = Math.min(UPSTREAM_RETRY_BASE_MS * upstreamRetries, UPSTREAM_RETRY_MAX_MS);
+      this.ui.addToolMessage(`⚠ 上游返回错误（${detail}），${wait}ms 后进行第 ${upstreamRetries}/${MAX_UPSTREAM_RETRIES} 次重试…`);
+      await sleep(wait);
+      return true;
+    };
+
     while (!this.aborted && !this.ui.isAborted) {
       // ── 排空子模型待注入的提交（安全网，以 tool 消息对注入） ──
       try {
@@ -672,6 +729,9 @@ export class CLIAAgent {
           }
         }
       };
+      // 本次尝试的上游错误（由 onError 捕获）与正文气泡开启标记，供 catch / 重试分支使用
+      let attemptError: any = null;
+      let agentBubbleOpen = false;
       try {
         const abortController = this.ui.createAbortController();
         // 思考指令仅在本轮第一次调用时注入，工具循环中间使用纯净 system prompt
@@ -706,6 +766,10 @@ export class CLIAAgent {
           messages: messagesForModel,
           tools: payloadTools,
           abortSignal: abortController.signal,
+          // 上游错误自行处理（见下方重试逻辑）：关闭 SDK 内置重试，避免重试次数叠加
+          maxRetries: 0,
+          // 捕获上游错误码：AI SDK 不抛异常，只把错误交给该回调，textStream 会空结束
+          onError: ({ error }) => { attemptError = error; },
           // 思考模式：向模型透传思考相关参数（按 provider 生效）
           ...(thinkingThisCall ? {
             providerOptions: {
@@ -738,8 +802,6 @@ export class CLIAAgent {
             }
           },
         });
-        // 首次模型调用已发生，后续工具循环中的调用不再主动触发思考
-        isFirstModelCall = false;
         // ── 流式文本 ──
         // 原生 reasoning 流必然先于文本流结束：先复位思考区，
         // 确保正文进入独立的普通文本气泡，而不是被并进思考气泡
@@ -749,6 +811,7 @@ export class CLIAAgent {
         thinkingDeltaBuf = '';
         this.ui.startThinkingSpinner();
         this.ui.addAgentMessage('');
+        agentBubbleOpen = true;
         for await (const chunk of result.textStream) {
           if (this.aborted || this.ui.isAborted) break;
           feedText(chunk);
@@ -813,6 +876,16 @@ export class CLIAAgent {
 
         const hasToolCalls = collectedToolCalls.length > 0;
 
+        // ── 上游错误（错误码）：放弃本次输出，退避后原样重发，最多重试 MAX_UPSTREAM_RETRIES 次 ──
+        // 未超过上限则 continue 重发（不中断主循环），耗尽后优雅结束本轮。
+        if (attemptError) {
+          if (await handleUpstreamFailure(attemptError, agentBubbleOpen)) continue;
+          break;
+        }
+        // 本次调用成功：重置重试计数，并标记「首次调用已发生」（后续工具循环不再注入思考）
+        upstreamRetries = 0;
+        isFirstModelCall = false;
+
         // ── 安全检查：空响应 ──
         if (!fullText && !hasToolCalls) {
           this.ui.removeLastAgent();
@@ -867,6 +940,15 @@ export class CLIAAgent {
         // ── 错误处理 ──
         if (this.aborted || this.ui.isAborted || error?.name === 'AbortError' || error?.message?.includes('abort')) {
           this.ui.addToolMessage('■ 已中断本轮 AI 处理');
+          break;
+        }
+        // ── 上游错误（错误码）重试：优先级最高，避免被下面的兜底分支直接终止 ──
+        // 上游报错有两种暴露方式：onError 回调捕获的 attemptError，或抛出的 APICallError/RetryError。
+        // 注意：带 tools 的调用路径下，上游报错常被包装成 NoOutputGeneratedError 抛出；
+        // 此时代入 attemptError 判定「这是上游错误」而非真空回复，仍走重试。
+        const upstreamErr = attemptError ?? (isUpstreamError(error) ? error : null);
+        if (upstreamErr) {
+          if (await handleUpstreamFailure(upstreamErr, agentBubbleOpen)) continue;
           break;
         }
         if (NoOutputGeneratedError.isInstance(error)) {
@@ -1472,6 +1554,7 @@ export class CLIAAgent {
     worklogStore.setSessionId(this.sessionId);
     subagentContextStore.setSessionId(this.sessionId);
     docPoolStore.setSessionId(this.sessionId);
+    cmdLogStore.setSessionId(this.sessionId);
     this.ui.clearMessages();
   }
 
@@ -1654,10 +1737,12 @@ export class CLIAAgent {
   /** 设置会话 ID（用于从文件恢复会话时指定），并同步 worklog 归档与子 Agent 上下文分区 */
   setSessionId(id: string): void {
     this.sessionId = id;
+    setOpenCodeSessionId(id);
     worklogStore.setSessionId(id);
     subagentContextStore.setSessionId(id);
     subagentRegistryStore.setSessionId(id);
     docPoolStore.setSessionId(id);
+    cmdLogStore.setSessionId(id);
   }
 
   /** 获取当前会话 ID（用于保存/定位 session 文件夹） */
@@ -1665,6 +1750,12 @@ export class CLIAAgent {
     return this.sessionId;
   }
 }
+
+
+
+
+
+
 
 
 

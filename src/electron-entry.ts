@@ -11,6 +11,40 @@
  * 通过环境变量 AGENT_SESSION_ID 标识会话身份。
  */
 
+
+/**
+ * 全局未捕获异常 / 未处理 Promise 拒绝兜底（与 TUI 入口 index.ts 保持一致）。
+ *
+ * 上游请求失败时 AI SDK 会在被丢弃的失败流上遗留 promise 拒绝；Electron 模式下缺少
+ * index.ts 的同名处理器，一个未处理拒绝就会让 Agent 子进程直接退出——表现为「上游一报错
+ * 整个会话就挂了」（主进程只标记 disconnected，不会自动重启）。
+ * 这里兜底：已知的上游 / 失败流收尾噪声静默吞掉，其余仅记录，绝不让进程因未处理拒绝退出。
+ */
+process.on('uncaughtException', (error: any) => {
+  const msg = error?.message || '';
+  if (
+    error?.name === 'AI_NoOutputGeneratedError' ||
+    msg.includes('No output generated') ||
+    msg.includes('worker-script')
+  ) {
+    return;
+  }
+  console.error('[FATAL] Uncaught exception:', error);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  const msg = reason?.message || reason?.toString?.() || '';
+  if (
+    reason?.name === 'AI_NoOutputGeneratedError' ||
+    reason?.name === 'AI_APICallError' ||
+    reason?.name === 'AI_RetryError' ||
+    msg.includes('No output generated') ||
+    msg.includes('worker-script')
+  ) {
+    return; // 上游错误 / 失败流收尾噪声：已由主循环的重试与错误处理接管
+  }
+  console.error('[FATAL] Unhandled rejection:', reason);
+});
 import 'dotenv/config';
 import * as fs from 'node:fs';
 import path from 'node:path';
@@ -85,6 +119,9 @@ try {
       const { subAgentManager, notifyTaskDispatched } = await import('./tools/inner_skills/sub-agent/manager');
       const { subagentRegistryStore } = await import('./tools/subagent-registry-store');
       subagentRegistryStore.setSessionId(sessionId);
+      // 命令日志分区跟随会话（latest-cmd.log）
+      const { cmdLogStore } = await import('./tools/cmd-log-store');
+      cmdLogStore.setSessionId(sessionId);
       const entries = subagentRegistryStore.load();
       for (const e of entries) subAgentManager.restore(e);
       if (entries.length > 0) notifyTaskDispatched();
@@ -427,6 +464,9 @@ bridge.emitReady();
 
 // 进程就绪后推送一次输入栏状态，渲染层据此恢复发送/停止按钮与胶囊比对基准
 pushInputState();
+
+
+
 
 
 

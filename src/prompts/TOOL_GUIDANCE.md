@@ -10,3 +10,5 @@
 - **undo_patch / history_patch** — 每次修改都可撤销、可审计；需要回溯时先用 `history_patch` 查看记录。
 
 包裹结构（为代码块加前缀）用 `wrap_by`（花括号）或 `wrap_by_label`（HTML/JSX 标签）；动手前可用 `find_matching_brace` / `find_matching_label` 确认括号/标签配对。语法检查失败时优先看「替换块结构预检」提示，不要盲目 force 跳过。
+
+- **execute_command / command_log** — `execute_command` 返回文本最长 10000 字符，超出会截断；完整输出同时落盘到当前会话的 `sessions/{sessionId}/latest-cmd.log`（覆盖式，只留最近一次），用 `command_log` 取回完整结果（默认最多 100000 字符，可用 `maxChars` 调整）。看到截断提示、或需要完整输出时调 `command_log`，不要反复重跑同一条命令。

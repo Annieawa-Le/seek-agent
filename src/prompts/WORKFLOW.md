@@ -118,6 +118,33 @@ finish_to_step("我的任务", 3)  → 实际进度跳跃/回溯时批量标记�
 del_todo("我的任务")     → 确认完成后删除
 ```
 
+### 任务段归档（mission，配合 todo 使用）
+
+把一段独立工作的**过程**从上下文里整段移走：开始前打标记，收尾时连人带行李一起归档落盘。
+归档只写磁盘（`sessions/{sessionId}/worklog/entries.json`），**不会在会话中留下任何梗概条目**，需要时靠召回工具取回。
+
+| 工具 | 用途 |
+|------|------|
+| `mission-start(name)` | 标记任务段起点，记录当前位置；一次只允许一个进行中的任务段 |
+| `mission-accomplish(summary)` | 结束任务段：裁剪 `mission-start` 到本次调用之间的全部上下文并归档为 Worklog（`summary` 即提交概要/经验教训） |
+| `mission-cancel()` | 结束任务段标记但**不裁剪**（任务中止 / 这段过程仍需留在上下文时用） |
+
+**推荐流程（与 todo 同步）：**
+```
+create_todo(name="重构 patch 定位", steps=["读代码", "改定位函数", "跑测试"])   # 规划
+  mission-start("重构 patch 定位")                                     # 同一轮里打标记（紧跟 create_todo）
+  ...中间正常干活：读文件、改代码、跑命令...
+finish_to_step("重构 patch 定位", 3)                                    # 收尾
+del_todo("重构 patch 定位")
+mission-accomplish("重写了 locateDelRanges 的上下文匹配逻辑；改动 src/tools/patch-locator.ts；测试全绿")  # 归档，过程移出上下文
+```
+
+**注意事项：**
+- `mission-accomplish` 必须与 `mission-start` 成对；中间的过程对话会被移出上下文，只会留下一条归档回执（含 Worklog id）
+- 归档后想找细节：`worklog_recall(W3)` 取梗概、`work_recall(W3)` 取原文
+- 归档边界落在整条消息上，不会撕裂 tool-call / tool-result 配对；若起点消息已被记忆消退压缩掉，本次不裁剪并给出提示
+- 别拿它当 `memory_focus` 用：`memory_focus` 保留一条梗概在会话里，`mission-accomplish` 是彻底移出（仅落盘）
+
 ---
 
 ## 四、上下文管理
@@ -301,6 +328,8 @@ spawn_agent(
 每当完成一组文件修改后，执行编译检查，
 
 如果环境不允许，告知用户。
+
+
 
 
 

@@ -116,6 +116,11 @@ def('execute_command', 'exec', '■', (args) => {
   return `执行: ${short}`;
 }, 'after-round');
 
+def('command_log', 'exec', '■', (args) => {
+  const max = args?.maxChars;
+  return `命令日志${max ? ` (≤${max} 字符)` : ''}`;
+}, 'after-round');
+
 // ── 文件操作 ──
 def('create_file', 'file', '■', (args) => {
   const fp = (args?.filePath ?? '(?)') as string;
@@ -201,6 +206,16 @@ def('alarm_cancel', 'exec', '⏰', (args) => {
 }, 'after-round');
 
 def('alarm_list', 'exec', '⏰', () => '闹钟列表', 'after-round');
+
+// ── 任务段归档（mission） ──
+def('mission-start', 'other', '🚩', (args) => {
+  const name = (args?.name ?? '(?)') as string;
+  return `标记任务段起点: ${name}`;
+}, 'after-round');
+
+def('mission-accomplish', 'other', '📦', () => '任务段归档（裁剪上下文）', 'after-round');
+
+def('mission-cancel', 'other', '🚩', () => '取消任务段标记', 'after-round');
 
 // ═════════════════════════════════════════════════════
 

@@ -11,6 +11,8 @@ import {
 } from './ref-desk';
 import { readFileTool, readNumline, scanFileTool } from './read-file';
 import { executeCommandTool } from './execute-command';
+import { commandLogTool } from './command-log';
+import { cmdLogStore } from './cmd-log-store';
 import { taskExecuteTool, taskSwitchTool, taskListTool, taskKillTool } from './task-runner';
 import {
   memoryFocus, memoryShorten,
@@ -21,6 +23,7 @@ import { searchAllFile, searchSubFile, searchDirectory, searchContent } from './
 import { createFile, addPatch, delPatch, replaceFile, undoPatch, historyPatch } from './file-manipulation';
 import { replaceStrTool } from './replace-str';
 import { worklogRecallTool, workRecallTool } from './worklog-tools';
+import { missionStart, missionAccomplish, missionCancel } from './mission';
 import { createTodo, finishStep, finishToStep, undoStep, rerollStep, delStep, readTodo, delTodo, activeTodo } from './todo';
 import { toolCache } from './tool-cache';
 import { collabSendTool } from './collab';
@@ -40,6 +43,9 @@ export { unwrapToolArgs, WRAP_KEYS } from './unwrap-args';
 function wrapTool(name: string, t: any) {
   if (!t?.execute) return t;
   const wrappedExecute = async (args: any, context?: any) => {
+    // 会话上下文兜底同步：子 Agent 等未显式绑定会话时，按调用方 sessionId 分区
+    const sid = context?.sessionId;
+    if (typeof sid === 'string' && sid) cmdLogStore.setSessionId(sid);
     return t.execute(unwrapToolArgs(args), context);
   };
   return { ...t, execute: toolCache.wrap(name, wrappedExecute) };
@@ -72,6 +78,8 @@ const coreTools = {
   read_lines: wrapTool('read_lines', readNumline),
   scan_file: wrapTool('scan_file', scanFileTool),
   execute_command: wrapTool('execute_command', executeCommandTool),
+  // 命令日志召回（execute_command 的完整输出，按会话落盘） 
+  command_log: wrapTool('command_log', commandLogTool),
   search_all_file: wrapTool('search_all_file', searchAllFile),
   search_sub_file: wrapTool('search_sub_file', searchSubFile),
   search_directory: wrapTool('search_directory', searchDirectory),
@@ -119,6 +127,10 @@ const coreTools = {
   // Worklog 归档召回（记忆消退路径）
   worklog_recall: wrapTool('worklog_recall', worklogRecallTool),
   work_recall: wrapTool('work_recall', workRecallTool),
+  // 任务段归档（mission-start 标记起点 → mission-accomplish 整段裁剪落盘）
+  'mission-start': wrapTool('mission-start', missionStart),
+  'mission-accomplish': wrapTool('mission-accomplish', missionAccomplish),
+  'mission-cancel': wrapTool('mission-cancel', missionCancel),
   // 跨会话协作
   collab_send: wrapTool('collab_send', collabSendTool),
   // 闹钟（长时间等待提醒，到点注入 user 消息打断）

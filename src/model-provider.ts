@@ -17,6 +17,46 @@ type ModelInstance = ReturnType<ReturnType<typeof createDeepSeek>>;
 let cachedProvider: ReturnType<typeof createDeepSeek | typeof createOpenAICompatible> | null = null;
 let cachedModel: ModelInstance | null = null;
 
+// ── OpenCode Go / Zen 客户端标识 ──
+// OpenCode 要求接入方声明自身客户端身份，并为每段对话携带稳定的会话 ID
+// （见 https://opencode.ai/docs/go「在哪里使用？」）：
+//   - 使用专属 user agent 标识，而不是通用 SDK / HTTP 库名称
+//   - 在 x-opencode-session 请求头中发送稳定会话 ID，便于上游路由与提示词缓存
+const OPENCODE_CLIENT_UA = 'seek-agent/1.0';
+
+let openCodeSessionId: string | null = null;
+
+/**
+ * 设置 OpenCode 请求头中携带的会话 ID（每段对话稳定）。
+ * fetch 注入层每次请求实时读取，无需重建 provider。
+ */
+export function setOpenCodeSessionId(id: string): void {
+  openCodeSessionId = id;
+}
+
+function resolveOpenCodeSessionId(): string {
+  if (!openCodeSessionId) {
+    openCodeSessionId = process.env.AGENT_SESSION_ID
+      || `session-${Math.random().toString(36).substring(2, 10)}`;
+  }
+  return openCodeSessionId;
+}
+
+/**
+ * OpenCode 请求头注入。
+ * AI SDK 内部的 header 合并会把 provider 的 headers 选项吞掉（实测 User-Agent
+ * 会被覆盖成通用 SDK 名），因此用自定义 fetch 在请求发出前强制写入。
+ */
+function createOpenCodeFetch(): typeof fetch {
+  return async (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set('User-Agent', OPENCODE_CLIENT_UA);
+    headers.set('x-opencode-session', resolveOpenCodeSessionId());
+    return fetch(input, { ...init, headers });
+  };
+}
+
+
 function buildProvider() {
   const baseUrl = process.env.OPENAI_BASE_URL || '';
 
@@ -25,6 +65,7 @@ function buildProvider() {
       apiKey: process.env.OPENAI_API_KEY,
       baseURL: baseUrl,
       name: 'opencode',
+      fetch: createOpenCodeFetch(),
     });
   }
 
@@ -88,6 +129,7 @@ function buildLiteProvider() {
       apiKey,
       baseURL: baseUrl,
       name: 'opencode',
+      fetch: createOpenCodeFetch(),
     });
   }
 
@@ -131,6 +173,7 @@ export function getSystemPrompt(): string {
 export function setSystemPrompt(prompt: string): void {
   _systemPrompt = prompt;
 }
+
 
 
 
