@@ -70,3 +70,7 @@ Seek Launcher.vbs
 
 # 临时产物目录
 tmp/
+
+
+# 技能内测试产物（dsh 技能测试脚本用的临时 DSH_HOME）
+.test-data*/

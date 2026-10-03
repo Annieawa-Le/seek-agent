@@ -12,6 +12,7 @@
 
 import { execSync } from 'child_process';
 import { existsSync, mkdirSync, readdirSync, copyFileSync } from 'fs';
+import { extname, relative, sep } from 'path';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -25,6 +26,15 @@ function log(msg) {
 // ═══════════════════════════════════════════════════
 // 递归拷贝目录（仅拷贝符合 filter 的文件）
 // ═══════════════════════════════════════════════════
+/**
+ * 判断某个路径是否位于「技能目录正下方」（即 skillsRoot/<skill>/<name>）。
+ * 用于只对顶层开发目录（如各技能自己的 scripts/）做排除，避免误伤更深层的同名目录。
+ */
+function isSkillRootChild(fullPath, skillsRoot) {
+  const rel = relative(skillsRoot, fullPath);
+  return rel.split(sep).length === 2;
+}
+
 function copyDir(src, dest, filter = () => true) {
   if (!existsSync(src)) return;
   if (!existsSync(dest)) mkdirSync(dest, { recursive: true });
@@ -34,9 +44,12 @@ function copyDir(src, dest, filter = () => true) {
     const srcPath = join(src, entry.name);
     const destPath = join(dest, entry.name);
 
+    // filter 对目录同样生效，否则「整个目录不进包」的规则永远没机会执行
+    if (!filter(entry.name, srcPath)) continue;
+
     if (entry.isDirectory()) {
       copyDir(srcPath, destPath, filter);
-    } else if (entry.isFile() && filter(entry.name, srcPath)) {
+    } else if (entry.isFile()) {
       copyFileSync(srcPath, destPath);
     }
   }
@@ -71,14 +84,28 @@ function copyAssets() {
     log(`  ✅ prompts/ 已拷贝`);
   }
 
-  // 2b. 拷贝 inner_skills 的静态配置文件
+  // 2b. 拷贝 inner_skills 的静态资源
+  //
+  // 过滤规则要排除「源码 / 开发脚本」，而不是「只收配置」：
+  //   ✗ .ts 源码      — tsc 已产出 .js，源码进包只会混淆（也拖大体积）
+  //   ✗ .map          — 产物已有各自的 sourcemap
+  //   ✗ node_modules  — 依赖由各自的 package.json 管理
+  //   ✗ scripts/      — 插件的开发/验收脚本，运行时不用
+  // 其余一律保留：.md（提示词/风格库）、.json（配置）、.js/.mjs（前端与宿主）、
+  // .html（沙箱页）、.woff2/.ttf（字体）、.css 等——这些是插件的运行时资源。
+  const SKIP_EXT = new Set(['.ts', '.tsx', '.map']);
+  const SKIP_DIRS = new Set(['node_modules', 'scripts']);
   const skillsSrc = join(srcDir, 'tools', 'inner_skills');
   const skillsDest = join(agentDist, 'tools', 'inner_skills');
   if (existsSync(skillsSrc)) {
-    copyDir(skillsSrc, skillsDest, (name) => {
-      return name === 'enable.json' || name.endsWith('.md');
+    copyDir(skillsSrc, skillsDest, (name, fullPath) => {
+      if (name === '.git' || name === '.gitignore') return false;
+      if (SKIP_EXT.has(extname(name))) return false;
+      // 顶层（技能目录正下方）的开发目录不进包；各技能内部的 styles/assets 保留
+      if (SKIP_DIRS.has(name) && isSkillRootChild(fullPath, skillsSrc)) return false;
+      return true;
     });
-    log(`  ✅ inner_skills 配置已拷贝`);
+    log(`  ✅ inner_skills 静态资源已拷贝`);
   }
 
   // 2c. 拷贝 assets/ 目录（非 TS 文件）

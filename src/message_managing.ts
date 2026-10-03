@@ -72,6 +72,69 @@ function getToolCallKey(toolName: string, input: Record<string, unknown>): strin
   return null;
 }
 /**
+ * 修复孤立的 tool-call / tool-result。
+ *
+ * 上游（provider）要求每个 tool-call 都有配对的 tool-result，反之亦然；
+ * 任一侧缺失都会导致整条请求被 400 拒绝，而且畸形消息留在历史里会让该会话永久报废。
+ * 两类修复：
+ *   - 孤立 tool-call（assistant 有 call，无 result）：在紧随其后的 tool 消息里补一条
+ *     占位 result，明确告知模型「该调用未返回结果（已中断）」。
+ *   - 孤立 tool-result（有 result，无 call）：直接从消息中剔除。
+ *
+ * 该函数不修改入参数组（构造新数组返回），可安全地在 hook 中调用。
+ */
+function repairOrphanToolParts(messages: ModelMessage[]): ModelMessage[] {
+  // 收集所有 tool-call id 与 tool-result id
+  const callIds = new Set<string>();
+  const resultIds = new Set<string>();
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue;
+    for (const part of msg.content) {
+      if (part.type === 'tool-call') callIds.add((part as ToolCallPart).toolCallId);
+      else if (part.type === 'tool-result') resultIds.add((part as ToolResultPart).toolCallId);
+    }
+  }
+
+  const missingResults = new Set([...callIds].filter((id) => !resultIds.has(id)));
+  const orphanResults = new Set([...resultIds].filter((id) => !callIds.has(id)));
+  if (missingResults.size === 0 && orphanResults.size === 0) return messages;
+
+  console.warn(
+    `⚠ 检测到孤立的工具消息：缺失 result ${missingResults.size} 个、多余 result ${orphanResults.size} 个 —— 已自动修复`,
+  );
+
+  const out: ModelMessage[] = [];
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) { out.push(msg); continue; }
+
+    // 剔除孤立 tool-result
+    const keptParts = msg.content.filter(
+      (p) => !(p.type === 'tool-result' && orphanResults.has((p as ToolResultPart).toolCallId)),
+    );
+    if (keptParts.length > 0) out.push(keptParts.length === msg.content.length ? msg : ({ ...msg, content: keptParts } as ModelMessage));
+
+    // assistant 消息后，为其中缺失结果的 tool-call 补一条占位 result
+    if (msg.role === 'assistant') {
+      const need = keptParts.filter(
+        (p) => p.type === 'tool-call' && missingResults.has((p as ToolCallPart).toolCallId),
+      ) as ToolCallPart[];
+      if (need.length > 0) {
+        out.push({
+          role: 'tool',
+          content: need.map((tc) => ({
+            type: 'tool-result' as const,
+            toolCallId: tc.toolCallId,
+            toolName: tc.toolName,
+            output: { type: 'text' as const, value: '（该工具调用未返回结果，可能被中断）' },
+          })),
+        } as ModelMessage);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * 创建一个 MessageHook 函数，用于在每轮消息传给模型前进行预处理。
  *
  * 预处理逻辑：
@@ -96,6 +159,12 @@ export function createMessageHook(options?: ContextManagerOptions): MessageHook 
 
   // ── 返回的 hook 函数，每次调用 AI 前都会执行 ──
   return (messages: ModelMessage[]): ModelMessage[] => {
+    // ──────── 前置步：修复孤立 tool-call / tool-result（防止会话 400 报废） ────────
+    // 无论根因如何，只要 assistant 里有一条 tool-call 找不到配对的 tool-result，
+    // provider 就会以 400 invalid_request_error 拒绝整个请求，且重试无用（消息畸形依旧）。
+    // 这里在发请求前补齐缺失的 tool-result，让已损坏的会话能够自愈。
+    messages = repairOrphanToolParts(messages);
+
     // ──────── 第零步：注入工作记忆（双层记忆的短期层） ────────
     // 工作记忆有内容时注入为一条 [工作记忆] 标记的 user 消息；
     // 已注入过则原地更新内容，让模型在调用 memory_* 工具后能看到最新状态。

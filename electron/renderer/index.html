@@ -6,10 +6,13 @@
   <!--
     CSP 说明：
     - 开发模式（Vite HMR）：需要 connect-src ws://localhost:* 以支持热更新
+    - 本地插件宿主：inner_skill 的宿主（如 dsh-raw-html）跑在 127.0.0.1:<随机端口>，
+      其前端脚本与样式由渲染层动态 <script>/<link> 加载 —— 因此 script-src / style-src
+      必须放行 http://127.0.0.1:*，否则引擎、KaTeX、Mermaid、字体全部被拦（卡片渲染不出来）。
     - 打包模式：仅 'self' 即可
     打包后的 dist/index.html 由 Vite 构建时自动处理 CSP。
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:*;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' http://127.0.0.1:*; script-src 'self' 'unsafe-inline' http://127.0.0.1:*; connect-src 'self' ws://localhost:* http://localhost:* http://127.0.0.1:*; img-src 'self' data: blob: http://127.0.0.1:*; media-src 'self' http://127.0.0.1:*; font-src 'self' data: http://127.0.0.1:*;">
   <title>Seek Agent</title>
 </head>
 <body>

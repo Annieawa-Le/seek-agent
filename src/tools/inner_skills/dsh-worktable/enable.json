@@ -1,0 +1,5 @@
+{
+  "enable": true,
+  "label": "工作台",
+  "description": "工作台 Worktable（移植版）：侧边栏「工作台」项目抽屉（项目卡片 + 项目↔会话绑定）+ 主区工作台舞台 + 控制室会话卡片网格。宿主半区（host.mjs）由 Electron 主进程按本目录开关托管；把 enable 设为 false 或删除本目录即可整体卸载。"
+}

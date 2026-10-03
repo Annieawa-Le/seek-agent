@@ -15,12 +15,13 @@
  *   - 打包模式：运行 dist/release/agent/electron-entry.js（编译后的版本）
  */
 
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, screen } from 'electron';
 import { spawn, exec } from 'child_process';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, resolve, join, isAbsolute, basename } from 'path';
 import { watch } from 'fs';
 import { readdirSync, readFileSync, statSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { startRemoteBridge } from './remote-bridge.js';
 import { extractPatchBody, parsePatchMeta, truncatePatchBody } from './patch-history.js';
 import { revertContent, RevertError } from './patch-revert.js';
@@ -69,6 +70,9 @@ const METHOD_TO_CHANNEL = {
   getSkillsList: 'skills:list',
   getEnvConfig: 'env:read',
   saveEnvConfig: 'env:write',
+  getPlugins: 'plugins:list',
+  setPluginEnabled: 'plugins:setEnabled',
+  setPluginOption: 'plugins:setOption',
 };
 
 /** RemoteBridge RPC 查询分发：method → channel → rpcFns handler */
@@ -355,6 +359,461 @@ function restartCurrentAgent() {
 }
 
 
+// ═════════════════════════════════════════════════════
+// 鲸鱼娘挂件（dsh-whale-widget 移植）：假 DSH 宿主托管
+//
+// 这是 inner_skill（src/tools/inner_skills/dsh-whale-widget）的「宿主半区」：
+// skill 目录里放着 dsh-whale-widget 原包（widget/）与假 DSH 壳（shim.mjs），
+// 但把挂件注入渲染层只有主进程能做，所以由这里读取 enable.json 按开关托管。
+// ═════════════════════════════════════════════════════
+const WHALE_SKILL_DIR = join(__dirname, '..', 'src', 'tools', 'inner_skills', 'dsh-whale-widget');
+let whaleHost = null;
+/** 把 seek-agent 的累计用量换算成插件要的单步增量（模块：skill 目录 usage-cursor.mjs） */
+let whaleUsageCursor = null;
+let whaleTurn = 1;
+let whaleTurnOpen = false;
+
+/**
+ * 挂件发往本地宿主的请求会被判为「跨站」（file:// 页面 → 127.0.0.1）而 403：
+ * 鲸鱼娘是插件自带的 Sec-Fetch-Site 校验，表情包宿主则是 CORS。
+ * Electron 允许在请求发出前改写请求头，这里抹掉 Sec-Fetch-Site / Origin 一次性解决两者。
+ *
+ * 注意：webRequest.onBeforeSendHeaders 是「单监听器」语义，后注册会覆盖先注册。
+ * 所以这里只装一次，URL 模式覆盖全部挂件端口，而不是每个挂件各装一次。
+ */
+const localHostRewritePorts = new Set();
+let localHostRewriteInstalled = false;
+function installLocalHostRequestRewrite(port) {
+  localHostRewritePorts.add(port);
+  if (localHostRewriteInstalled) return;
+  localHostRewriteInstalled = true;
+  try {
+    session.defaultSession.webRequest.onBeforeSendHeaders(
+      { urls: [...localHostRewritePorts].map((p) => `http://127.0.0.1:${p}/*`) },
+      (details, callback) => {
+        const headers = details.requestHeaders;
+        delete headers['Sec-Fetch-Site'];
+        delete headers['sec-fetch-site'];
+        delete headers['Origin'];
+        delete headers['origin'];
+        callback({ requestHeaders: headers });
+      },
+    );
+    console.log('[widgets] 已安装请求头改写（抹掉 Sec-Fetch-Site/Origin，绕过跨站自校验）');
+  } catch (err) {
+    console.error('[widgets] 请求头改写安装失败：', err);
+  }
+}
+
+/** 按 skill 的 enable.json 开关启动鲸鱼娘宿主；返回是否启动。 */
+async function startWhaleWidget() {
+  try {
+    const enablePath = join(WHALE_SKILL_DIR, 'enable.json');
+    if (!existsSync(enablePath)) return false;
+    let cfg = {};
+    try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏按默认处理 */ }
+    if (cfg.enable === false) {
+      console.log('[whale] 挂件已禁用（enable.json: enable=false）');
+      return false;
+    }
+    // 依 seek-agent 的 provider 配置预置凭据名，供 shim 的 credentials 回退读取。
+    // 余额只有对得上「同一个 key 的厂商接口」才有意义，因此按 base_url 判定，不盲塞。
+    const baseUrl = String(process.env.OPENAI_BASE_URL || '').toLowerCase();
+    if (process.env.OPENAI_API_KEY) {
+      if (baseUrl.includes('opencode') && !process.env.OPENCODE_GO_API_KEY) process.env.OPENCODE_GO_API_KEY = process.env.OPENAI_API_KEY;
+      if (baseUrl.includes('deepseek') && !process.env.DEEPSEEK_API_KEY) process.env.DEEPSEEK_API_KEY = process.env.OPENAI_API_KEY;
+    }
+
+    const { createWhaleHost } = await import(pathToFileURL(join(WHALE_SKILL_DIR, 'shim.mjs')).href);
+    const { createUsageCursor } = await import(pathToFileURL(join(WHALE_SKILL_DIR, 'usage-cursor.mjs')).href);
+    whaleUsageCursor = createUsageCursor();
+    whaleHost = createWhaleHost({
+      widgetDir: join(WHALE_SKILL_DIR, 'widget'),
+      dataDir: join(app.getPath('userData'), 'whale'),
+    });
+    await whaleHost.loadPlugin();
+    const { port } = await whaleHost.start();
+    installLocalHostRequestRewrite(port);
+    console.log(`[whale] 鲸鱼娘宿主已启动：http://127.0.0.1:${port}`);
+    return true;
+  } catch (err) {
+    console.error('[whale] 启动失败：', err);
+    whaleHost = null;
+    return false;
+  }
+}
+
+/** 把前端挂件注入渲染层（URL 重写到宿主端口，浏览器按绝对地址访问本地宿主）。 */
+async function injectWhaleWidget(win) {
+  if (!whaleHost || !win || win.isDestroyed()) return;
+  try {
+    const port = whaleHost.getPort();
+    let code = await readFile(join(WHALE_SKILL_DIR, 'widget', 'assets', 'whale-widget.js'), 'utf8');
+    code = code.split('/dsh-whale/').join(`http://127.0.0.1:${port}/dsh-whale/`);
+    await win.webContents.executeJavaScript(code, true);
+    console.log('[whale] 前端挂件已注入');
+  } catch (err) {
+    console.error('[whale] 注入失败：', err);
+  }
+}
+
+/** 把 seek-agent 的模型名映射到鲸鱼娘价目表的 id（认不了就原样返回，插件用默认价）。 */
+function whaleModelName() {
+  const m = String(process.env.OPENAI_MODEL || '').toLowerCase();
+  if (m.includes('pro')) return 'deepseek-v4-pro';
+  if (m.includes('flash')) return 'deepseek-flash';
+  return m;
+}
+
+// ═════════════════════════════════════════════════════
+// 表情包挂件（dsh-meme 移植）：web 半区托管
+//
+// 与鲸鱼娘不同：dsh-meme 的后端要 tools/attachments/llm 一堆服务，跑不动原插件，
+// 所以 host.mjs 只重写它对外暴露的东西（图片路由 + 图库索引接口），
+// 前端 client.dom.js 走 DOM 装饰（不进 React、不依赖宿主 slot API）。
+// ═════════════════════════════════════════════════════
+const MEME_SKILL_DIR = join(__dirname, '..', 'src', 'tools', 'inner_skills', 'dsh-meme');
+let memeHost = null;
+
+/** 按 skill 的 enable.json 开关启动表情包宿主；返回是否启动。 */
+async function startMemeWidget() {
+  try {
+    const enablePath = join(MEME_SKILL_DIR, 'enable.json');
+    if (!existsSync(enablePath)) return false;
+    let cfg = {};
+    try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏按默认处理 */ }
+    if (cfg.enable === false) {
+      console.log('[meme] 挂件已禁用（enable.json: enable=false）');
+      return false;
+    }
+    const { createMemeHost } = await import(pathToFileURL(join(MEME_SKILL_DIR, 'host.mjs')).href);
+    memeHost = createMemeHost({ skillDir: MEME_SKILL_DIR });
+    const { port } = await memeHost.start();
+    installLocalHostRequestRewrite(port);
+    console.log(`[meme] 表情包宿主已启动：http://127.0.0.1:${port}`);
+    return true;
+  } catch (err) {
+    console.error('[meme] 启动失败：', err);
+    memeHost = null;
+    return false;
+  }
+}
+
+/** 把前端脚本注入渲染层（先塞宿主地址，再跑 client.dom.js）。 */
+async function injectMemeWidget(win) {
+  if (!memeHost || !win || win.isDestroyed()) return;
+  try {
+    const port = memeHost.getPort();
+    const code = await readFile(join(MEME_SKILL_DIR, 'client.dom.js'), 'utf8');
+    const prelude = `window.__MEME_HOST = 'http://127.0.0.1:${port}';\n`;
+    await win.webContents.executeJavaScript(prelude + code, true);
+    console.log('[meme] 前端挂件已注入');
+  } catch (err) {
+    console.error('[meme] 注入失败：', err);
+  }
+}
+
+// ═════════════════════════════════════════════════════
+// 工作台（dsh-worktable 移植）：宿主半区托管
+//
+// 与鲸鱼娘/表情包同一套约定：宿主逻辑全在 skill 目录（host.mjs），这里只做
+// 「读 enable.json → 动态 import → 起本地服务 → 注入前端」。删掉该目录 = 整体卸载，
+// 主进程不会崩（enable.json 不存在即不启用，import 失败被 catch 掉）。
+// ═════════════════════════════════════════════════════
+const WORKTABLE_SKILL_DIR = join(__dirname, '..', 'src', 'tools', 'inner_skills', 'dsh-worktable');
+let worktableHost = null;
+
+/** 按 skill 的 enable.json 开关启动工作台宿主；返回是否启动。 */
+async function startWorktable() {
+  try {
+    const enablePath = join(WORKTABLE_SKILL_DIR, 'enable.json');
+    if (!existsSync(enablePath)) return false;
+    let cfg = {};
+    try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏按默认处理 */ }
+    if (cfg.enable === false) {
+      console.log('[worktable] 已禁用（enable.json: enable=false）');
+      return false;
+    }
+    const { createWorktableHost } = await import(pathToFileURL(join(WORKTABLE_SKILL_DIR, 'host.mjs')).href);
+    worktableHost = createWorktableHost({ skillDir: WORKTABLE_SKILL_DIR });
+    const { port } = await worktableHost.start();
+    installLocalHostRequestRewrite(port);
+    console.log(`[worktable] 宿主已启动：http://127.0.0.1:${port}`);
+    return true;
+  } catch (err) {
+    console.error('[worktable] 启动失败：', err);
+    worktableHost = null;
+    return false;
+  }
+}
+
+/** 把前端脚本注入渲染层（先塞宿主地址，再跑 worktable.js）。 */
+async function injectWorktable(win) {
+  if (!worktableHost || !win || win.isDestroyed()) return;
+  try {
+    const port = worktableHost.getPort();
+    const code = await readFile(join(WORKTABLE_SKILL_DIR, 'client', 'worktable.js'), 'utf8');
+    const prelude = `window.__WT_HOST = 'http://127.0.0.1:${port}';\n`;
+    await win.webContents.executeJavaScript(prelude + code, true);
+    console.log('[worktable] 前端已注入');
+  } catch (err) {
+    console.error('[worktable] 注入失败：', err);
+  }
+}
+
+
+// ═════════════════════════════════════════════════════
+// 视觉卡片（dsh-raw-html 移植）：宿主半区托管
+//
+// 与工作台同一套约定：宿主逻辑全在 skill 目录（host.mjs），这里只做
+// 「读 enable.json → 动态 import → 起本地服务 → 注入前端」。删掉该目录 = 整体卸载，
+// 主进程不会崩（enable.json 不存在即不启用，import 失败被 catch 掉）。
+//
+// 与其它挂件的差别：本插件的前端不挂 DOM，而是注册到渲染层的中立内容扩展点
+// （electron/renderer/src/utils/content-extension.ts）——渲染层不认识卡片协议，
+// 只有插件注册了渲染器才会接管助手正文；插件缺席时渲染层走原 markdown 路径。
+// ═════════════════════════════════════════════════════
+const RAWTML_SKILL_DIR = join(__dirname, '..', 'src', 'tools', 'inner_skills', 'dsh-raw-html');
+let rawHtmlHost = null;
+
+/** 按 skill 的 enable.json 开关启动视觉卡片宿主；返回是否启动。 */
+async function startRawHtml() {
+  try {
+    const enablePath = join(RAWTML_SKILL_DIR, 'enable.json');
+    if (!existsSync(enablePath)) return false;
+    let cfg = {};
+    try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏按默认处理 */ }
+    if (cfg.enable === false) {
+      console.log('[raw-html] 已禁用（enable.json: enable=false）');
+      return false;
+    }
+    const trusted = cfg.trusted === true;
+    const { createRawHtmlHost } = await import(pathToFileURL(join(RAWTML_SKILL_DIR, 'host.mjs')).href);
+    rawHtmlHost = createRawHtmlHost({ skillDir: RAWTML_SKILL_DIR, trusted });
+    const { port } = await rawHtmlHost.start();
+    installLocalHostRequestRewrite(port);
+    console.log(`[raw-html] 宿主已启动：http://127.0.0.1:${port}${trusted ? '（可信模式：卡内脚本在 iframe 沙箱内执行）' : '（安全模式：卡内脚本不执行）'}`);
+    return true;
+  } catch (err) {
+    console.error('[raw-html] 启动失败：', err);
+    rawHtmlHost = null;
+    return false;
+  }
+}
+
+/**
+ * 把前端脚本注入渲染层。
+ * 渲染层需要三样东西才能接管正文，这里一次给全：
+ *   __SEEK_EXT_HOST           宿主地址（资源走它）
+ *   __seekReact               React 本体（引擎的 f 注入与 shim 都要）
+ *   __SEEK_CONTENT_EXTENSION  渲染层提名的注册接口（register / renderMarkdown）
+ * 任一缺失插件就静默退出，渲染层不受影响。
+ */
+async function injectRawHtml(win) {
+  if (!rawHtmlHost || !win || win.isDestroyed()) return;
+  try {
+    const port = rawHtmlHost.getPort();
+    const code = await readFile(join(RAWTML_SKILL_DIR, 'client', 'raw-html.js'), 'utf8');
+    let trusted = false;
+    try {
+      trusted = JSON.parse(readFileSync(join(RAWTML_SKILL_DIR, 'enable.json'), 'utf8')).trusted === true;
+    } catch { /* 读不到按安全模式 */ }
+    const prelude = [
+      `window.__SEEK_EXT_HOST = 'http://127.0.0.1:${port}';`,
+      `window.__SEEK_RAW_HTML_TRUSTED = ${trusted};`,
+      ';(function(){',
+      '  try {',
+      // 从渲染层提名的扩展点里取 React 与 markdown（渲染层主动挂出，非插件私有约定）
+      '    var ext = window.__SEEK_CONTENT_EXTENSION;',
+      '    if (ext && ext.react) window.__seekReact = ext.react;',
+      '  } catch (e) {}',
+      '})();',
+      '',
+    ].join('\n');
+    await win.webContents.executeJavaScript(prelude + code, true);
+    console.log('[raw-html] 前端已注入');
+  } catch (err) {
+    console.error('[raw-html] 注入失败：', err);
+  }
+}
+
+/**
+ * 等渲染层就绪再注入视觉卡片前端。
+ *
+ * 注入的前提是渲染层的 `__SEEK_CONTENT_EXTENSION` 已经挂出（插件要拿它的 React 与 markdown），
+ * 而那是渲染层模块执行的结果，主进程无从直接观测——此前只能硬等一个固定延迟，
+ * 短了名单还没挂上（注入静默失败）、长了每次开窗白等。
+ *
+ * 现在渲染层在挂出名单的同时广播事件 + 立一次性标志，这里两条路都走：
+ *   · 标志已在 → 名单早已就绪，立即注入；
+ *   · 否则挂事件监听，等广播到达；事件超时兜底重试，避免脚本异常时不注入。
+ */
+async function injectRawHtmlWhenReady(win) {
+  if (!rawHtmlHost || !win || win.isDestroyed()) return;
+  const READY_FLAG = 'window.__SEEK_CONTENT_EXTENSION_READY === true';
+  try {
+    if (await win.webContents.executeJavaScript(READY_FLAG, true)) {
+      await injectRawHtml(win);
+      return;
+    }
+    await win.webContents.executeJavaScript(
+      `new Promise(function (resolve) {
+         var done = false;
+         function fire() { if (!done) { done = true; resolve(true); } }
+         window.addEventListener('seek:content-extension-ready', fire, { once: true });
+         // 兜底：脚本异常导致事件永不到达时，轮询标志（上限 5s），仍不就绪则放弃本轮
+         var waited = 0;
+         var timer = setInterval(function () {
+           waited += 100;
+           if (window.__SEEK_CONTENT_EXTENSION_READY === true || waited >= 5000) {
+             clearInterval(timer); fire();
+           }
+         }, 100);
+       })`,
+      true,
+    );
+    if (!win.isDestroyed()) await injectRawHtml(win);
+  } catch (err) {
+    console.error('[raw-html] 等待渲染层就绪失败，改用直接注入：', err);
+    void injectRawHtml(win);
+  }
+}
+
+
+// ═════════════════════════════════════════════════════
+// 大肥鱼桌宠（dsh-dafeiyu 移植）：桌面窗口型插件
+//
+// 与前两个挂件不同，桌宠不开 HTTP 宿主，而是直接开一个透明置顶窗。
+// 状态来源是 agent 事件流：agent:message 里的消息喂给事件桥，
+// 桥跑 DSH 版 CompanionReducer，产出的协议消息推给桌宠窗。
+// ═════════════════════════════════════════════════════
+const PET_SKILL_DIR = join(__dirname, '..', 'src', 'tools', 'inner_skills', 'dsh-dafeiyu');
+let petHost = null;
+let petStatus = null;
+
+/** 按 skill 的 enable.json 开关启动桌宠；返回是否启动。 */
+async function startPetWidget() {
+  try {
+    const enablePath = join(PET_SKILL_DIR, 'enable.json');
+    if (!existsSync(enablePath)) return false;
+    let cfg = {};
+    try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏按默认处理 */ }
+    if (cfg.enable === false) {
+      console.log('[dafeiyu] 桌宠已禁用（enable.json: enable=false）');
+      return false;
+    }
+    const { createPetHost } = await import(pathToFileURL(join(PET_SKILL_DIR, 'pet-window.js')).href);
+    const { createPetStatus } = await import(pathToFileURL(join(PET_SKILL_DIR, 'pet-status.js')).href);
+    petStatus = createPetStatus();
+    petHost = createPetHost({
+      BrowserWindow,
+      screen,
+      reducedMotion: cfg.reducedMotion === true,
+      status: petStatus,
+    });
+    await petHost.initBridge();
+    const ok = await petHost.open();
+    if (!ok) { petHost = null; return false; }
+    petHost.applyConfig(cfg);
+    console.log('[dafeiyu] 大肥鱼桌宠已启动');
+    return true;
+  } catch (err) {
+    console.error('[dafeiyu] 启动失败：', err);
+    petHost = null;
+    return false;
+  }
+}
+
+/**
+ * 关闭桌宠窗。
+ *
+ * 桌宠是独立置顶窗，不属于主窗口的子窗：只关主窗的话它仍挂在桌面上，
+ * BrowserWindow 列表非空 → window-all-closed 永不触发 → 应用退不出去，
+ * 表现为「UI 没了、任务栏也没了，桌上还剩一条鱼」。所以关主窗时必须连带收它。
+ * 宿主对象保留（含已加载的事件桥），macOS 重新拉起主窗时可再 open()。
+ */
+function closePetWidget() {
+  if (!petHost) return;
+  try {
+    petHost.close();
+  } catch (err) {
+    console.error('[dafeiyu] 桌宠关闭失败：', err);
+  }
+}
+
+// 桌宠窗发回的消息（素材就绪 / 桌面交互），仅用于状态记录与日志
+ipcMain.on('dafeiyu:loaded', () => {
+  console.log('[dafeiyu] 窗内素材已就绪');
+});
+ipcMain.on('dafeiyu:ready', () => {
+  console.log('[dafeiyu] 窗内脚本已就绪');
+});
+ipcMain.on('dafeiyu:interact', (_e, kind) => {
+  console.log(`[dafeiyu] 桌面交互：${kind}`);
+});
+// 拖拽：窗内上报增量位移，主进程移窗（避免 app-region 的延迟与吃点击问题）
+ipcMain.on('dafeiyu:drag-move', (_e, payload) => {
+  if (!petHost) return;
+  petHost.dragMove(payload?.dx, payload?.dy);
+});
+ipcMain.on('dafeiyu:drag-end', () => {
+  if (!petHost) return;
+  petHost.dragEnd();
+});
+
+/** 把 seek-agent 的事件喂给桌宠事件桥。 */
+let petLastLoggedState = '';
+function bridgePetEvent(msg, sessionId) {
+  if (!petHost) return;
+  const bridge = petHost.getBridge();
+  if (!bridge) return;
+  try {
+    bridge.handle({ ...msg, sessionId, sessionName: sessionDisplayName(sessionId) });
+    // 状态变化打一行日志（同一状态不重复刷屏），便于排查桌宠为何不动
+    const snap = petStatus ? petStatus.snapshot() : null;
+    if (snap && snap.lastState && snap.lastState !== petLastLoggedState) {
+      petLastLoggedState = snap.lastState;
+      console.log(`[dafeiyu] 状态 → ${snap.lastState}：${snap.lastMessage || ''}`);
+    }
+  } catch (err) {
+    console.error('[dafeiyu] 事件桥处理失败：', err);
+  }
+}
+
+/**
+ * 把 seek-agent 的 usage 转成 DSH 会话事件喂给插件算账。
+ *
+ * seek-agent 推的是「会话累计四桶」，插件按「每条 assistant/message = 一次调用」自己累加，
+ * 口径差一层 —— 换算（取增量）在 skill 目录的 usage-cursor.mjs，缘由与边界见该文件。
+ */
+function bridgeWhaleUsage(sessionId, msg) {
+  if (!whaleHost) return;
+  try {
+    const session = { id: sessionId, name: sessionDisplayName(sessionId) };
+    if (msg.type === 'usage') {
+      // 累计 → 增量的口径换算（详见 usage-cursor.mjs）
+      const step = whaleUsageCursor ? whaleUsageCursor.take(sessionId, msg) : null;
+      // 没有增量（例如同一轮里数值没变）就不发事件，免得给本轮掺入空步
+      if (!step) return;
+      whaleHost.emitSessionEvent(session, {
+        type: 'assistant/message',
+        data: {
+          turn: whaleTurn,
+          usage: step,
+          message: { source: { model: whaleModelName() } },
+        },
+      });
+      whaleTurnOpen = true;
+    } else if (msg.type === 'state' && msg.processing === false && whaleTurnOpen) {
+      whaleHost.emitSessionEvent(session, { type: 'turn/end', data: { turn: whaleTurn } });
+      whaleTurnOpen = false;
+      whaleTurn += 1;
+    }
+  } catch (err) {
+    console.error('[whale] usage 桥接失败：', err);
+  }
+}
+
 function handleAgentMessage(msg, sessionId) {
   if (msg.type === 'init-done') {
     const entry = agentProcs.get(sessionId);
@@ -386,6 +845,10 @@ function handleAgentMessage(msg, sessionId) {
     logCollab(sessionId, from, msg.content, 'reply');
     sendToAgent(from, { type: 'collab-message', from: sessionDisplayName(sessionId), content: msg.content });
   }
+  // 鲸鱼娘：把每轮 usage 转发给假 DSH 宿主算账
+  bridgeWhaleUsage(sessionId, msg);
+  // 大肥鱼：把状态事件喂给桌宠事件桥
+  bridgePetEvent(msg, sessionId);
   // 转发时附加 sessionId，渲染层据此区分会话
   broadcastToClients('agent:message', { ...msg, sessionId });
 }
@@ -552,8 +1015,8 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
-      // 开发模式下允许加载 HTTP 资源
-      webSecurity: !isDev,
+      // 开发模式、或启用了本地挂件（需从 file:// 页面访问本地宿主 127.0.0.1）时放开跨源限制
+      webSecurity: !isDev && !whaleHost && !memeHost,
     },
   });
 
@@ -568,7 +1031,29 @@ function createWindow() {
   mainWindow.webContents.on('console-message', (event) => {
     console.log(`[renderer:${event.level}] ${event.message}`);
   });
-  mainWindow.on('closed', () => { mainWindow = null; });
+
+  // ── 本地挂件：页面加载完成后注入前端 ──
+  mainWindow.webContents.on('did-finish-load', () => {
+    void injectWhaleWidget(mainWindow);
+    void injectMemeWidget(mainWindow);
+    void injectWorktable(mainWindow);
+    // 视觉卡片：等渲染层广播「扩展点已提名」再注入（内容扩展点注册表就绪是硬前置）
+    void injectRawHtmlWhenReady(mainWindow);
+  });
+  // dev.mjs 用 vite build --watch，其 emptyOutDir 会瞬时清空 dist；首帧可能撞上而 ERR_FILE_NOT_FOUND。
+  // 这里对 index.html 做有限重试，避免开发时白屏。
+  let whaleLoadRetry = 0;
+  mainWindow.webContents.on('did-fail-load', (_e, _code, _desc, validatedURL) => {
+    if (whaleLoadRetry < 6 && String(validatedURL || '').includes('index.html')) {
+      whaleLoadRetry += 1;
+      setTimeout(() => { if (!mainWindow.isDestroyed()) mainWindow.loadFile(RENDERER_HTML); }, 400);
+    }
+  });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    // 桌宠是独立窗口，不跟着主窗销毁；这里显式收掉，window-all-closed 才会如期触发
+    closePetWidget();
+  });
   mainWindow.on('maximize', () => {
     if (!mainWindow.isDestroyed()) mainWindow.webContents.send('window:maximized', true);
   });
@@ -1350,6 +1835,163 @@ registerRpc('skills:list', async () => {
 });
 
 // ── 侧边栏静态数据（Skills / Instructions / Agents / MCP 配置 / Plugins） ──
+// ── 挂件插件管理（设置面板「插件」板块）──
+
+/** 挂件插件清单：只列带 host.mjs 的 inner_skill（即需要主进程托管的插件）。 */
+const WIDGET_PREFIXES = ['dsh-whale-widget', 'dsh-meme', 'dsh-dafeiyu', 'dsh-worktable', 'dsh-raw-html'];
+function listWidgetPlugins() {
+  const skillsDir = join(ROOT, isPackaged ? 'agent' : 'src', 'tools', 'inner_skills');
+  const out = [];
+  for (const name of WIDGET_PREFIXES) {
+    const dir = join(skillsDir, name);
+    const enablePath = join(dir, 'enable.json');
+    if (!existsSync(enablePath)) continue;
+    let cfg = {};
+    try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏按默认处理 */ }
+    out.push({
+      name,
+      label: cfg.label || name,
+      description: cfg.description || '',
+      enabled: cfg.enable !== false,
+      running: name === 'dsh-meme' ? !!memeHost
+        : name === 'dsh-dafeiyu' ? !!(petHost && petHost.isOpen())
+        : name === 'dsh-worktable' ? !!worktableHost
+        : name === 'dsh-raw-html' ? !!rawHtmlHost
+        : !!whaleHost,
+      port: name === 'dsh-meme' ? (memeHost ? memeHost.getPort() : 0)
+        : name === 'dsh-worktable' ? (worktableHost ? worktableHost.getPort() : 0)
+        : name === 'dsh-raw-html' ? (rawHtmlHost ? rawHtmlHost.getPort() : 0)
+        : name === 'dsh-dafeiyu' ? 0
+        : (whaleHost ? whaleHost.getPort() : 0),
+    });
+  }
+  return out;
+}
+
+/** 写回某插件的 enable 开关。 */
+function setWidgetEnabled(name, enabled) {
+  const skillsDir = join(ROOT, isPackaged ? 'agent' : 'src', 'tools', 'inner_skills');
+  const enablePath = join(skillsDir, name, 'enable.json');
+  if (!existsSync(enablePath)) throw new Error('插件不存在: ' + name);
+  let cfg = {};
+  try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏则重建 */ }
+  cfg.enable = !!enabled;
+  writeFileSync(enablePath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+  return listWidgetPlugins();
+}
+
+// 桌宠自检：没有视觉检查手段时用来确认「窗口起来了 / 素材加载了 / 收到过状态」
+registerRpc('pet:status', async () => ({
+  ok: true,
+  open: !!(petHost && petHost.isOpen()),
+  ...(petStatus ? petStatus.snapshot() : {}),
+}));
+
+registerRpc('plugins:list', async () => ({ ok: true, plugins: listWidgetPlugins() }));
+
+/**
+ * 开关某插件的次级选项（现用于 dsh-raw-html 的 trusted）。
+ * 只允许写入该插件自己声明的白名单键，避免前端传入任意键污染配置。
+ */
+const PLUGIN_OPTIONS = {
+  'dsh-raw-html': {
+    trusted: { type: 'boolean', label: '可信模式', hint: '允许卡片内 <script> 在隔离沙箱中执行（默认关）' },
+  },
+};
+
+function setPluginOption(name, key, value) {
+  const skillsDir = join(ROOT, isPackaged ? 'agent' : 'src', 'tools', 'inner_skills');
+  const enablePath = join(skillsDir, name, 'enable.json');
+  if (!existsSync(enablePath)) throw new Error('插件不存在: ' + name);
+  const spec = PLUGIN_OPTIONS[name] && PLUGIN_OPTIONS[name][key];
+  if (!spec) throw new Error('该插件无此选项: ' + key);
+  let cfg = {};
+  try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏则重建 */ }
+  cfg[key] = spec.type === 'boolean' ? (value === true || value === 'true') : value;
+  writeFileSync(enablePath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+  return cfg;
+}
+
+registerRpc('plugins:setOption', async (name, key, value) => {
+  try {
+    const cfg = setPluginOption(String(name || ''), String(key || ''), value);
+    // 次级选项改变效力需要重启宿主：直接提示前端刷新（不做热重启，避免半途状态）
+    return { ok: true, config: cfg, restartRequired: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+registerRpc('plugins:setEnabled', async (name, enabled) => {
+  try {
+    const plugins = setWidgetEnabled(String(name || ''), !!enabled);
+    return { ok: true, plugins };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/** 桌宠可调项的白名单与范围，读写共用，避免前端传入越界值 */
+const PET_CONFIG_SCHEMA = {
+  scale:         { type: 'number', min: 0.3, max: 1.6, step: 0.05, label: '大小', hint: '桌宠显示比例' },
+  speed:         { type: 'number', min: 0.25, max: 3, step: 0.05,  label: '动作速度', hint: '动画播放倍率：1 为素材原速（42ms/帧），2 为快一倍' },
+  playbackFps:   { type: 'number', min: 24,  max: 144, step: 1,    label: '刷新帧率', hint: '换帧时机的精度上限；只影响画面顺滑度，不影响动作快慢（快慢请调「动作速度」）' },
+  bubbleScale:   { type: 'number', min: 0.6, max: 1.6, step: 0.05, label: '气泡大小', hint: '对话气泡的缩放' },
+  activityLevel: { type: 'enum', values: ['quiet', 'normal', 'lively'], label: '活跃度', hint: '空闲时做小动作的频率' },
+  bubbleMode:    { type: 'enum', values: ['always', 'custom', 'hidden'], label: '气泡模式', hint: 'always 始终显示 / custom 仅特定状态 / hidden 不显示' },
+  reducedMotion: { type: 'boolean', label: '减少动态', hint: '关闭拖拽、摸头等交互动画' },
+  soundEnabled:  { type: 'boolean', label: '提示音', hint: '交互时是否发声' },
+};
+
+function petConfigPath() {
+  return join(PET_SKILL_DIR, 'enable.json');
+}
+
+function readPetConfig() {
+  try {
+    return JSON.parse(readFileSync(petConfigPath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writePetConfig(patch) {
+  const cfg = readPetConfig();
+  for (const [key, spec] of Object.entries(PET_CONFIG_SCHEMA)) {
+    if (!(key in patch)) continue;
+    const raw = patch[key];
+    if (spec.type === 'number') {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) continue;
+      cfg[key] = Math.min(spec.max, Math.max(spec.min, n));
+    } else if (spec.type === 'boolean') {
+      cfg[key] = raw === true || raw === 'true';
+    } else if (spec.type === 'enum') {
+      if (spec.values.includes(String(raw))) cfg[key] = String(raw);
+    }
+  }
+  writeFileSync(petConfigPath(), JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+  return cfg;
+}
+
+// 桌宠配置读写：保存后立即下发给运行中的窗口，不必重启
+registerRpc('pet:getConfig', async () => {
+  const cfg = readPetConfig();
+  return { ok: true, config: cfg, schema: PET_CONFIG_SCHEMA, skillDir: PET_SKILL_DIR };
+});
+
+registerRpc('pet:setConfig', async (patch) => {
+  try {
+    const cfg = writePetConfig(patch && typeof patch === 'object' ? patch : {});
+    if (petHost) {
+      // applyConfig 内部会在 scale 变化时一并重算窗口尺寸，无需额外处理
+      petHost.applyConfig(cfg);
+    }
+    return { ok: true, config: cfg };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
 
 /** 读取 src 或打包 agent 目录下的 prompts 配置 */
 function getAgentSrcRoot() {
@@ -1443,15 +2085,26 @@ registerRpc('sidebar:instruction', (kind, file) => {
 // ═════════════════════════════════════════════════════
 
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // 迁移旧 session 数据到新文件夹结构（启动时一次，幂等）
   migrateLegacySessions();
+  // 挂件宿主：按各 skill 的开关启动（须在 createWindow 之前，webSecurity 依赖它们）
+  await startWhaleWidget();
+  await startMemeWidget();
+  await startWorktable();
+  await startRawHtml();
   createWindow();
+  // 桌宠是独立窗口，须在主窗口之后拉起（不依赖 webSecurity 放宽）
+  await startPetWidget();
   // 启动会话：生成全新 session-xxxx-xxxx-xxxx 会话（不再固定 'default'，避免不同启动的聊天混入同一文件）
   currentSessionId = newSessionId();
   spawnAgent(currentSessionId);
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+      // 关主窗时已把桌宠一并收掉，重新拉起窗口时唤醒它（macOS 走这条路径）
+      if (petHost && !petHost.isOpen()) void petHost.open();
+    }
   });
 });
 
@@ -1482,170 +2135,6 @@ if (process.env.SEEK_RELAY_URL) {
     trustedDevicesFile: TRUSTED_DEVICES_FILE,
   });
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

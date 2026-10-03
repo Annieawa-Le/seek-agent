@@ -1,8 +1,11 @@
 import { memo, useState, useEffect, useRef, useMemo } from 'react';
+import type { ReactNode } from 'react';
 import type { DisplayMessage } from '@/hooks/useMessages.ts';
-import { renderMarkdown, renderAnsi, escapeHtml } from '@/utils/markdown.ts';
+import { renderMarkdownWithMath, renderAnsi, escapeHtml } from '@/utils/markdown.ts';
+import { replaceEmojiWithSvg } from '@/utils/emoji-icons.ts';
 import type { ToolHistoryEntry } from '@/types/index.ts';
 import { formatToolDisplayName } from '@/utils/tool-display-config.ts';
+import { renderViaContentRenderer } from '@/utils/content-extension.ts';
 
 interface Props {
   msg: DisplayMessage;
@@ -38,7 +41,7 @@ export const MessageItem = memo(function MessageItem({ msg }: Props) {
       return (
         <div className={`message agent${msg.streaming ? ' streaming' : ''}${!msg.streaming ? ' round-ended' : ''}`}>
           <div className="content">
-            {msg.content && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />}
+            {msg.content && <AgentContent content={msg.content} streaming={!!msg.streaming} msgId={msg.id} />}
             {msg.toolHistory && msg.toolHistory.length > 0 && (
               <ToolHistoryDisplay history={msg.toolHistory} />
             )}
@@ -82,7 +85,7 @@ export const MessageItem = memo(function MessageItem({ msg }: Props) {
             <span className="thinking-title">思考过程</span>
             {msg.streaming && <span className="thinking-dots">⠋</span>}
           </div>
-          {msg.content && <div className="thinking-body content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />}
+          {msg.content && <div className="thinking-body content" dangerouslySetInnerHTML={{ __html: renderMarkdownWithMath(msg.content) }} />}
           {msg.toolHistory && msg.toolHistory.length > 0 && (
             <ToolHistoryDisplay history={msg.toolHistory} />
           )}
@@ -93,7 +96,7 @@ export const MessageItem = memo(function MessageItem({ msg }: Props) {
       return (
         <div className="message subagent">
           <div className="message-subagent-header"><svg className="subagent-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> {escapeHtml(msg.subagentName || '子模型')}</div>
-          <div className="content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+          <div className="content" dangerouslySetInnerHTML={{ __html: renderMarkdownWithMath(msg.content) }} />
         </div>
       );
 
@@ -115,7 +118,7 @@ export const MessageItem = memo(function MessageItem({ msg }: Props) {
             <span className="instructor-name">{escapeHtml(msg.subagentName || '教练')}</span>
             <span className="instructor-tag">建议</span>
           </div>
-          <div className="content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+          <div className="content" dangerouslySetInnerHTML={{ __html: renderMarkdownWithMath(msg.content) }} />
         </div>
       );
 
@@ -126,6 +129,18 @@ export const MessageItem = memo(function MessageItem({ msg }: Props) {
     default: return null;
   }
 }, messagePropsEqual);
+
+/**
+ * 助手正文：优先交给已注册的内容扩展渲染器（插件注入，渲染层对其零知识）；
+ * 无扩展接管时退回默认 markdown 渲染——与扩展点引入前行为完全一致。
+ *
+ * memo：流式时内容逐字增长、气泡内其余部分不变，避免父级重渲染时连带刷新。
+ */
+const AgentContent = memo(function AgentContent({ content, streaming, msgId }: { content: string; streaming: boolean; msgId: number }) {
+  const custom: ReactNode = renderViaContentRenderer(content, { streaming, key: `msg-${msgId}` });
+  if (custom !== null) return <>{custom}</>;
+  return <div dangerouslySetInnerHTML={{ __html: renderMarkdownWithMath(content) }} />;
+});
 
 const ToolHistoryDisplay = memo(function ToolHistoryDisplay({ history: rawHistory }: {
   history: ToolHistoryEntry[];
@@ -194,9 +209,10 @@ const ToolHistoryDisplay = memo(function ToolHistoryDisplay({ history: rawHistor
 const ToolResultContent = memo(function ToolResultContent({ entry, lines }: { entry: { resultHtml?: string | null; fullOutput?: string | null }; lines: number }) {
   // 有 resultHtml（来自 rawBulk 的 toWebUI）→ 结构化 HTML 渲染
   // 无 resultHtml → 用 renderAnsi 增强纯文本（转义 + ANSI 颜色）
+  // 两条路最后都过一遍 emoji → 内联 SVG，统一图标尺寸与色彩
   const content = entry.resultHtml
-    ? <div dangerouslySetInnerHTML={{ __html: entry.resultHtml }} />
-    : <div className="tool-result-ansi" dangerouslySetInnerHTML={{ __html: renderAnsi(entry.fullOutput || '') }} />;
+    ? <div dangerouslySetInnerHTML={{ __html: replaceEmojiWithSvg(entry.resultHtml) }} />
+    : <div className="tool-result-ansi" dangerouslySetInnerHTML={{ __html: replaceEmojiWithSvg(renderAnsi(entry.fullOutput || '')) }} />;
 
   if (lines > 8) {
     return (
@@ -249,7 +265,7 @@ const UserMessage = memo(function UserMessage({ content }: { content: string }) 
   if (!parts.some(p => p.type === 'file')) {
     return (
       <div className="message user">
-        <div className="content" dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />
+        <div className="content" dangerouslySetInnerHTML={{ __html: renderMarkdownWithMath(content) }} />
       </div>
     );
   }
@@ -294,13 +310,15 @@ const UserMessage = memo(function UserMessage({ content }: { content: string }) 
           // 纯文本段落走普通 markdown
           if (!part.value.trim()) return null;
           return (
-            <div key={i} className="content-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(part.value) }} />
+            <div key={i} className="content-text" dangerouslySetInnerHTML={{ __html: renderMarkdownWithMath(part.value) }} />
           );
         })}
       </div>
     </div>
   );
 });
+
+
 
 
 

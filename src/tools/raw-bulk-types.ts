@@ -213,9 +213,38 @@ export interface MissionBulk {
   error?: string;
 }
 
+/** 闹钟操作结果 */
+export interface AlarmBulk {
+  type: 'alarm';
+  action: 'set' | 'cancel' | 'list';
+  /** 闹钟名（set / cancel） */
+  label?: string;
+  /** 设定时长（秒，set） */
+  durationSec?: number;
+  /** 到点时刻的本地时间字符串（set） */
+  fireAt?: string;
+  /** 是否成功（cancel 时表示是否找到并取消） */
+  ok?: boolean;
+  /** 未到点的闹钟（list） */
+  alarms?: Array<{ label: string; remainingMs: number }>;
+  error?: string;
+}
+
+/** 跨会话协作消息发送结果 */
+export interface CollabBulk {
+  type: 'collab';
+  action: 'send';
+  /** 目标会话 id 或标题 */
+  target?: string;
+  /** 消息是否已送达 */
+  delivered?: boolean;
+  /** 目标会话当时是否活跃（false = 未唤醒） */
+  active?: boolean;
+  error?: string;
+}
+
 // ============================================================
 // 统一 RawBulk 联合类型
-// ============================================================
 
 export type RawBulk =
   | ReadFileBulk
@@ -230,7 +259,9 @@ export type RawBulk =
   | MemoryBulk
   | MissionBulk
   | WorklogBulk
-  | CmdLogBulk;
+  | CmdLogBulk
+  | AlarmBulk
+  | CollabBulk;
 // ============================================================
 // 格式化器接口
 // ============================================================
@@ -286,6 +317,10 @@ export interface CmdLogBulk {
   content?: string;
   error?: string;
 }
+
+
+
+
 
 
 

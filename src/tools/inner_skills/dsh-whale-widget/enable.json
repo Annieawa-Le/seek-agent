@@ -1,0 +1,5 @@
+{
+  "enable": true,
+  "always_detectable": true,
+  "description": "鲸鱼娘记账挂件：把 dsh-whale-widget（原 DSH bundle 插件）通过假 DSH 宿主壳迁移到 seek-agent。Electron 界面右下角显示余额小鲸鱼、每轮消耗、音效与可自定义泡泡。宿主由 Electron 主进程按本目录的 enable.json 开关托管；把 enable 设为 false 即可整体卸载。"
+}

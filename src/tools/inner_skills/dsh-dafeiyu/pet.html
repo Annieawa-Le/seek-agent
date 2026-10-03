@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>大肥鱼</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+  }
+  /* 舞台：整窗 */
+  #stage {
+    position: relative;
+    width: 100%; height: 100%;
+  }
+  /* 角色图片：铺满「角色区」（窗口高度减去顶部气泡留白 --bubble-space）。
+     窗口已经按 scale 建小，这里 1:1 铺满即可 —— 不再叠加 transform:scale，
+     否则缩放会生效两次。留白量由主进程按 scale 算好后透传下来。 */
+  #pet {
+    display: block;
+    width: 100%;
+    height: calc(100% - var(--bubble-space, 56px));
+    object-fit: contain;
+    object-position: center bottom;
+    pointer-events: none;
+    -webkit-user-drag: none;
+    filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
+  }
+
+  /* 交互层：整窗只留这一层，同时处理拖拽与点击判定。
+     不用 -webkit-app-region（它铺满窗口会吃掉点击、且判定不跟角色走），
+     改为鼠标事件上报 → 主进程移动窗口，判定完全由角色实际渲染区域决定。 */
+  #hit {
+    position: absolute;
+    inset: 0;
+    cursor: grab;
+  }
+  #hit:active { cursor: grabbing; }
+  #hit.onPet { cursor: pointer; }
+  #bubble {
+    position: absolute;
+    left: 50%;
+    /* 顶住窗口上沿，向下自然排布（不再用 translateY(-100%) 向上撑开，
+       那种方式整颗气泡在锚点之上、超出窗口的部分会被裁掉）。 */
+    top: 0;
+    transform: translateX(-50%);
+    max-width: 240px;
+    /* 留白区高度有限（主进程按 scale 给 --bubble-space），超长文案不能把它撑破 */
+    max-height: var(--bubble-space, 56px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 7px 11px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.96);
+    color: #1f2937;
+    font: 12px/1.45 "Microsoft YaHei", system-ui, sans-serif;
+    white-space: pre-wrap;
+    word-break: break-word;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    pointer-events: none;
+  }
+  #bubble.show { opacity: 1; }
+  #bubble .msg { font-weight: 600; }
+  #bubble .detail { margin-top: 3px; opacity: 0.62; font-size: 11px; }
+  #tasks {
+    position: absolute;
+    right: 4px;
+    top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    pointer-events: none;
+  }
+  #tasks .task {
+    background: rgba(31, 41, 55, 0.86);
+    color: #f9fafb;
+    font: 10px/1.35 "Microsoft YaHei", system-ui, sans-serif;
+    padding: 4px 7px;
+    border-radius: 8px;
+    max-width: 180px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="bubble"><div class="msg"></div><div class="detail"></div></div>
+    <img id="pet" alt="大肥鱼" />
+    <div id="hit"></div>
+    <div id="tasks"></div>
+  </div>
+
+<script>
+(() => {
+  'use strict';
+
+  const petImg = document.getElementById('pet');
+  const bubble = document.getElementById('bubble');
+  const bubbleMsg = bubble.querySelector('.msg');
+  const bubbleDetail = bubble.querySelector('.detail');
+  const tasksBox = document.getElementById('tasks');
+  const hit = document.getElementById('hit');
+
+  // ── 运行时状态 ──
+  let manifest = null;
+  let clips = {};
+  let stateMap = {};
+  let workingActivityMap = {};
+  let idleMicroClips = [];
+
+  let currentClip = null;      // 当前播放的 clip 名
+  let frames = [];             // 当前 clip 的帧路径
+  let frameIndex = 0;
+  let frameMs = 42;
+  let loop = true;
+  let timer = null;            // requestAnimationFrame 句柄
+
+  let override = null;         // 交互覆盖：{clip, until, then} 播放完后回落
+  let baseState = 'IDLE';      // reducer 给的状态
+  let baseActivity = null;     // 工具细分（searching/editing/...）
+  let config = {
+    scale: 1,
+    bubbleScale: 1,
+    reducedMotion: false,
+    bubbleMode: 'always',
+    bubbleStates: ['SUCCESS', 'ERROR', 'WAITING'],
+  };
+
+  const IDLE_MICRO_CHANCE = { quiet: 0.06, normal: 0.16, lively: 0.3 };
+  let activityLevel = 'normal';
+
+  // ── 帧路径解析：manifest 里的 frames 是相对 assets 的路径（如 idle/idle_001.webp）──
+  // 注意：不能对整个路径做 encodeURIComponent，那会把 '/' 编成 %2F，
+  // file:// 协议不会把它还原成分隔符，会导致所有帧 404。逐段编码即可。
+  function frameURL(rel) {
+    return 'PET_ASSET_BASE_PLACEHOLDER' + rel.split('/').map(encodeURIComponent).join('/');
+  }
+
+
+
+
+
+  // ── 播放引擎 ──
+  // 用 requestAnimationFrame + 目标时间戳推进，而不是 setTimeout 递归：
+  // setTimeout 每次都有几毫秒的调度误差，10 秒循环累计能漂出几百毫秒，
+  // 观感上就是「节奏不匀、偶尔一顿」。这里按「应该播到第几帧」来对齐，
+  // 掉帧时直接跳到正确位置，不累积误差。
+  //
+  // targetFps 只影响「最多多快换帧」（默认 60，即跟着显示器刷新率的上限），
+  // 真正的播放速度由 clip.frameMs 决定 —— 素材是按 42ms/帧（约 23.8fps）做的，
+  // 提高 targetFps 不会让动作变快，只是让换帧时机更准。
+  let targetFps = 60;
+  let playStartedAt = 0;   // 当前 clip 起始时间戳（用于算「该播第几帧」）
+  // 播放速度倍率：1 = 素材原速（42ms/帧），2 = 快一倍，0.5 = 慢放一倍。
+  // 只影响「每帧实际播放多久」，不碰素材本身 —— 所有时间换算都走 effectiveFrameMs()。
+  let speed = 1;
+
+  /** 当前生效的每帧时长（ms）：素材 frameMs ÷ 速度倍率 */
+  function effectiveFrameMs() {
+    return frameMs / (speed > 0 ? speed : 1);
+  }
+
+  function stopTimer() {
+    if (timer) { cancelAnimationFrame(timer); timer = null; }
+  }
+
+  function play(clipName, opts = {}) {
+    const clip = clips[clipName];
+    if (!clip || !Array.isArray(clip.frames) || clip.frames.length === 0) return false;
+    const sameClip = currentClip === clipName;
+    const prevFrameMs = frameMs;
+    currentClip = clipName;
+    frames = clip.frames;
+    frameMs = Number(clip.frameMs) || 42;
+    loop = clip.loop !== false;
+    // 同一 clip 重播时保留当前帧进度，避免状态抖动导致动画反复从头开始
+    if (!sameClip || opts.restart) frameIndex = 0;
+    if (frameIndex >= frames.length) frameIndex = 0;
+    // 同 clip 且帧率没变时，把起始时间往回拨，让当前帧接着播完
+    playStartedAt = (sameClip && !opts.restart && prevFrameMs === frameMs)
+      ? performance.now() - frameIndex * effectiveFrameMs()
+      : performance.now();
+    stopTimer();
+    renderFrame();
+    tick();
+    return true;
+  }
+
+  /** 立即把当前帧画到 <img> 上 */
+  function renderFrame() {
+    if (!frames.length) return;
+    petImg.src = frameURL(frames[frameIndex]);
+  }
+
+  /** 推进帧索引；返回 false 表示这次播放已结束（非循环且到底） */
+  function advance() {
+    frameIndex += 1;
+    if (frameIndex < frames.length) return true;
+    if (loop) {
+      frameIndex = 0;
+      playStartedAt = performance.now();
+      return true;
+    }
+    // 单次播放结束：有确定的回落目标就切回去，否则停在最后一帧
+    frameIndex = frames.length - 1;
+    stopTimer();
+    if (override && override.then) {
+      const next = override.then;
+      override = null;
+      applyBase(next);
+    } else {
+      override = null;
+    }
+    return false;
+  }
+
+  function tick() {
+    if (!frames.length) return;
+    const elapsed = performance.now() - playStartedAt;
+    // 这一轮应该播到第几帧（可能跨过多帧，掉帧时直接对齐，不补播）
+    const dueIndex = Math.floor(elapsed / effectiveFrameMs());
+
+    if (loop) {
+      const target = dueIndex % frames.length;
+      if (target !== frameIndex) {
+        frameIndex = target;
+        renderFrame();
+      }
+      timer = requestAnimationFrame(tick);
+      return;
+    }
+
+    // 非循环：逐帧往前推，advance() 返回 false 表示播完且已切走，此时不再排下一帧
+    let guard = frames.length;   // 防止极端情况下死循环
+    while (frameIndex < dueIndex && guard > 0) {
+      guard -= 1;
+      if (!advance()) return;
+    }
+    if (guard <= 0) { stopTimer(); return; }
+    renderFrame();
+    timer = requestAnimationFrame(tick);
+  }
+
+  // ── 状态 → clip ──
+  function clipForState(state, activity) {
+    if (state === 'WORKING' && activity && workingActivityMap[activity]) {
+      return workingActivityMap[activity];
+    }
+    if (state === 'SUCCESS') return stateMap.SUCCESS || 'success';
+    return stateMap[state] || 'idle';
+  }
+
+  function applyBase(state) {
+    baseState = state;
+    if (override) return;   // 交互动画播放中，不打断
+    play(clipForState(baseState, baseActivity));
+  }
+
+  // 交互动画：播完指定次数后回到当前基础状态
+  function playOnce(clipName) {
+    if (!clips[clipName]) return;
+    override = { clip: clipName, then: baseState };
+    play(clipName, { restart: true });
+  }
+
+  // ── 空闲微动作 ──
+  function scheduleMicroAction() {
+    if (config.reducedMotion) return;
+    const chance = IDLE_MICRO_CHANCE[activityLevel] ?? IDLE_MICRO_CHANCE.normal;
+    if (baseState !== 'IDLE' || override) return;
+    if (Math.random() > chance) return;
+    const pool = idleMicroClips.filter((name) => clips[name]);
+    if (!pool.length) return;
+    playOnce(pool[Math.floor(Math.random() * pool.length)]);
+  }
+
+  // ── 气泡 ──
+  function shouldShowBubble(state) {
+    if (config.bubbleMode === 'hidden') return false;
+    if (config.bubbleMode === 'custom') return (config.bubbleStates || []).includes(state);
+    return true;
+  }
+
+  function renderBubble(state, message, detail) {
+    if (!shouldShowBubble(state)) {
+      bubble.classList.remove('show');
+      return;
+    }
+    bubbleMsg.textContent = message || '';
+    bubbleDetail.textContent = detail || '';
+    bubbleDetail.style.display = detail ? '' : 'none';
+    // 位置交给 CSS：气泡顶住窗口上沿向下排布，留白区多高它就占多高，
+    // 不需要 JS 按角色头顶算锚点（那样反而不够直观、会被窗口裁掉）。
+    // 这里只处理缩放。
+    bubble.style.transform = `translateX(-50%) scale(${config.bubbleScale})`;
+    bubble.style.transformOrigin = '50% 0';
+    bubble.classList.add('show');
+  }
+
+  function renderTasks(tasks) {
+    tasksBox.innerHTML = '';
+    if (!Array.isArray(tasks) || tasks.length < 2) return;
+    for (const task of tasks.slice(0, 4)) {
+      const el = document.createElement('div');
+      el.className = 'task';
+      el.textContent = task.message || task.task || task.state || '';
+      tasksBox.appendChild(el);
+    }
+  }
+
+  // ── 协议消息处理 ──
+  function handleMessage(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    switch (msg.kind) {
+      case 'hello':
+        break;
+
+      case 'state':
+        baseActivity = msg.activity || null;
+        renderBubble(msg.state, msg.message, msg.detail);
+        applyBase(msg.state);
+        break;
+
+      case 'pulse':
+        // 瞬时提示（成功/失败闪一下），ttlMs 后由下一条 state 恢复
+        baseActivity = msg.resumeActivity || baseActivity;
+        renderBubble(msg.state, msg.message, msg.detail);
+        if (clips[stateMap[msg.state] || '']) playOnce(stateMap[msg.state]);
+        if (Number.isFinite(msg.ttlMs)) {
+          setTimeout(() => applyBase(msg.resumeState || baseState), msg.ttlMs);
+        }
+        break;
+
+      case 'task':
+      case 'tasks':
+        if (msg.kind === 'task') renderBubble('WORKING', msg.message, msg.detail);
+        break;
+
+      case 'config':
+        config = {
+          scale: Number(msg.scale) || 1,
+          bubbleScale: Number(msg.bubbleScale) || 1,
+          reducedMotion: msg.reducedMotion === true,
+          bubbleMode: msg.bubbleMode || 'always',
+          bubbleStates: Array.isArray(msg.bubbleStates) ? msg.bubbleStates : config.bubbleStates,
+        };
+        activityLevel = msg.activityLevel || activityLevel;
+        // 帧率上限：只限制「最快多久换一帧」，不改变素材本身的速度。
+        // 60 表示跟着 60Hz 显示器走；设更高没有意义（rAF 也不会更快）。
+        if (Number.isFinite(Number(msg.playbackFps)) && Number(msg.playbackFps) > 0) {
+          targetFps = Math.min(Number(msg.playbackFps), 240);
+        }
+        // 速度倍率变化：重设时间基准，否则「已播时长 ÷ 新帧长」会算出跳变，
+        // 画面上表现为动画突然闪一下。
+        if (Number.isFinite(Number(msg.speed)) && Number(msg.speed) > 0) {
+          const nextSpeed = Number(msg.speed);
+          if (nextSpeed !== speed) {
+            speed = nextSpeed;
+            playStartedAt = performance.now() - frameIndex * effectiveFrameMs();
+          }
+        }
+        // scale 由主进程算出窗口尺寸实现，这里只接收气泡留白量。
+        // 若再对 #pet 叠一层 transform:scale，缩放就会生效两次。
+        if (Number.isFinite(Number(msg.bubbleSpace)) && Number(msg.bubbleSpace) > 0) {
+          document.documentElement.style.setProperty('--bubble-space', Number(msg.bubbleSpace) + 'px');
+        }
+        break;
+
+      case 'shutdown':
+      case 'closed':
+        // 主进程已收工；保持当前帧静置
+        stopTimer();
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  // ── 与主进程通信 ──
+  // 桌宠窗用 preload 暴露的通道；若不存在则退化为 no-op（便于浏览器里单独调试 pet.html）
+  const api = window.petBridge || null;
+  if (api) {
+    api.onMessage(handleMessage);
+    api.onTasks(renderTasks);
+    api.ready();
+  }
+
+  api?.onConfig?.((next) => handleMessage({ kind: 'config', ...next }));
+  // ── 交互判定：只认角色真正占据的像素 ──
+  // #pet 的 CSS 尺寸是「窗口宽度 × (窗口高度-56)」，object-fit:contain 会在
+  // 这个盒子里按比例居中。用 getBoundingClientRect 拿到的就是缩放后的实际矩形
+  // （transform 会影响它），再按 naturalWidth/Height 反推图片真实占位，
+  // 这样窗口留白、气泡区、缩放后的边角都不会被算成可交互区域。
+  function petRect() {
+    const box = petImg.getBoundingClientRect();
+    const nw = petImg.naturalWidth || box.width;
+    const nh = petImg.naturalHeight || box.height;
+    if (!box.width || !box.height || !nw || !nh) return box;
+    const ratio = Math.min(box.width / nw, box.height / nh);
+    const w = nw * ratio;
+    const h = nh * ratio;
+    return {
+      left: box.left + (box.width - w) / 2,
+      top: box.top + (box.height - h) / 2,
+      width: w,
+      height: h,
+    };
+  }
+
+  /** 返回 'body' | 'tail' | null（null = 没点到角色） */
+  function hitTest(x, y) {
+    const r = petRect();
+    if (!r.width || !r.height) return null;
+    if (x < r.left || x > r.left + r.width || y < r.top || y > r.top + r.height) return null;
+    // 尾巴区：角色右下角约 1/4 宽、下半部分
+    const relX = (x - r.left) / r.width;
+    const relY = (y - r.top) / r.height;
+    if (relX > 0.72 && relY > 0.42) return 'tail';
+    return 'body';
+  }
+
+
+
+  // ── 拖拽 + 点击：同一个层的两种手势 ──
+  // 按下后移动超过阈值算拖拽（上报主进程移窗），未超过则算点击。
+  const DRAG_THRESHOLD = 4;
+  let pointer = null;
+  let clickTimer = null;
+  let clickCount = 0;
+  // 按下：只有真的按在角色身上才进入手势流程。
+  // 之前无脑进入，导致窗口留白处也能把窗口拖走。
+  hit.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    const zone = hitTest(e.clientX, e.clientY);
+    if (!zone) return;
+    pointer = {
+      startX: e.screenX,
+      startY: e.screenY,
+      moved: false,
+      hitZone: zone,
+      startedAt: performance.now(),
+      lastX: e.screenX,
+      lastY: e.screenY,
+    };
+    e.preventDefault();
+  });
+
+
+
+  window.addEventListener('mousemove', (e) => {
+    if (pointer) {
+      const dx = e.screenX - pointer.startX;
+      const dy = e.screenY - pointer.startY;
+      if (!pointer.moved && Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
+        pointer.moved = true;
+        if (!config.reducedMotion) playOnce('dragging');
+      }
+      if (pointer.moved) {
+        // 上报增量位移，由主进程移动窗口（比 app-region 更跟手、且不吃点击）
+        api?.dragMove?.(e.screenX - pointer.lastX, e.screenY - pointer.lastY);
+        pointer.lastX = e.screenX;
+        pointer.lastY = e.screenY;
+      }
+      return;
+    }
+    // 未按下时只更新光标：只有真的指到角色身上才变手型
+    hit.classList.toggle('onPet', !!hitTest(e.clientX, e.clientY));
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (!pointer) return;
+    const wasDrag = pointer.moved;
+    const zone = pointer.hitZone;
+    const duration = performance.now() - pointer.startedAt;
+    pointer = null;
+
+    if (wasDrag) {
+      api?.dragEnd?.();
+      if (!config.reducedMotion) playOnce(duration > 900 ? 'dragging_dizzy' : 'dragging_release');
+      return;
+    }
+    // 没移动 → 视作点击；只有点在角色身上才响应
+    if (!zone) return;
+    if (zone === 'tail') {
+      playOnce('tail');
+      api?.interact?.('tail');
+      return;
+    }
+    // 单击 / 双击区分
+    clickCount += 1;
+    if (clickTimer) clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => {
+      clickTimer = null;
+      const isDouble = clickCount >= 2;
+      clickCount = 0;
+      playOnce(isDouble ? 'head_pat' : 'poke');
+      api?.interact?.(isDouble ? 'head_pat' : 'poke');
+    }, 230);
+  });
+
+  // ── 空闲微动作轮询 ──
+  setInterval(scheduleMicroAction, 4200);
+
+  // ── 素材载入 ──
+  fetch('PET_ASSET_BASE_PLACEHOLDER' + 'pet-manifest.json')
+    .then((res) => res.json())
+    .then((data) => {
+      manifest = data;
+      clips = data.clips || {};
+      stateMap = data.stateMap || {};
+      workingActivityMap = data.workingActivityMap || {};
+      idleMicroClips = Array.isArray(data.idleMicroClips) ? data.idleMicroClips : [];
+      play(stateMap.IDLE || 'idle');
+      console.log('[dafeiyu] 素材就绪：' + Object.keys(clips).length + ' 组动画，当前 clip=' + currentClip);
+      if (api) api.loaded();
+    })
+    .catch((err) => {
+      console.error('[dafeiyu] manifest 载入失败:', err);
+      document.body.innerHTML = '<div style="color:#e11d48;font:12px sans-serif;padding:8px">素材载入失败</div>';
+    });
+
+  // 帧加载失败单独报出来（file:// 路径写错时会静默裂图）
+  petImg.addEventListener('error', () => {
+    console.error('[dafeiyu] 帧加载失败: ' + petImg.src);
+  });
+})();
+</script>
+</body>
+</html>
+
+
+

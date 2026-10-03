@@ -1,0 +1,5 @@
+{
+  "enable": true,
+  "always_detectable": true,
+  "description": "表情包插件 dsh-meme（移植版）：模型用 send_meme 搜图、把 [表情: 描述] 写进回复，界面自动配图；支持情绪桶/关键词两种搜法，内置 dafeiyu-001 图库。工具跑在 agent 进程，图片路由与前端注入由 Electron 主进程按本目录开关托管（shim.mjs）。"
+}

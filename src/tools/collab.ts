@@ -11,6 +11,8 @@
 import { tool } from 'ai';
 import { appendChatMessage } from '../modes/chat-thread';
 import { z } from 'zod';
+import { ToolOutput } from './tool-output';
+import type { CollabBulk } from './raw-bulk-types';
 
 export const collabSendTool = tool({
   description:
@@ -22,21 +24,33 @@ export const collabSendTool = tool({
   execute: async ({ sessionId, message }, ctx: any) => {
     const ui = ctx?.ui;
     if (!ui?.requestCollab) {
-      return '❌ 协作功能仅在 Electron 多会话模式下可用（当前为单会话/TUI 模式）。';
+      const bulk: CollabBulk = { type: 'collab', action: 'send', error: '协作功能仅在 Electron 多会话模式下可用（当前为单会话/TUI 模式）。' };
+      return new ToolOutput(bulk, '❌ 协作功能仅在 Electron 多会话模式下可用（当前为单会话/TUI 模式）。');
     }
-    if (!sessionId || !message.trim()) return '❌ 需要提供 sessionId 和 message。';
+    if (!sessionId || !message.trim()) {
+      const bulk: CollabBulk = { type: 'collab', action: 'send', error: '需要提供 sessionId 和 message。' };
+      return new ToolOutput(bulk, '❌ 需要提供 sessionId 和 message。');
+    }
     const res = await ui.requestCollab('send', { to: sessionId, content: message.trim() });
-    if (!res?.ok) return `❌ ${res?.error || '发送失败'}`;
+    if (!res?.ok) {
+      const err = res?.error || '发送失败';
+      const bulk: CollabBulk = { type: 'collab', action: 'send', target: sessionId, error: err };
+      return new ToolOutput(bulk, `❌ ${err}`);
+    }
     const d = res.data || {};
+    const target = String(d.target || sessionId);
     // 发送记录写入协作聊天 thread（manager 角色；worker 下属场景）
-    appendChatMessage(String(d.target || sessionId), 'worker', 'manager', message.trim());
+    appendChatMessage(target, 'worker', 'manager', message.trim());
     if (d.delivered) {
-      return `✅ 协作消息已送达会话「${d.target}」。对方回复会自动回到本会话。`;
+      const bulk: CollabBulk = { type: 'collab', action: 'send', target, delivered: true };
+      return new ToolOutput(bulk, `✅ 协作消息已送达会话「${d.target}」。对方回复会自动回到本会话。`);
     }
     if (d.active === false) {
-      return `⏸ 会话「${d.target}」当前未活跃，未自动唤醒。\n如需深度协作，请先唤醒该会话（/loadsession 加载，或让用户切换到该会话），再重新发送。`;
+      const bulk: CollabBulk = { type: 'collab', action: 'send', target, active: false };
+      return new ToolOutput(bulk, `⏸ 会话「${d.target}」当前未活跃，未自动唤醒。\n如需深度协作，请先唤醒该会话（/loadsession 加载，或让用户切换到该会话），再重新发送。`);
     }
-    return `⚠️ 未知结果：${JSON.stringify(d)}`;
+    const bulk: CollabBulk = { type: 'collab', action: 'send', target };
+    return new ToolOutput(bulk, `⚠️ 未知结果：${JSON.stringify(d)}`);
   },
 });
 

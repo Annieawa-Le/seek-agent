@@ -238,10 +238,14 @@ export function registerTool(
 /** 生成工具调用的友好标签 */
 export function friendlyToolCallLabel(toolName: string, args: Record<string, unknown>): string {
   const t = ALL_TOOLS.get(toolName);
-  if (t) {
-    return `\x1b[94m${t.icon} ${t.callLabel(args)}\x1b[0m`;
+  // 防御：inner_skill 的 translation 可能只写了 { label, action } 这类简写形态，
+  // 缺 icon / callLabel。此处若直接 t.callLabel(args) 会抛 TypeError，
+  // 且异常发生在 assistant tool-call 已入栈、tool-result 尚未入栈之间——
+  // 结果是留下「孤立 tool-call」，下一轮请求被 provider 以 400 拒绝，会话报废。
+  if (t && typeof t.callLabel === 'function') {
+    return `\x1b[94m${t.icon ?? '■'} ${t.callLabel(args)}\x1b[0m`;
   }
-  // 未注册的工具（如 inner_skills）→ 通用 fallback
+  // 未注册的工具，或 translation 形态不完整 → 通用 fallback（保证永不抛错）
   return `\x1b[94m■\x1b[0m \x1b[30m调用 ${toolName}\x1b[0m`;
 }
 /** 获取工具的折叠模式 */

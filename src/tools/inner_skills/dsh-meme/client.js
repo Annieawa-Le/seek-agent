@@ -1,0 +1,1809 @@
+/**
+ * dsh-meme — 设置页表情包管理面板(Client 半边)。
+ *
+ * 以 dsh.client bundle 格式加载(与 dsh-ssh 同款):注册 settings.section
+ * 「表情包」页,渲染完整管理面板(列表/上传/编辑/删除)。
+ * 数据走 dsh-meme 的 HTTP API(/dsh-memes-api,静态、重启不丢)。
+ * 注册 id 必须等于 loader entry 名(dsh-meme),否则 ModuleLoader 报
+ * "loaded without registering dsh-meme"。
+ */
+window.__ModuleLoader__.load({
+  id: 'dsh-meme',
+  factory: (require) => {
+    var module = { exports: {} }
+    var exports = module.exports
+    Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
+
+    const React = require('react')
+
+    const CSS = [
+      '.meme-panel{display:flex;flex-direction:column;gap:14px;padding:4px 0;font-size:13px;color:var(--dsw-alias-label-primary)}',
+      '.meme-panel .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}',
+      '.meme-panel .section-title{font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 -4px}',
+      '.meme-panel .pack-dd{position:relative;flex:1;min-width:160px}',
+      '.meme-panel .pack-dd-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer;padding:8px 12px}',
+      '.meme-panel .pack-dd-btn .caret{opacity:.55;font-size:11px;flex:none}',
+      '.meme-panel .pack-dd-menu{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 4px);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:4px;max-height:240px;overflow:auto}',
+      '.meme-panel .pack-dd-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;border:none;background:transparent;padding:8px 10px;border-radius:6px;cursor:pointer}',
+      '.meme-panel .pack-dd-item:hover{background:var(--dsw-alias-bg-layer-2)}',
+      '.meme-panel .pack-dd-item.on{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent)}',
+      '.meme-panel .pack-dd-item .hint{font-size:11px;color:var(--dsw-alias-label-secondary);flex:none}',
+      '.meme-panel .switch{position:relative;width:36px;height:20px;border-radius:999px;background:var(--dsw-alias-border-l1);cursor:pointer;transition:background .15s ease;flex:none;display:inline-block}',
+      '.meme-panel .switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .15s ease}',
+      '.meme-panel .switch.on{background:var(--dsw-alias-brand-primary)}',
+      '.meme-panel .switch.on::after{transform:translateX(16px)}',
+      '.meme-panel input[type=text],.meme-panel select,.meme-panel textarea{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:6px 10px;font-size:13px;outline:none;transition:border-color .12s ease}',
+      '.meme-panel input[type=text]:focus,.meme-panel select:focus,.meme-panel textarea:focus{border-color:var(--dsw-alias-brand-primary)}',
+      '.meme-panel textarea{resize:vertical;font-family:inherit}',
+      '.meme-panel button{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:5px 12px;font-size:13px;cursor:pointer;transition:border-color .12s ease,background .12s ease}',
+      '.meme-panel button:hover{border-color:var(--dsw-alias-brand-primary)}',
+      '.meme-panel button:disabled{opacity:.5;cursor:default}',
+      '.meme-panel .btn-primary{background:var(--dsw-alias-button-primary-fill);border-color:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}',
+      '.meme-panel .btn-primary:hover{background:var(--dsw-alias-button-primary-hover);border-color:var(--dsw-alias-button-primary-hover)}',
+      '.meme-panel .notice{padding:7px 12px;border-radius:8px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);font-size:12px;color:var(--dsw-alias-label-secondary)}',
+      '.meme-panel .meme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}',
+      '.meme-panel .meme-card{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:transform .12s ease,box-shadow .12s ease}',
+      '.meme-panel .meme-card:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.12)}',
+      '.meme-panel .meme-thumb{width:100%;height:120px;background-size:contain;background-position:center center;background-repeat:no-repeat;background-color:var(--dsw-alias-bg-base)}',
+      '.meme-modal .meme-shot{width:100%;height:220px;border-radius:8px;background-size:contain;background-position:center center;background-repeat:no-repeat;background-color:var(--dsw-alias-bg-base)}',
+      '.meme-panel .meta{padding:8px 10px;display:flex;flex-direction:column;gap:5px;min-height:80px}',
+      '.meme-panel .tag{display:inline-block;align-self:flex-start;font-size:11px;color:var(--dsw-alias-brand-primary);text-transform:lowercase;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent);border-radius:999px;padding:1px 8px}',
+      '.meme-panel .cap{font-size:12px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}',
+      '.meme-panel .acts{display:flex;gap:6px;margin-top:auto}',
+      '.meme-panel .acts button{padding:3px 10px;font-size:12px;border-radius:6px}',
+      '.meme-panel .acts button.danger:hover{border-color:#e5484d;color:#e5484d}',
+      '.meme-panel .empty{color:var(--dsw-alias-label-secondary);padding:24px;text-align:center}',
+      '.meme-modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}',
+      '.meme-modal{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;width:340px;max-width:100%;box-shadow:0 10px 36px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:10px}',
+      '.meme-modal h3{margin:0;font-size:14px;font-weight:600}',
+      '.meme-modal .field{display:flex;flex-direction:column;gap:4px}',
+      '.meme-modal input[type=text],.meme-modal select,.meme-modal textarea{box-sizing:border-box;width:100%}',
+      '.meme-modal .field label{font-size:11px;color:var(--dsw-alias-label-secondary)}',
+      '.meme-modal .hint{font-size:11px;line-height:1.5;color:var(--dsw-alias-label-secondary)}',
+      // 即时校验:字段不合法时标签和边框变红,而不是等提交后在面板顶部报错
+      '.meme-modal .field.bad label{color:#e5484d}',
+      '.meme-modal .field.bad input[type=text]{border-color:#e5484d}',
+      '.meme-modal .modal-acts{display:flex;gap:8px;justify-content:flex-end;margin-top:2px}',
+      '.meme-modal .modal-acts button{padding:6px 14px}',
+      '.mk-tabs{display:flex;gap:18px;border-bottom:1px solid var(--dsw-alias-border-l1);width:100%}',
+      '.meme-panel .mk-tab{border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-secondary);padding:4px 2px 8px;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:0;transition:color .12s}',
+      '.meme-panel .mk-tab:hover{color:var(--dsw-alias-label-primary);background:transparent;border-color:transparent;border-bottom-color:transparent}',
+      '.meme-panel .mk-tab.on{color:var(--dsw-alias-brand-primary);border-bottom-color:var(--dsw-alias-brand-primary);font-weight:600}',
+      '.mk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;width:100%}',
+      '.mk-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;transition:transform .12s ease,box-shadow .12s ease}',
+      '.mk-card:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.12)}',
+      '.mk-cover{position:relative;width:100%!important;height:136px!important;background-color:var(--dsw-alias-bg-base);display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--dsw-alias-label-secondary)}',
+      '.mk-cover-img{position:absolute;inset:0;background-size:cover;background-position:center 28%;background-repeat:no-repeat}',
+      '.mk-cover-fallback{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,var(--dsw-alias-bg-layer-2))}',
+      '.mk-body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1}',
+      '.mk-title{display:flex;align-items:center;justify-content:space-between;gap:8px}',
+      '.mk-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.mk-meta{font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.mk-desc{font-size:12px;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+      '.mk-chips{display:flex;gap:4px;flex-wrap:wrap}',
+      '.mk-chip{font-size:10px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border-radius:999px;padding:1px 8px}',
+      '.mk-progress-wrap{display:flex;flex-direction:column;gap:3px}',
+      '.mk-progress{height:4px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}',
+      '.mk-progress-bar{height:100%;background:var(--dsw-alias-brand-primary);border-radius:999px;transition:width .3s ease}',
+      '.mk-progress-text{font-size:10px;color:var(--dsw-alias-label-secondary)}',
+      '.mk-progress-unknown{width:35%;animation:mk-slide 1.2s ease-in-out infinite}',
+      '@keyframes mk-slide{0%{margin-left:0}50%{margin-left:65%}100%{margin-left:0}}',
+      '.mk-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}',
+      '.mk-acts button{padding:3px 12px;font-size:12px;border-radius:6px}',
+      '.mk-acts button.mk-danger:hover{border-color:#e5484d;color:#e5484d}',
+      '.mk-empty{width:100%;color:var(--dsw-alias-label-secondary);padding:20px;text-align:center;border:1px dashed var(--dsw-alias-border-l1);border-radius:10px;font-size:12px}',
+      '.mk-card-open{cursor:pointer}',
+      '.meme-modal-head{display:flex;align-items:flex-start;gap:8px;margin:-4px -4px 0 0}',
+      '.meme-modal-head h3{flex:1;margin:0}',
+      '.meme-panel .meme-x{flex:none;border:none;background:transparent;cursor:pointer;font-size:18px;line-height:1;padding:2px 8px;border-radius:6px;color:var(--dsw-alias-label-secondary)}',
+      '.meme-panel .meme-x:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border-color:transparent}',
+      '.mk-preview{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px;max-height:300px;overflow:auto;padding:2px}',
+      '.mk-preview a{display:block;height:84px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background-size:contain;background-position:center;background-repeat:no-repeat;background-color:var(--dsw-alias-bg-base)}',
+      '.meme-panel .meme-footer{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:8px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1);font-size:12px;color:var(--dsw-alias-label-secondary)}',
+      '.meme-panel .meme-footer a{color:var(--dsw-alias-brand-primary);text-decoration:none;white-space:nowrap}',
+      '.meme-panel .meme-footer a:hover{text-decoration:underline}',
+    ].join('')
+
+    // 分类中文显示(仅 UI,存储/搜索仍是英文 tag)
+    const TAG_ZH = {
+      angry: '生气', happy: '开心', sad: '难过', shy: '害羞', confused: '困惑',
+      daily: '日常',
+      surprised: '惊讶', sleep: '睡觉', meow: '喵喵', morning: '早上好', work: '上班',
+      like: '喜欢', see: '看看', reply: '回复', sigh: '叹气', baka: '笨蛋',
+      fool: '傻瓜', givemoney: '给钱', color: '彩色', cpu: 'CPU',
+    }
+    const tagZh = (t) => TAG_ZH[t] || t
+
+    async function apiGet(params) {
+      const qs = new URLSearchParams()
+      if (params.tag) qs.set('tag', params.tag)
+      if (params.q) qs.set('q', params.q)
+      if (params.remoteDir) qs.set('remoteDir', '1')
+      return (await fetch('/dsh-memes-api?' + qs.toString())).json()
+    }
+    async function apiPost(payload) {
+      return (await fetch('/dsh-memes-api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })).json()
+    }
+
+    function MemePanel(props) {
+      const ctx = props && props.ctx
+      const h = React.createElement
+      const [memes, setMemes] = React.useState([])
+      const [tags, setTags] = React.useState([])
+      const [total, setTotal] = React.useState(0)
+      const [q, setQ] = React.useState('')
+      const [tagFilter, setTagFilter] = React.useState('')
+      const [notice, setNotice] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+      const [edit, setEdit] = React.useState(null)
+      const [upTag, setUpTag] = React.useState('')
+      const [upCaption, setUpCaption] = React.useState('')
+      const [upKeywords, setUpKeywords] = React.useState('')
+      const [uploading, setUploading] = React.useState(false)
+      const [recognizing, setRecognizing] = React.useState(false)
+      const [uploadOpen, setUploadOpen] = React.useState(false)
+      const [memeRoot, setMemeRoot] = React.useState('')
+      const [packId, setPackId] = React.useState('')
+      const [packs, setPacks] = React.useState([])
+      const [packsDir, setPacksDir] = React.useState('')
+      const [packsDirInput, setPacksDirInput] = React.useState('')
+      const [rootNotice, setRootNotice] = React.useState('')
+      const [browseOpen, setBrowseOpen] = React.useState(false)
+      const [browseList, setBrowseList] = React.useState(null)
+      const [browseErr, setBrowseErr] = React.useState('')
+      const [companionPrompt, setCompanionPrompt] = React.useState('') // 用户自定义覆盖(空=默认)
+      const [defaultPrompt, setDefaultPrompt] = React.useState('') // 内置默认提示词
+      const [promptOpen, setPromptOpen] = React.useState(false)
+      const [promptDraft, setPromptDraft] = React.useState('') // 弹窗内草稿
+      const [remoteSubs, setRemoteSubs] = React.useState([])
+      const [remoteDir, setRemoteDir] = React.useState(null) // 服务端代拉的图库目录(null=暂不可用)
+      const [remoteJobs, setRemoteJobs] = React.useState({})
+      const [remoteBusy, setRemoteBusy] = React.useState(false)
+      const [panelTab, setPanelTab] = React.useState('library')
+      const [remoteQuery, setRemoteQuery] = React.useState('')
+      const [packView, setPackView] = React.useState('') // 非空 = 进入该图库的表情包页(二级页,不是标签页)
+      const [promptOn, setPromptOn] = React.useState(true)
+      const [pluginVersion, setPluginVersion] = React.useState('')
+      const applyRoot = (res) => {
+        if (!res || !res.ok) return
+        setMemeRoot(res.memeRoot || '')
+        setPackId(res.packId || '')
+        setPacks(Array.isArray(res.packs) ? res.packs : [])
+        setPromptOn(res.promptEnabled !== false)
+        setPluginVersion(res.pluginVersion || '')
+        setPacksDir(res.packsDir || '')
+        setPacksDirInput(res.packsDir || '')
+        setCompanionPrompt(res.companionPrompt || '')
+        setDefaultPrompt(res.defaultCompanionPrompt || '')
+        setRemoteSubs(Array.isArray(res.remoteSubs) ? res.remoteSubs : [])
+      }
+      const localPackCards = packs.map((p) => {
+        const entry = (remoteDir || []).find((e) => e.id === p.id) || null
+        const sub = remoteSubs.find((s) => s.id === p.id) || null
+        const isBundled = p.source === 'bundled'
+        const isUserPack = p.source === 'user'
+        const count = p.count || 0
+        // 本地版本:市场装的看订阅记录,内置/导入/自建看自己的 manifest
+        const installed = String((sub && sub.version) || p.version || '').trim()
+        const hasUpdate = !!(entry && entry.version && installed && compareVersions(entry.version, installed) > 0)
+        return {
+          key: 'pack-' + p.id, packId: p.id,
+          name: p.name || p.id, desc: '',
+          // 已安装的图库用本地那张图当封面(插件自己的路由),不再依赖远程预览图
+          cover: p.cover || null,
+          meta: [
+            isBundled ? '内置' : (isUserPack ? '导入' : '自定义'),
+            installed ? 'v' + installed.replace(/^v/i, '') : '',
+            count ? count + ' 张' : '',
+            hasUpdate ? '可更新到 v' + String(entry.version).replace(/^v/i, '') : '',
+          ].filter(Boolean).join(' · '),
+          tags: (entry && (entry.keywords || entry.tags)) || [],
+          entry, sub,
+          installed: true, job: null,
+          downloaded: true,
+          hasUpdate,
+          builtin: isBundled,
+          enabled: p.enabled === true,
+          onToggle: (next) => onTogglePack(p.id, next),
+          pack: p,
+        }
+      })
+      const onSaveCompanionPrompt = async () => {
+        try {
+          const res = await apiPost({ op: 'setCompanionPrompt', text: promptDraft })
+          if (res && res.ok) {
+            applyRoot(res)
+            setPromptOpen(false)
+            setRootNotice(res.message || '已保存')
+          } else {
+            setRootNotice('保存失败: ' + (res && res.error || ''))
+          }
+        } catch (e) {
+          setRootNotice('保存失败')
+        }
+      }
+      React.useEffect(() => {
+        apiPost({ op: 'getMemeRoot' }).then(applyRoot).catch(() => {})
+      }, [])
+      // 远程图库目录:服务端代拉(逐源回退 + 60s 缓存),浏览器侧没有跨域问题
+      React.useEffect(() => {
+        let alive = true
+        apiGet({ remoteDir: 1 }).then((res) => {
+          if (alive && res && res.ok) setRemoteDir(Array.isArray(res.remoteDir) ? res.remoteDir : null)
+        }).catch(() => {})
+        return () => { alive = false }
+      }, [])
+      const pollRemoteJob = async (jobId) => {
+        try {
+          const res = await apiPost({ op: 'remoteJobStatus', jobId })
+          if (!res || !res.ok) {
+            setRemoteJobs((cur) => { const n = { ...cur }; delete n[jobId]; return n })
+            return
+          }
+          if (res.state === 'running') {
+            setRemoteJobs((cur) => ({ ...cur, [jobId]: res }))
+            return
+          }
+          setRemoteJobs((cur) => { const n = { ...cur }; delete n[jobId]; return n })
+          setRootNotice(res.message || (res.state === 'error' ? '下载失败' : '远程图库已就绪'))
+          if (res.state !== 'error') {
+            await load('', '')
+            apiPost({ op: 'getMemeRoot' }).then(applyRoot).catch(() => {})
+          }
+        } catch (e) { /* 下一轮轮询再试 */ }
+      }
+      React.useEffect(() => {
+        const ids = Object.keys(remoteJobs)
+        if (ids.length === 0) return
+        const t = setInterval(() => { for (const id of ids) pollRemoteJob(id) }, 1200)
+        return () => clearInterval(t)
+      }, [remoteJobs])
+      const startRemote = async (manifestUrl, packId) => {
+        const url = String(manifestUrl || '').trim()
+        if (!url) { setRootNotice('先填远程图库清单 JSON 地址'); return }
+        setRemoteBusy(true)
+        try {
+          const res = await apiPost({ op: 'subscribeRemote', manifestUrl: url, packId: packId || '' })
+          if (res && res.ok) {
+            setRemoteJobs((cur) => ({ ...cur, [res.id]: res }))
+            setRemoteUrl('')
+            setRootNotice('「' + res.name + '」开始下载(' + res.total + ' 张),完成后自动切换')
+          } else {
+            setRootNotice('订阅失败: ' + ((res && res.error) || '未知错误'))
+          }
+        } catch (e) {
+          setRootNotice('订阅失败: ' + (e && e.message ? e.message : String(e)))
+        }
+        setRemoteBusy(false)
+      }
+      const startArchive = async (entry) => {
+        const archiveUrl = String((entry && entry.archiveUrl) || '').trim()
+        if (!archiveUrl) { setRootNotice('该图库没有可下载的 ZIP 地址'); return }
+        setRemoteBusy(true)
+        setRootNotice('正在下载并校验「' + (entry.name || entry.id || '图库') + '」…')
+        try {
+          const res = await apiPost({
+            op: 'installRemoteArchive', archiveUrl,
+            sha256: entry.sha256 || '', packId: entry.id || '',
+            name: entry.name || '', version: entry.version || '',
+          })
+          if (res && res.ok) {
+            // 走任务制:注册后由轮询更新进度条,装完 pollRemoteJob 会刷新列表
+            setRemoteJobs((cur) => ({ ...cur, [res.id]: res }))
+            setRootNotice('「' + (entry.name || entry.id || '图库') + '」开始下载安装…')
+          } else {
+            setRootNotice('安装失败: ' + ((res && res.error) || '未知错误'))
+          }
+        } catch (e) {
+          setRootNotice('安装失败: ' + (e && e.message ? e.message : String(e)))
+        }
+        setRemoteBusy(false)
+      }
+      // 图库卡片「导出」:导出指定图库的 ZIP(不必先切过去)
+      const onExportPack = async (id, name) => {
+        try {
+          setRootNotice('正在导出…')
+          const response = await fetch('/dsh-memes-export?packId=' + encodeURIComponent(id))
+          if (!response.ok) throw new Error((await response.text()) || '导出失败')
+          const blob = await response.blob()
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = 'dsh-meme-' + id + '.zip'
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+          setTimeout(() => URL.revokeObjectURL(url), 60000)
+          setRootNotice('已导出「' + (name || id) + '」的 ZIP')
+        } catch (error) {
+          setRootNotice(error.message || '导出失败，请重试')
+        }
+      }
+      // 图库卡片开关:打开后模型可以用这个图库发图
+      const onTogglePack = async (id, next) => {
+        try {
+          const res = await apiPost({ op: 'setPackEnabled', packId: id, enabled: next })
+          if (!res || !res.ok) throw new Error((res && res.error) || '操作失败')
+          applyRoot(res)
+          setRootNotice(res.message || '')
+        } catch (error) { setRootNotice(error.message || '操作失败') }
+      }
+      const onDeletePack = async (id) => {
+        try {
+          const res = await apiPost({ op: 'deleteMemePack', packId: id })
+          if (!res || !res.ok) throw new Error((res && res.error) || '删除失败')
+          applyRoot(res)
+          if (packView === id) setPackView('')
+          setRootNotice(res.message || '已删除')
+          await load('', '')
+        } catch (error) { setRootNotice(error.message || '删除失败') }
+      }
+      // 预览弹窗:已装的图库列它自己的图,没装的用目录里带的预览图
+      const openPreview = async (row) => {
+        const entry = row.entry || {}
+        const catalogImages = [
+          ...(entry.preview ? [entry.preview] : []),
+          ...(Array.isArray(entry.previews) ? entry.previews : []),
+        ]
+        setPreviewPack({
+          packId: row.packId || '', name: row.name || '', meta: row.meta || '',
+          desc: row.desc || '', tags: row.tags || [],
+          images: [...new Set(catalogImages)].filter(Boolean),
+          total: Number(entry.count) || 0,
+          // 已装的读本地图库、清单包读清单:这两种拿到的都是图库自己的图,能说「显示前 N 张」
+          loading: !!(row.downloaded && row.packId) || !!entry.manifestUrl,
+        })
+        // 清单热链的包:没装也能看它列出的图(清单里有全部 128 条,比目录里那 19 张精选全)
+        if ((!row.downloaded || !row.packId) && entry.manifestUrl) {
+          try {
+            const res = await apiPost({ op: 'previewManifest', manifestUrl: entry.manifestUrl })
+            if (res && res.ok && Array.isArray(res.urls) && res.urls.length) {
+              setPreviewPack((cur) => (cur && cur.packId === row.packId
+                ? { ...cur, images: res.urls, total: Number(res.total) || res.urls.length, loading: false, fromPack: true }
+                : cur))
+              return
+            }
+          } catch (e) { /* 清单读不到就用目录里的预览图 */ }
+        }
+        if (!row.downloaded || !row.packId) {
+          setPreviewPack((cur) => (cur && cur.packId === row.packId ? { ...cur, loading: false } : cur))
+          return
+        }
+        try {
+          const res = await fetch('/dsh-memes-api?packId=' + encodeURIComponent(row.packId)).then((r) => r.json())
+          const urls = (res && Array.isArray(res.memes)) ? res.memes.map((m) => m.url).filter(Boolean) : []
+          if (urls.length) {
+            setPreviewPack((cur) => (cur && cur.packId === row.packId
+              ? { ...cur, images: urls.slice(0, 60), total: urls.length, loading: false, fromPack: true }
+              : cur))
+            return
+          }
+        } catch (e) { /* 读不到就用目录里的预览图 */ }
+        setPreviewPack((cur) => (cur && cur.packId === row.packId ? { ...cur, loading: false } : cur))
+      }
+      const onDeletePackPrompt = (row) => {
+        setRootNotice('')
+        setConfirmBox({
+          title: '删除图库',
+          lines: [
+            '确认删除图库「' + (row.name || row.packId) + '」？',
+            '该图库的目录和里面的图片都会被删掉，不可恢复。',
+            ...(row.packId === packId ? ['这是当前图库（编辑/上传写进的那个），删除后会自动切到别的图库。'] : []),
+            ...(row.builtin ? ['这是插件自带的内置图库，升级或重装插件后它会重新出现。'] : []),
+          ],
+          confirmLabel: '删除',
+          onConfirm: () => onDeletePack(row.packId),
+        })
+      }
+      // 图库卡片「编辑」:先切到该图库(上传/改/删只作用于当前图库),再进它的表情包页
+      const onEditPack = async (id) => {
+        const next = String(id || '').trim()
+        if (!next) return
+        try {
+          if (next !== packId) {
+            const res = await apiPost({ op: 'setPack', packId: next })
+            if (!res || !res.ok) { setRootNotice('打开失败: ' + ((res && res.error) || '')); return }
+            applyRoot(res)
+          }
+          setPackView(next)
+          setQ('')
+          setTagFilter('')
+          await load('', '')
+        } catch (e) { setRootNotice('打开失败') }
+      }
+      const onTogglePrompt = async (next) => {
+        try {
+          const res = await apiPost({ op: 'setPromptEnabled', enabled: next })
+          if (res && res.ok) {
+            applyRoot(res)
+            setPromptOn(next)
+            setRootNotice(res.message || (next ? '已开启陪伴提示词' : '已关闭陪伴提示词'))
+          } else {
+            setRootNotice('操作失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) { setRootNotice('操作失败') }
+      }
+      const [packDialog, setPackDialog] = React.useState('')
+      const [packDraft, setPackDraft] = React.useState({ id: '', name: '', description: '' })
+      const [packSaving, setPackSaving] = React.useState(false)
+      // 新建弹窗的即时校验:规则与服务端 createMemePack 一致,不合法就别让点「创建」。
+      // 红框只在碰过那个字段之后才显示——刚打开就一片红太吓人,空名字靠禁用按钮表达。
+      const [packTouched, setPackTouched] = React.useState({})
+      const packIdOk = /^[a-z0-9][a-z0-9_-]{0,39}$/.test(packDraft.id.trim())
+      const packNameOk = packDraft.name.trim().length > 0
+      const packDraftOk = packIdOk && packNameOk
+      const packBad = (key) => !!packTouched[key] && !(key === 'id' ? packIdOk : packNameOk)
+      const packSubmitOnEnter = (e) => { if (e.key === 'Enter' && packDraftOk && !packSaving) savePack() }
+      // 应用内确认弹窗(不用浏览器原生 confirm):{title, lines, confirmLabel, onConfirm}
+      const [confirmBox, setConfirmBox] = React.useState(null)
+      const [previewPack, setPreviewPack] = React.useState(null) // 预览弹窗
+      const [marketResult, setMarketResult] = React.useState('')
+      const savePack = async () => {
+        if (packSaving) return
+        setPackSaving(true)
+        setRootNotice('正在新建图库…')
+        try {
+          const res = await apiPost({ op: 'createMemePack', ...packDraft })
+          if (!res || !res.ok) throw new Error(res && res.error || '操作失败')
+          applyRoot(res)
+          await load('', '')
+          setQ('')
+          setTagFilter('')
+          setRootNotice('图库已新建并切换，可以开始添加图片')
+          setPackDialog('')
+        } catch (error) { setRootNotice(error.message || '操作失败，请重试') }
+        finally { setPackSaving(false) }
+      }
+      const submitPack = async () => {
+        if (packSaving) return
+        const pack = packs.find(p => p.id === packId)
+        if (!pack || !pack.count) { setRootNotice('空图库不能投稿，请先添加图片'); return }
+        const params = new URLSearchParams({ template: 'submit-pack.yml',
+          title: '[投稿] ' + pack.name, name: pack.name,
+          description: (pack.description || '') + '\n图片数量：' + pack.count + '\n图库 ID：' + pack.id })
+        const issueUrl = 'https://github.com/yyh-001/dsh-meme-packs/issues/new?' + params
+        // Open synchronously in the click handler so browsers do not block the tab.
+        const issueWindow = window.open('about:blank', '_blank')
+        if (issueWindow) issueWindow.opener = null
+        setPackSaving(true)
+        setMarketResult('')
+        setRootNotice('正在导出投稿 ZIP…')
+        try {
+          const response = await fetch('/dsh-memes-export?packId=' + encodeURIComponent(pack.id))
+          if (!response.ok) throw new Error(await response.text() || '导出失败')
+          const blob = await response.blob()
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = 'dsh-meme-' + pack.id + '.zip'
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+          setTimeout(() => URL.revokeObjectURL(url), 60000)
+          setMarketResult(issueUrl)
+          if (issueWindow && !issueWindow.closed) issueWindow.location.href = issueUrl
+          setPackDialog('')
+          setRootNotice('已发起 ZIP 下载。请在 GitHub 投稿页登录，拖入下载的 ZIP，补充来源和许可后提交。尚未提交或收录；如果页面未打开，请点击下方链接。')
+        } catch (error) {
+          if (issueWindow && !issueWindow.closed) issueWindow.close()
+          setRootNotice(error.message || '导出失败，请重试')
+        } finally { setPackSaving(false) }
+      }
+      const onSavePacksDir = async (dirArg) => {
+        const dir = String(dirArg !== undefined ? dirArg : packsDirInput || '').trim()
+        if (!dir) { setRootNotice('扫描目录不能为空'); return }
+        try {
+          const res = await apiPost({ op: 'setPacksDir', packsDir: dir })
+          if (res && res.ok) {
+            applyRoot(res)
+            setRootNotice('已更新扫描目录')
+          } else {
+            setRootNotice('保存失败: ' + (res && res.error || ''))
+          }
+        } catch (e) {
+          setRootNotice('保存失败')
+        }
+      }
+      // 目录浏览走插件自己的 API(宿主 0.1.5 的客户端没有 workspaces 服务,
+      // 之前依赖它 → 点了「选择目录」什么都不发生)
+      const browseFetch = async (path) => {
+        const res = await apiPost({ op: 'browse', path: path || '' })
+        if (!res || !res.ok) throw new Error((res && res.error) || '读取失败')
+        return { path: res.path, parent: res.parent, entries: res.entries, breadcrumbs: res.breadcrumbs }
+      }
+      const browseTo = async (path) => {
+        setBrowseErr('')
+        try {
+          setBrowseList(await browseFetch(path))
+        } catch (e) {
+          setBrowseErr('读取失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      const onPickDir = async () => {
+        setBrowseErr('')
+        setBrowseList(null)
+        try {
+          setBrowseList(await browseFetch(String(packsDirInput || '').trim()))
+        } catch (e) {
+          // 失败原因要说出来,否则用户看到的就是「点了没反应」
+          setRootNotice('打开目录浏览器失败: ' + (e && e.message ? e.message : String(e)))
+        }
+        setBrowseOpen(true)
+      }
+
+      const [upNewTag, setUpNewTag] = React.useState('')
+      const [upFile, setUpFile] = React.useState(null)
+      const [upData64, setUpData64] = React.useState('')
+      const [upPreview, setUpPreview] = React.useState('')
+      const fileRef = React.useRef(null)
+      const importFileRef = React.useRef(null)
+      const onImportPack = (ev) => {
+        const file = ev.target.files && ev.target.files[0]
+        ev.target.value = ''
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = async () => {
+          const b64 = String(reader.result || '').split(',')[1] || ''
+          const name = String(file.name || '').replace(/\.zip$/i, '')
+          setRootNotice('导入中…')
+          try {
+            const res = await apiPost({ op: 'importMemePack', dataBase64: b64, name })
+            if (res && res.ok) {
+              applyRoot(res)
+              setRootNotice(res.message || '导入成功')
+              await load(q, tagFilter)
+            } else {
+              setRootNotice('导入失败: ' + (res && res.error || ''))
+            }
+          } catch (e) {
+            setRootNotice('导入失败')
+          }
+        }
+        reader.onerror = () => setRootNotice('读取文件失败')
+        reader.readAsDataURL(file)
+      }
+
+      const load = async (query, tagf) => {
+        setBusy(true)
+        try {
+          const res = await apiGet({ q: query || '', tag: tagf || '' })
+          if (res && res.ok) {
+            setMemes(res.memes)
+            setTags(res.tags)
+            setTotal(res.total)
+            if (Array.isArray(res.packs)) setPacks(previous => previous.map(p => ({ ...p, count: (res.packs.find(next => next.id === p.id) || p).count })))
+            setNotice('')
+          } else {
+            setNotice('加载失败' + (res && res.error ? ': ' + res.error : ''))
+          }
+        } catch (error) {
+          setNotice('加载失败: ' + (error && error.message ? error.message : String(error)))
+        }
+        setBusy(false)
+      }
+      React.useEffect(() => { load('', '') }, [])
+
+      const onDeleteTag = (tagArg) => {
+        const tag = tagArg || (upTag === '__new__' ? '' : String(upTag || '').trim())
+        if (!tag) return
+        setConfirmBox({
+          title: '删除分类',
+          lines: [
+            '确认删除分类「' + tagZh(tag) + ' (' + tag + ')」？',
+            '这个分类下的表情包会一起删掉，不可恢复。',
+          ],
+          confirmLabel: '删除分类',
+          onConfirm: () => doDeleteTag(tag),
+        })
+      }
+      const doDeleteTag = async (tag) => {
+        try {
+          const res = await apiPost({ op: 'deleteTag', tag })
+          setNotice(res && res.ok ? '已删除分类,共 ' + (res.deleted || 0) + ' 张' : '删除失败: ' + (res && res.error || ''))
+          setUpTag('')
+          setUpNewTag('')
+          await load(q, tagFilter === tag ? '' : tagFilter)
+        } catch (error) {
+          setNotice('删除失败: ' + (error && error.message ? error.message : String(error)))
+        }
+      }
+
+      const onPickFile = (ev) => {
+        const file = ev.target.files && ev.target.files[0]
+        ev.target.value = ''
+        if (!file) return
+        if (!/\.(jpg|jpeg|png|gif|webp)$/i.test(file.name)) {
+          setNotice('仅支持 jpg/png/gif/webp')
+          return
+        }
+        setUpFile(file)
+        setUpPreview(URL.createObjectURL(file))
+        // 换图后清掉上一张的识别结果,避免误存错标签
+        setUpTag('')
+        setUpCaption('')
+        setUpKeywords('')
+        const reader = new FileReader()
+        reader.onload = () => setUpData64(String(reader.result || '').split(',')[1] || '')
+        reader.readAsDataURL(file)
+      }
+
+      // AI 识别:上传前先让模型看图,自动填分类/描述/关键词;失败不阻塞手动填写
+      const onRecognize = async () => {
+        if (!upFile) { setNotice('先选择图片'); return }
+        if (!upData64) { setNotice('图片还没读好,稍等片刻再试'); return }
+        setRecognizing(true)
+        try {
+          const res = await apiPost({ op: 'recognize', fileName: upFile.name, dataBase64: upData64 })
+          if (res && res.ok) {
+            setUpTag(res.tag || '')
+            setUpCaption(res.caption || '')
+            setUpKeywords(res.keywords || '')
+            setNotice('AI 已识别: [' + (res.tag || '?') + '] ' + (res.caption || ''))
+          } else {
+            setNotice('AI 识别失败: ' + (res && res.error || '未知错误'))
+          }
+        } catch (error) {
+          setNotice('AI 识别失败: ' + (error && error.message ? error.message : String(error)))
+        }
+        setRecognizing(false)
+      }
+
+      const onConfirmUpload = async () => {
+        const file = upFile
+        if (!file) { setNotice('先选择图片文件'); return }
+        const tag = upTag === '__new__' ? String(upNewTag || '').trim().toLowerCase() : String(upTag || '').trim()
+        if (!tag) { setNotice('先选择或填写分类'); return }
+        if (!/^[a-z0-9_-]+$/.test(tag)) { setNotice('分类只能是小写字母/数字/-/_'); return }
+        setUploading(true)
+        const reader = new FileReader()
+        reader.onload = async () => {
+          const data = String(reader.result || '').split(',')[1] || ''
+          try {
+            const res = await apiPost({
+              op: 'upload',
+              tag,
+              caption: String(upCaption || '').trim(),
+              keywords: String(upKeywords || '').trim(),
+              fileName: file.name,
+              dataBase64: data,
+            })
+            setNotice(res && res.ok && res.meme ? '已上传: ' + res.meme.path : '上传失败: ' + (res && res.error || ''))
+            if (res && res.ok) {
+              setUploadOpen(false)
+              setUpFile(null)
+              setUpPreview('')
+              setUpTag('')
+              setUpNewTag('')
+              setUpCaption('')
+              setUpKeywords('')
+              await load(q, tagFilter)
+            }
+          } catch (error) {
+            setNotice('上传失败: ' + (error && error.message ? error.message : String(error)))
+          }
+          setUploading(false)
+        }
+        reader.onerror = () => { setUploading(false); setNotice('读取文件失败') }
+        reader.readAsDataURL(file)
+      }
+
+      const onSaveEdit = async () => {
+        if (!edit) return
+        try {
+          const tag = edit.tag === '__new__' ? String(edit.newTag || '').trim().toLowerCase() : String(edit.tag || '').trim().toLowerCase()
+          const res = await apiPost({
+            op: 'update',
+            path: edit.path,
+            tag,
+            caption: String(edit.caption || ''),
+            keywords: String(edit.keywords || ''),
+          })
+          setNotice(res && res.ok ? '已保存' : '保存失败: ' + (res && res.error || ''))
+          setEdit(null)
+          await load(q, tagFilter)
+        } catch (error) {
+          setNotice('保存失败: ' + (error && error.message ? error.message : String(error)))
+        }
+      }
+
+      const onDelete = (m) => {
+        setConfirmBox({
+          title: '删除表情包',
+          lines: ['确认删除这张表情包？', m.path, '不可恢复。'],
+          confirmLabel: '删除',
+          onConfirm: () => doDelete(m),
+        })
+      }
+      const doDelete = async (m) => {
+        try {
+          const res = await apiPost({ op: 'delete', path: m.path })
+          setNotice(res && res.ok ? '已删除' : '删除失败: ' + (res && res.error || ''))
+          await load(q, tagFilter)
+        } catch (error) {
+          setNotice('删除失败: ' + (error && error.message ? error.message : String(error)))
+        }
+      }
+
+      const searchInput = h('input', {
+        type: 'text',
+        placeholder: '搜索描述/关键词',
+        value: q,
+        onChange: (e) => setQ(e.target.value),
+        onKeyDown: (e) => { if (e.key === 'Enter') load(q, tagFilter) },
+        style: { width: 180 },
+      })
+      const tagSelect = h('select', {
+        value: tagFilter,
+        onChange: (e) => { setTagFilter(e.target.value); load(q, e.target.value) },
+      }, [
+        h('option', { key: '', value: '' }, '全部分类'),
+        tags.map((t) => h('option', { key: t, value: t }, tagZh(t) + ' (' + t + ')')),
+      ])
+
+      const fileInput = h('input', {
+        ref: fileRef,
+        type: 'file',
+        accept: 'image/*',
+        style: { display: 'none' },
+        onChange: onPickFile,
+      })
+
+      const curPack = packs.find((p) => p.id === packId) || null
+      const cards = memes.map((m) => h('div', { key: m.path, className: 'meme-card' },
+        // 用背景层而不是 <img>:宿主对 img 的全局样式会把图挤到左边(封面那次踩过)
+        h('div', { className: 'meme-thumb', style: { backgroundImage: 'url("' + m.url + '")' }, title: m.caption || m.file_name }),
+        h('div', { className: 'meta' },
+          h('div', { className: 'tag' }, tagZh(m.tag)),
+          h('div', { className: 'cap' }, m.caption || m.file_name),
+          h('div', { className: 'acts' },
+            h('button', { onClick: () => setEdit({ path: m.path, tag: m.tag, caption: m.caption || '', keywords: m.keywords || '' }) }, '编辑'),
+            h('button', { className: 'danger', onClick: () => onDelete(m) }, '删除'),
+          ),
+        ),
+      ))
+
+      // 市场卡片:发现 = 目录条目;图库页 = 已安装图库(订阅记录 + 扫描到的本地图库)。搜索按 空格分词 全命中。
+      const mkQuery = remoteQuery.trim().toLowerCase()
+      const mkMatch = (hay) => !mkQuery || mkQuery.split(/\s+/).filter(Boolean).every((t) => hay.includes(t))
+      const jobFor = (pid) => Object.values(remoteJobs).find((j) => j.packId === pid && j.state === 'running')
+      const discoverCards = (() => {
+        const cards = []
+        for (const entry of (remoteDir || [])) {
+          const pid = entry.id || ''
+          const sub = remoteSubs.find((s) => s.id === pid)
+            || remoteSubs.find((s) => s.url && s.url === entry.manifestUrl)
+            || remoteSubs.find((s) => s.archiveUrl && s.archiveUrl === entry.archiveUrl)
+            || null
+          const keywords = Array.isArray(entry.keywords) ? entry.keywords : (Array.isArray(entry.tags) ? entry.tags : [])
+          const author = entry.author || entry.maintainer || ''
+          const hay = ((entry.name || '') + ' ' + author + ' ' + (entry.description || '') + ' ' + keywords.join(' ') + ' ' + pid).toLowerCase()
+          if (!mkMatch(hay)) continue
+          const local = pid ? packs.find((p) => p.id === pid) : null
+          const downloaded = !!(pid && local)
+          cards.push({
+            key: 'dir-' + (pid || entry.manifestUrl || entry.archiveUrl), packId: pid,
+            name: entry.name || pid, desc: entry.description || '',
+            // 装过的用本地封面,没装的才用目录里的远程预览图
+            cover: (downloaded && local.cover) ? local.cover : (entry.preview || (entry.previews || [])[0] || null),
+            meta: [
+              author,
+              entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '',
+              entry.count ? entry.count + ' 张' : '',
+              entry.downloads ? '↓ ' + fmtCount(entry.downloads) : '',
+            ].filter(Boolean).join(' · '),
+            tags: keywords, entry, sub,
+            installed: !!sub || downloaded,
+            job: jobFor(pid),
+            downloaded,
+            downloads: Number(entry.downloads) || 0,
+          })
+        }
+        // 默认按下载量排序;没有下载量的(清单热链的包、或额度/网络拉不到)排最后,
+        // 同分保持目录原顺序(Array#sort 稳定)
+        cards.sort((a, b) => (b.downloads || 0) - (a.downloads || 0))
+        return cards
+      })()
+      // 已安装:本地扫描到的图库(含内置/导入/自定义 + 下载的远程包)在前,订阅了但没扫到的追加在后
+      const libraryCards = (() => {
+        const cards = []
+        for (const c of localPackCards) {
+          const hay = ((c.name || '') + ' ' + c.packId + ' ' + (c.tags || []).join(' ') + ' ' + c.meta).toLowerCase()
+          if (mkMatch(hay)) cards.push(c)
+        }
+        const seen = new Set(cards.map((c) => c.packId))
+        for (const s of remoteSubs) {
+          if (seen.has(s.id)) continue
+          const hay = ((s.name || '') + ' ' + s.id + ' ' + (s.url || s.archiveUrl || '')).toLowerCase()
+          if (!mkMatch(hay)) continue
+          cards.push({
+            key: 'sub-' + s.id, packId: s.id,
+            name: s.name || s.id, desc: s.url || s.archiveUrl, cover: null,
+            meta: ['未下载', s.version, s.total ? s.total + ' 张' : ''].filter(Boolean).join(' · '),
+            tags: [], entry: null, sub: s,
+            installed: true, job: jobFor(s.id),
+            downloaded: false,
+          })
+        }
+        return cards
+      })()
+
+      // 市场/图库共用的卡片:封面 + 名称 + 徽标 + meta + 标签 + 进度 + 操作
+      const packCard = (row, acts, onOpen) => {
+        const job = row.job
+        const pct = job && job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0
+        return h('div', {
+          key: row.key,
+          className: 'mk-card' + (onOpen ? ' mk-card-open' : ''),
+          // 整卡可点 = 打开预览;卡片内的按钮自己 stopPropagation,不会误触发
+          ...(onOpen ? { onClick: () => onOpen(row), title: '点击打开' } : {}),
+        },
+          // 封面用背景图而不是 <img>:尺寸完全由我们这层样式决定,不受宿主对 img 的
+          // 全局样式影响(之前实测在宿主里图片没铺满,露出一块空底色很难看)
+          // 首字母始终是子节点:背景图正常时不透明看不见,加载失败(远程 404/断网)时就露出来,
+          // 不会只留一块空白让人以为坏了 —— 之前 catalog 里漏了扩展名就是这个症状
+          row.cover
+            ? h('div', { className: 'mk-cover' },
+              (row.name || '?').slice(0, 1),
+              // 图片单独一层盖在首字母上面:加载成功(不透明)就看不见字,404/断网时露出来,
+              // 不会只留一块空白让人以为坏了 —— catalog 里漏扩展名那次就是这个症状
+              h('div', {
+                className: 'mk-cover-img',
+                style: {
+                  backgroundImage: 'url("' + coverUrl(row.cover) + '")',
+                  backgroundSize: 'cover', backgroundPosition: 'center 28%', backgroundRepeat: 'no-repeat',
+                },
+              }))
+            : h('div', { className: 'mk-cover mk-cover-fallback' }, (row.name || '?').slice(0, 1)),
+          h('div', { className: 'mk-body' },
+            h('div', { className: 'mk-title' },
+              h('span', { className: 'mk-name', title: row.name }, row.name),
+              // 开关:打开后模型可以用这个图库发图(可以同时开多个)
+              row.onToggle
+                ? h('span', {
+                  className: 'switch' + (row.enabled ? ' on' : ''),
+                  title: row.enabled ? '模型正在使用这个图库,点击关闭' : '点击打开:模型可以用这个图库发图',
+                  // 开关自己吞掉点击:卡片整张可点(进表情包页 / 开预览),别误触发
+                  onClick: (e) => { e.stopPropagation(); row.onToggle(!row.enabled) },
+                })
+                : null,
+            ),
+            row.meta ? h('div', { className: 'mk-meta', title: row.meta }, row.meta) : null,
+            row.desc ? h('div', { className: 'mk-desc', title: row.desc }, row.desc) : null,
+            row.tags && row.tags.length
+              ? h('div', { className: 'mk-chips' }, row.tags.slice(0, 4).map((t) => h('span', { key: t, className: 'mk-chip' }, t)))
+              : null,
+            job ? h('div', { className: 'mk-progress-wrap' },
+              h('div', { className: 'mk-progress' },
+                // total 为 0 = 上游没给 content-length:画不确定进度条,别假装 100%
+                job.total
+                  ? h('div', { className: 'mk-progress-bar', style: { width: pct + '%' } })
+                  : h('div', { className: 'mk-progress-bar mk-progress-unknown' })),
+              h('span', { className: 'mk-progress-text' }, (job.message || '下载中…') + (job.total ? ' ' + pct + '%' : '')),
+            ) : null,
+            h('div', { className: 'mk-acts', onClick: (e) => e.stopPropagation() }, acts),
+          ),
+        )
+      }
+      // 更新:有订阅走订阅,否则回落到目录条目;没下载过就是「安装」
+      const updateBtn = (row) => h('button', {
+        key: 'update',
+        onClick: row.sub
+          ? () => (row.sub.archiveUrl ? startArchive(row.sub) : startRemote(row.sub.url, row.sub.id))
+          : () => (row.entry.archiveUrl ? startArchive(row.entry) : startRemote(row.entry.manifestUrl, row.entry.id || '')),
+        disabled: remoteBusy || !!row.job,
+      }, row.downloaded ? '更新' : '安装')
+      return h('div', { className: 'meme-panel' },
+        h('div', { className: 'mk-tabs', style: { width: '100%', marginBottom: 2 } },
+          h('button', { className: 'mk-tab' + (panelTab === 'library' ? ' on' : ''), onClick: () => setPanelTab('library') }, '图库' + (packs.length ? ' (' + packs.length + ')' : '')),
+          h('button', { className: 'mk-tab' + (panelTab === 'market' ? ' on' : ''), onClick: () => { setRootNotice(''); setPanelTab('market') } }, '发现'),
+          h('button', { className: 'mk-tab' + (panelTab === 'settings' ? ' on' : ''), onClick: () => setPanelTab('settings') }, '设置'),
+        ),
+        // 图库页两态:已安装图库列表 ⇄ 某个图库的表情包页(二级页面,不是二级标签)
+        panelTab === 'library' ? (packView
+          ? h(React.Fragment, null,
+            h('div', { className: 'row', style: { width: '100%' } },
+              h('button', { onClick: () => { setPackView(''); setRootNotice('') } }, '← 图库列表'),
+              h('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
+                (curPack ? curPack.name : packView) + ' · ' + total + ' 张'),
+            ),
+            memeRoot ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', wordBreak: 'break-all' } }, memeRoot) : null,
+            h('div', { className: 'row' },
+              searchInput,
+              h('button', { className: 'btn-primary', onClick: () => setUploadOpen(true) }, '上传表情包'),
+              tagSelect,
+              h('button', { onClick: () => load(q, tagFilter), disabled: busy }, '搜索'),
+            ),
+            notice ? h('div', { className: 'notice' }, notice) : null,
+            memes.length === 0 && !busy
+              ? h('div', { className: 'empty' }, '没有匹配的表情包')
+              : h('div', { className: 'meme-grid' }, cards),
+          )
+          : h(React.Fragment, null,
+            h('div', { className: 'row', style: { width: '100%' } },
+              h('button', { className: 'btn-primary', disabled: packSaving, onClick: () => { setPackDraft({ id: 'pack-' + Date.now().toString(36), name: '', description: '' }); setPackTouched({}); setPackDialog('create') } }, '新建图包库'),
+              h('button', { disabled: uploading, onClick: () => importFileRef.current && importFileRef.current.click() }, '导入图库'),
+            ),
+            h('input', { ref: importFileRef, type: 'file', accept: '.zip,application/zip', style: { display: 'none' }, onChange: onImportPack }),
+            libraryCards.length === 0
+              ? h('div', { className: 'empty' }, '还没有图库')
+              : h('div', { className: 'mk-grid' }, libraryCards.map((row) => packCard(row, [
+                row.downloaded
+                  ? h('button', { key: 'export', onClick: () => onExportPack(row.packId, row.name) }, '导出')
+                  : null,
+                row.packId === packId && curPack && curPack.count > 0
+                  ? h('button', { key: 'submit', disabled: packSaving, onClick: () => { setRootNotice(''); setPackDialog('submit') } }, '投稿')
+                  : null,
+                // 没下载的给「安装」,下载了且真有新版本才给「更新」
+                (!row.downloaded || row.hasUpdate) ? updateBtn(row) : null,
+                // 删除是唯一入口:内置、市场下载、自建/导入都走它(服务端也只留这一个 op)
+                row.downloaded
+                  ? h('button', { key: 'delete', className: 'mk-danger', disabled: packSaving, onClick: () => onDeletePackPrompt(row) }, '删除')
+                  : null,
+              ].filter(Boolean), () => onEditPack(row.packId)))),
+          )
+        ) : null,
+        // 编辑弹窗
+        edit ? h('div', { className: 'meme-modal-mask', onClick: () => setEdit(null) },
+          h('div', { className: 'meme-modal', onClick: (e) => e.stopPropagation() },
+            h('h3', null, '编辑表情包'),
+            h('div', {
+              className: 'meme-shot',
+              style: { backgroundImage: 'url("' + (memes.find((m) => m.path === edit.path)?.url || '') + '")' },
+            }),
+            h('div', { className: 'field' },
+              h('label', null, '分类'),
+              h('div', { className: 'row', style: { width: '100%' } },
+                h('select', { value: edit.tag, onChange: (e) => setEdit({ ...edit, tag: e.target.value }), style: { flex: 1 } },
+                  (tags.includes(edit.tag) ? tags : [edit.tag, ...tags]).map((t) => h('option', { key: t, value: t }, tagZh(t) + ' (' + t + ')')),
+                  h('option', { value: '__new__' }, '+ 新建分类'),
+                ),
+                h('button', { onClick: () => onDeleteTag(edit.tag), disabled: !edit.tag || edit.tag === '__new__', title: '删除该分类及其中所有表情包' }, '删除分类'),
+              ),
+              edit.tag === '__new__'
+                ? h('input', { type: 'text', value: edit.newTag || '', placeholder: '新分类名,小写字母/数字/-/_', onChange: (e) => setEdit({ ...edit, newTag: e.target.value }), style: { width: '100%' } })
+                : null,
+            ),
+            h('div', { className: 'field' },
+              h('label', null, '描述'),
+              h('textarea', { value: edit.caption, placeholder: '如:无语', rows: 2, onChange: (e) => setEdit({ ...edit, caption: e.target.value }) }),
+            ),
+            h('div', { className: 'field' },
+              h('label', null, '关键词(空格分隔)'),
+              h('input', { type: 'text', value: edit.keywords, placeholder: '搜索用', onChange: (e) => setEdit({ ...edit, keywords: e.target.value }) }),
+            ),
+            h('div', { className: 'modal-acts' },
+              h('button', { onClick: () => setEdit(null) }, '取消'),
+              h('button', { className: 'btn-primary', onClick: onSaveEdit }, '保存'),
+            ),
+          ),
+        ) : null,
+        // 上传弹窗
+        uploadOpen ? h('div', { className: 'meme-modal-mask', onClick: () => setUploadOpen(false) },
+          h('div', { className: 'meme-modal', onClick: (e) => e.stopPropagation() },
+            h('h3', null, '上传表情包'),
+            upFile
+              ? h('div', {
+                className: 'meme-shot',
+                style: { backgroundImage: 'url("' + upPreview + '")' },
+                title: upFile.name,
+              })
+              : h('div', { className: 'empty', style: { padding: '24px', border: '1px dashed var(--dsw-alias-border-l1)', borderRadius: 8 } },
+                  h('button', { onClick: () => fileRef.current && fileRef.current.click() }, '选择图片'),
+                ),
+
+            h('div', { className: 'field' },
+              h('label', null, upFile ? '已选: ' + upFile.name + ' (点击更换)' : '文件'),
+              h('input', { type: 'text', placeholder: upFile ? '' : '先选图片', value: '', readOnly: true, style: { display: 'none' } }),
+            ),
+            // AI 识别:选图后一键自动填分类/描述/关键词,识别失败不阻塞手动填写
+            upFile ? h('div', { className: 'row', style: { width: '100%' } },
+              h('button', { className: 'btn-primary', onClick: onRecognize, disabled: recognizing }, recognizing ? 'AI 识别中…' : 'AI 识别'),
+            ) : null,
+            h('div', { className: 'field' },
+              h('label', null, '分类(必填)'),
+              h('div', { className: 'row', style: { width: '100%' } },
+                h('select', { value: upTag, onChange: (e) => setUpTag(e.target.value), style: { flex: 1 } },
+                  h('option', { value: '' }, '选择分类'),
+                  tags.map((t) => h('option', { key: t, value: t }, tagZh(t) + ' (' + t + ')')),
+                  h('option', { value: '__new__' }, '+ 新建分类'),
+                ),
+                h('button', { onClick: onDeleteTag, disabled: !upTag || upTag === '__new__', title: '删除该分类及其中所有表情包' }, '删除分类'),
+              ),
+              upTag === '__new__'
+                ? h('input', { type: 'text', value: upNewTag, placeholder: '新分类名,小写字母/数字/-/_', onChange: (e) => setUpNewTag(e.target.value), style: { width: '100%' } })
+                : null,
+            ),
+            h('div', { className: 'field' },
+              h('label', null, '描述'),
+              h('textarea', { value: upCaption, placeholder: '如:无语', rows: 2, onChange: (e) => setUpCaption(e.target.value) }),
+            ),
+            h('div', { className: 'field' },
+              h('label', null, '关键词(空格分隔)'),
+              h('input', { type: 'text', value: upKeywords, placeholder: '搜索用', onChange: (e) => setUpKeywords(e.target.value) }),
+            ),
+            h('div', { className: 'modal-acts' },
+              h('button', { onClick: () => setUploadOpen(false) }, '取消'),
+              h('button', { className: 'btn-primary', onClick: onConfirmUpload, disabled: uploading }, uploading ? '上传中…' : '上传'),
+            ),
+          ),
+        ) : null,
+        fileInput,
+        panelTab === 'market' ? h(React.Fragment, null,
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('input', {
+            type: 'text', value: remoteQuery, onChange: (e) => setRemoteQuery(e.target.value),
+            placeholder: '搜索图库…', style: { flex: 1, minWidth: 160 },
+          }),
+        ),
+        discoverCards.length === 0
+          ? h('div', { className: 'mk-empty' },
+              mkQuery
+                ? '没有匹配的图库'
+                : (remoteDir === null
+                    ? '图库目录暂不可用(检查网络或稍后重试)'
+                    : '目录暂无内容'))
+          : h('div', { className: 'mk-grid' }, discoverCards.map((row) => packCard(row, [
+            // 发现页只负责装:装过的这里不给按钮,更新去图库页(有新版本才显示)
+            row.downloaded ? null : h('button', {
+              key: 'install',
+              className: 'btn-primary',
+              onClick: () => row.entry.archiveUrl
+                ? startArchive(row.entry)
+                : startRemote(row.entry.manifestUrl, row.entry.id || ''),
+              disabled: remoteBusy || !!row.job,
+            }, row.job ? '下载中…' : '安装'),
+          ].filter(Boolean), () => openPreview(row)))),
+
+        ) : null,
+        panelTab === 'settings' ? h(React.Fragment, null,
+        promptOpen ? h('div', { className: 'meme-modal-mask', onClick: () => setPromptOpen(false) },
+          h('div', { className: 'meme-modal', style: { width: 460 }, onClick: (e) => e.stopPropagation() },
+            h('h3', null, '陪伴提示词(注入模型)'),
+            h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
+              '在默认提示词基础上修改,保存后下一条消息生效;留空 = 使用内置默认。'),
+            h('textarea', {
+              value: promptDraft,
+              onChange: (e) => setPromptDraft(e.target.value),
+              rows: 7,
+              style: { boxSizing: 'border-box', width: '100%', minHeight: 140, fontFamily: 'inherit', fontSize: 12, lineHeight: 1.6, background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-label-primary)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8, padding: 8 },
+            }),
+            h('div', { className: 'modal-acts' },
+              h('button', { onClick: () => { setPromptDraft(defaultPrompt); setRootNotice('已重置为默认,点击保存生效') } }, '恢复默认'),
+              h('button', { onClick: () => setPromptOpen(false) }, '取消'),
+              h('button', { className: 'btn-primary', onClick: onSaveCompanionPrompt }, '保存'),
+            ),
+          ),
+        ) : null,
+        // 底部:扫描目录 / 提示词(导入导出在图库页)
+        h('div', { className: 'section-title' }, '扫描目录'),
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('input', { type: 'text', value: packsDirInput, onChange: (e) => setPacksDirInput(e.target.value), placeholder: '自动扫描含 index.db 的子文件夹', style: { flex: 1, minWidth: 160 } }),
+          h('button', { onClick: () => onPickDir() }, '选择目录'),
+          h('button', { className: 'btn-primary', onClick: () => onSavePacksDir() }, '保存'),
+        ),
+        h('div', { className: 'section-title' }, '陪伴提示词'),
+        h('div', { className: 'row' },
+          h('span', {
+            className: 'switch' + (promptOn ? ' on' : ''),
+            title: promptOn ? '点击关闭:模型不再主动斗图' : '点击开启:模型主动斗图',
+            onClick: () => onTogglePrompt(!promptOn),
+          }),
+          h('span', { style: { fontSize: 12 } }, promptOn ? '已开启' : '已关闭'),
+          h('button', { onClick: () => { setPromptDraft(companionPrompt || defaultPrompt); setPromptOpen(true) } }, '编辑提示词'),
+          h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
+            companionPrompt ? '已自定义' : '使用默认'),
+        ),
+
+        ) : null,
+        rootNotice ? h('div', { className: 'notice' }, rootNotice) : null,
+        marketResult ? h('a', { href: marketResult, target: '_blank', rel: 'noopener noreferrer' }, '打开 GitHub 投稿页') : null,
+        // 页脚:求 star + 反馈入口
+        h('div', { className: 'meme-footer' },
+          h('span', null, '觉得好用？'),
+          h('a', { href: 'https://github.com/yyh-001/dsh-meme', target: '_blank', rel: 'noopener noreferrer' }, '⭐ 去 GitHub 点个 Star'),
+          h('span', null, '·'),
+          h('a', {
+            href: issueFormUrl(pluginVersion),
+            target: '_blank', rel: 'noopener noreferrer',
+          }, '💬 反馈建议 / 提 issue'),
+        ),
+        packDialog ? h('div', { className: 'meme-modal-mask', onClick: () => { if (!packSaving) setPackDialog('') } },
+          h('div', {
+            className: 'meme-modal',
+            style: { width: packDialog === 'create' ? 400 : 440 },
+            onClick: (e) => e.stopPropagation(),
+          },
+            h('div', { className: 'meme-modal-head' },
+              h('h3', null, packDialog === 'create' ? '新建图包库' : '投稿到市场'),
+              h('button', {
+                className: 'meme-x', title: '关闭', 'aria-label': '关闭', disabled: packSaving,
+                onClick: () => setPackDialog(''),
+              }, '×'),
+            ),
+            rootNotice ? h('div', { className: 'notice', role: 'status' }, rootNotice) : null,
+            packDialog === 'create' ? h(React.Fragment, null,
+              h('div', { className: 'field' + (packBad('name') ? ' bad' : '') },
+                h('label', null, '图库名称'),
+                h('input', {
+                  type: 'text', value: packDraft.name, maxLength: 60, autoFocus: true,
+                  placeholder: '如：大肥鱼、官方表情包1号', disabled: packSaving,
+                  onChange: (e) => { setPackTouched({ ...packTouched, name: true }); setPackDraft({ ...packDraft, name: e.target.value }) },
+                  onKeyDown: packSubmitOnEnter,
+                }),
+                packBad('name') ? h('div', { className: 'hint' }, '起个名字——图库列表和模型都用它认这套图') : null,
+              ),
+              h('div', { className: 'field' + (packBad('id') ? ' bad' : '') },
+                h('label', null, '图库 ID'),
+                h('input', {
+                  type: 'text', value: packDraft.id, maxLength: 40, disabled: packSaving,
+                  placeholder: '如：my-cat-pack',
+                  onChange: (e) => { setPackTouched({ ...packTouched, id: true }); setPackDraft({ ...packDraft, id: e.target.value }) },
+                  onKeyDown: packSubmitOnEnter,
+                }),
+                h('div', { className: 'hint' }, packBad('id')
+                  ? '只能用小写字母、数字、- 和 _，首字符不能是 - 或 _（1–40 位）'
+                  : '图库就装在这个文件夹名下；以后分享给别人时保持 ID 不变'),
+              ),
+              h('div', { className: 'field' },
+                h('label', null, '简介 / 图片来源（可选）'),
+                h('textarea', {
+                  value: packDraft.description, rows: 2, maxLength: 200, disabled: packSaving,
+                  placeholder: '如：图是谁画的、来自哪个仓库、什么许可',
+                  onChange: (e) => setPackDraft({ ...packDraft, description: e.target.value }),
+                }),
+              ),
+            ) : h(React.Fragment, null,
+              h('p', null, '自动导出当前图库 ZIP，并打开预填好的 GitHub 投稿页。'),
+              h('p', null, '登录 GitHub 后，将下载的 ZIP 拖入“图库 ZIP”一栏，补充图片来源和许可，再提交。审核通过后收录到市场。'),
+            ),
+            h('div', { className: 'modal-acts' },
+              h('button', { disabled: packSaving, onClick: () => setPackDialog('') }, '取消'),
+              h('button', {
+                className: 'btn-primary',
+                disabled: packSaving || (packDialog === 'create' && !packDraftOk),
+                title: packDialog === 'create' && !packDraftOk ? '先填图库名称和合法的图库 ID' : undefined,
+                onClick: packDialog === 'create' ? savePack : submitPack,
+              }, packSaving ? '处理中…' : packDialog === 'create' ? '创建并切换' : '导出 ZIP 并打开投稿页'),
+            ),
+          ),
+        ) : null,
+        // 图库预览弹窗:点卡片打开
+        previewPack ? h('div', { className: 'meme-modal-mask', onClick: () => setPreviewPack(null) },
+          h('div', {
+            className: 'meme-modal', style: { width: 560, maxHeight: '82vh', overflow: 'auto' },
+            onClick: (e) => e.stopPropagation(),
+          },
+            h('div', { className: 'meme-modal-head' },
+              h('h3', null, previewPack.name),
+              h('button', {
+                className: 'meme-x', title: '关闭', 'aria-label': '关闭',
+                onClick: () => setPreviewPack(null),
+              }, '×'),
+            ),
+            previewPack.meta ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, previewPack.meta) : null,
+            previewPack.desc ? h('p', { style: { margin: 0, fontSize: 12 } }, previewPack.desc) : null,
+            previewPack.tags.length
+              ? h('div', { className: 'mk-chips' }, previewPack.tags.map((t) => h('span', { key: t, className: 'mk-chip' }, t)))
+              : null,
+            previewPack.loading ? h('div', { className: 'notice' }, '正在读取图库图片…') : null,
+            previewPack.images.length
+              ? h('div', { className: 'mk-preview' }, previewPack.images.map((u, i) => h('a', {
+                key: u + '#' + i, href: coverUrl(u), target: '_blank', rel: 'noopener noreferrer', title: '点开原图',
+                style: { backgroundImage: 'url("' + coverUrl(u) + '")' },
+              })))
+              : (previewPack.loading ? null : h('div', { className: 'empty' }, '这个图库没有提供预览图')),
+            previewPack.images.length && previewPack.total > previewPack.images.length
+              ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
+                previewPack.fromPack
+                  ? '共 ' + previewPack.total + ' 张，这里显示前 ' + previewPack.images.length + ' 张'
+                  : '目录里提供 ' + previewPack.images.length + ' 张预览；这个图库共 ' + previewPack.total + ' 张，安装后可以看全部')
+              : null,
+          ),
+        ) : null,
+        // 应用内确认弹窗(原生 confirm 在桌面壳里观感不一致)
+        confirmBox ? h('div', { className: 'meme-modal-mask', onClick: () => setConfirmBox(null) },
+          h('div', { className: 'meme-modal', onClick: (e) => e.stopPropagation() },
+            h('h3', null, confirmBox.title),
+            (confirmBox.lines || []).map((line, i) => h('p', { key: i }, line)),
+            h('div', { className: 'row', style: { marginTop: 16 } },
+              h('button', {
+                className: 'btn-primary',
+                onClick: () => { const run = confirmBox.onConfirm; setConfirmBox(null); if (run) run() },
+              }, confirmBox.confirmLabel || '确认'),
+              h('button', { onClick: () => setConfirmBox(null) }, '取消'),
+            ),
+          ),
+        ) : null,
+        // 目录浏览弹窗(WSL 无原生选择器,用 browse 能力前端浏览)
+        browseOpen && browseList ? h('div', { className: 'meme-modal-mask', onClick: () => setBrowseOpen(false) },
+          h('div', { className: 'meme-modal', style: { width: 420 }, onClick: (e) => e.stopPropagation() },
+            h('h3', null, '选择表情包目录'),
+            h('div', { className: 'total', style: { wordBreak: 'break-all' } }, browseList.path),
+            h('div', { className: 'row', style: { flexWrap: 'wrap', gap: 4 } },
+              h('button', {
+                onClick: () => { if (browseList.parent) browseTo(browseList.parent) },
+                disabled: !browseList.parent,
+                style: { padding: '3px 8px', fontSize: 12 },
+              }, '⬆ 上一级'),
+              (browseList.breadcrumbs || []).map((c, i) =>
+                h('button', { key: c.path, onClick: () => browseTo(c.path), style: { padding: '3px 8px', fontSize: 12 } },
+                  (i === 0 ? '🏠 ' : '') + c.name)),
+            ),
+            h('div', { style: { height: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8, padding: 4 } },
+              (browseList.entries || []).length === 0
+                ? h('div', { className: 'empty' }, '(空目录)')
+                : (browseList.entries || []).map((e) =>
+                    h('button', { key: e.path, onClick: () => browseTo(e.path), style: { textAlign: 'left', padding: '5px 10px', fontSize: 13 } },
+                      '📁 ' + e.name)),
+            ),
+            browseErr ? h('div', { className: 'notice' }, browseErr) : null,
+            h('div', { className: 'modal-acts' },
+              h('button', { onClick: () => setBrowseOpen(false) }, '取消'),
+              h('button', { className: 'btn-primary', onClick: () => {
+                onSavePacksDir(browseList.path)
+                setBrowseOpen(false)
+              } }, '使用此目录'),
+            ),
+          ),
+        ) : null,
+      )
+    }
+
+    // ---- 输入框快捷发图(QQ 式):😊 按钮 + 悬浮面板 ----
+    const memePickerCSS = [
+      '.meme-trigger{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;cursor:pointer;color:var(--dsw-alias-label-secondary);background:transparent;border:none;line-height:1;outline:none;transition:background .12s,color .12s}',
+      '.meme-trigger:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
+      '.meme-trigger.active{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent)}',
+      '.meme-picker{position:absolute;bottom:calc(100% + 8px);left:0;width:min(360px,90vw);z-index:30;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:10px;padding:12px;max-height:46vh;overflow:hidden;font-size:12px;color:var(--dsw-alias-label-primary)}',
+      '.meme-picker .mp-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
+      '.meme-picker .mp-tabs{display:flex;gap:4px;align-items:center;overflow-x:auto;max-width:100%;padding-bottom:2px}',
+      '.meme-picker .mp-tag{padding:3px 10px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);cursor:pointer;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11px;white-space:nowrap;flex:none;transition:background .12s,color .12s,border-color .12s}',
+      '.meme-picker .mp-tag:hover{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary)}',
+      '.meme-picker .mp-tag.on{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-layer-1)}',
+      '.meme-picker .mp-grid{overflow-y:auto;display:flex;flex-wrap:wrap;gap:8px;max-height:38vh;padding:2px}',
+      '.meme-picker .mp-cell{width:76px;height:76px;flex:0 0 76px;border:1px solid var(--dsw-alias-border-l1);border-radius:11px;overflow:hidden;cursor:pointer;background:var(--dsw-alias-bg-layer-2);padding:0;display:block;transition:border-color .12s,transform .12s,box-shadow .12s}',
+      '.meme-picker .mp-cell:hover{border-color:var(--dsw-alias-brand-primary);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.15)}',
+      '.meme-picker .mp-empty{color:var(--dsw-alias-label-secondary);text-align:center;padding:28px 0}',
+    ].join('')
+
+    /**
+     * 比较版本号:按 `.` `-` `+` 切段,纯数字段按数值比,长度不足补 0。
+     * 非数字段退化成字符串比较;任一侧为空返回 0(无法判断 = 不算有更新)。
+     * @returns {number} 1 / 0 / -1
+     */
+    function compareVersions(a, b) {
+      const parts = (v) => String(v == null ? '' : v).trim().replace(/^v/i, '').split(/[.\-+]/).filter(Boolean)
+      const pa = parts(a)
+      const pb = parts(b)
+      if (pa.length === 0 || pb.length === 0) return 0
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const x = pa[i] || '0'
+        const y = pb[i] || '0'
+        const nx = /^\d+$/.test(x)
+        const ny = /^\d+$/.test(y)
+        if (nx && ny) {
+          const d = Number(x) - Number(y)
+          if (d !== 0) return d > 0 ? 1 : -1
+          continue
+        }
+        // 一边数字一边非数字:非数字那段是预发布后缀(1.2.0-beta),比不带后缀的旧
+        if (nx !== ny) return nx ? 1 : -1
+        if (x !== y) return x > y ? 1 : -1
+      }
+      return 0
+    }
+
+    /**
+     * 封面用背景图而不是 <img>:尺寸完全由我们这层样式决定,不受宿主对 img 的
+     * 全局样式影响(实测在宿主里 <img> 没铺满卡片,露出一块空底色很难看)
+     */
+    function coverUrl(u) {
+      const raw = String(u || '')
+      const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(raw)
+      // 远端预览图优先走 jsDelivr 镜像(raw.githubusercontent 在部分网络下不稳)
+      return m ? 'https://cdn.jsdelivr.net/gh/' + m[1] + '/' + m[2] + '@' + m[3] + '/' + m[4] : raw
+    }
+
+    /**
+     * 反馈入口:直接打开仓库里的「反馈 / Bug」表单,尽量替用户填好能自动拿到的信息
+     * (插件版本来自 payload;运行环境只有浏览器 UA 可读,dsh 版本得让用户补)。
+     */
+    function issueFormUrl(version) {
+      const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || ''
+      const env = ua ? (/Windows/i.test(ua) ? 'Windows' : /Mac/i.test(ua) ? 'macOS' : /Linux/i.test(ua) ? 'Linux' : '') + (/(Electron\/[\d.]+)/.exec(ua) ? ' · ' + /(Electron\/[\d.]+)/.exec(ua)[1] : '') : ''
+      const qs = new URLSearchParams({ template: 'feedback.yml' })
+      if (version) qs.set('version', String(version))
+      if (env) qs.set('env', env)
+      return 'https://github.com/yyh-001/dsh-meme/issues/new?' + qs.toString()
+    }
+
+    /** 下载量显示:上千折成 1.2k,省得数字把卡片撑爆 */
+    function fmtCount(n) {
+      const x = Number(n) || 0
+      return x >= 1000 ? (Math.round(x / 100) / 10) + 'k' : String(x)
+    }
+
+    function makeMemeStore() {
+      let open = false
+      const subs = new Set()
+      return {
+        get: () => open,
+        set: (v) => { open = !!v; subs.forEach((fn) => fn()) },
+        toggle: () => { open = !open; subs.forEach((fn) => fn()) },
+        subscribe: (fn) => { subs.add(fn); return () => subs.delete(fn) },
+      }
+    }
+
+    function makeMemeButton(store) {
+      return function MemeButton(props) {
+        const open = React.useSyncExternalStore(store.subscribe, store.get)
+        return React.createElement('button', {
+          className: open ? 'meme-trigger active' : 'meme-trigger',
+          title: '表情包',
+          onClick: (e) => {
+            e.preventDefault(); e.stopPropagation()
+            store.toggle()
+          },
+        }, React.createElement('svg', { viewBox: '0 0 24 24', width: 20, height: 20, style: { display: 'block' } },
+          // Material 标准笑脸,currentColor 跟随主题
+          React.createElement('path', { d: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z', fill: 'currentColor' }),
+        ))
+      }
+    }
+
+    function MemeBoard(props) {
+      const h = React.createElement
+      const store = props.store
+      const actions = props.inputActions
+      // 草稿要从宿主实时读:本 slot 的 props 只有 inputActions 加 hooks 派生的 useInput
+      // (宿主输入栏就是 useInput((s) => s)),没有 props.input;读不存在的属性不报错,
+      // 只会静默拿到 undefined —— 别再回头去读 props.input.draft。
+      // 拿不到钩子(宿主侧改动)时兜底为空串,即修复前的行为,不因此崩。
+      const useLiveInput = typeof props.useInput === 'function' ? props.useInput : (() => null)
+      const inputState = useLiveInput((s) => s)
+      const open = React.useSyncExternalStore(store.subscribe, store.get)
+      const [memes, setMemes] = React.useState([])
+      const [packs, setPacks] = React.useState([]) // [{id,name,count}] 可切换的表情包组
+      const [packId, setPackId] = React.useState('') // '' = 跟随当前激活图库
+
+      React.useEffect(() => {
+        if (!open) return
+        let alive = true
+        const qs = new URLSearchParams()
+        if (packId) qs.set('packId', packId)
+        fetch('/dsh-memes-api?' + qs.toString())
+          .then((r) => r.json())
+          .then((res) => {
+            if (!alive || !res || !res.ok) return
+            setPacks(res.packs || [])
+            setMemes(res.memes || [])
+            // 首次打开:锚定当前激活图库;切包后当前包不存在时回退激活包
+            setPackId((cur) => {
+              const valid = (res.packs || []).some((p) => p.id === cur)
+              return cur && valid ? cur : (res.packId || '')
+            })
+          })
+          .catch(() => {})
+        return () => { alive = false }
+      }, [open, packId])
+
+      // 点外部(非面板、非 😊 按钮)自动收起。
+      React.useEffect(() => {
+        if (!open) return
+        const onDown = (e) => {
+          const t = e && e.target
+          if (t && t.closest && !t.closest('.meme-picker') && !t.closest('.meme-trigger')) {
+            store.set(false)
+          }
+        }
+        document.addEventListener('pointerdown', onDown)
+        return () => document.removeEventListener('pointerdown', onDown)
+      }, [open])
+
+      if (!open) return null
+
+      // 点击:发 [表情: 描述] 文本,前端按描述配图。
+      const send = async (m) => {
+        if (!m) return
+        // 纯文本:[表情: 描述] —— 模型只看到文字;前端按描述配图。
+        const setText = (text) => { try { if (actions && actions.setDraft) actions.setDraft(text) } catch (e) {} }
+        const desc = (m.caption || m.keywords || m.tag || '表情包').slice(0, 80)
+        const text = '[表情: ' + desc + ']'
+        const cur = inputState && typeof inputState.draft === 'string' ? inputState.draft : ''
+        setText(cur.trim() ? cur + '\n' + text : text)
+        try { if (actions && actions.submit) actions.submit() } catch (e) {}
+        store.set(false)
+      }
+
+      // 表情包组 tab:大肥鱼 / 官方 / 导入的包,点选即切换数据源
+      const cells = memes.map((m) => h('div', {
+        key: m.path, className: 'mp-cell', title: m.caption || m.file_name, onClick: () => send(m),
+        style: {
+          width: '74px', height: '74px',
+          backgroundImage: 'url(' + m.url + ')',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center center',
+          backgroundRepeat: 'no-repeat',
+        },
+      }))
+
+      return h('div', { className: 'meme-picker', onClick: (e) => e.stopPropagation() },
+        h('div', { className: 'mp-tabs' },
+          packs.length === 0
+            ? h('div', { className: 'mp-empty', style: { padding: '4px 0' } }, '加载中…')
+            : packs.map((p) => h('button', {
+              type: 'button', key: p.id,
+              className: 'mp-tag' + (p.id === packId ? ' on' : ''),
+              onClick: () => setPackId(p.id),
+            }, p.name + ' (' + (p.count || 0) + ')')),
+        ),
+        memes.length === 0
+          ? h('div', { className: 'mp-empty' }, '没有匹配的表情包')
+          : h('div', { className: 'mp-grid' }, cells),
+      )
+    }
+
+    const inject = ['slots', 'workspaces']
+
+    // 模型常把 “” 抄成 ""；匹配时折叠引号和空白。
+    const foldCaption = (s) => String(s || '').trim()
+      .replace(/[\u201c\u201d\u2018\u2019\u300c\u300d\u300e\u300f«»]/g, '"')
+      .replace(/\s+/g, ' ')
+    const looseCaption = (s) => foldCaption(s).replace(/["'\s]/g, '')
+    // 描述里按中英文标点切词,长词优先(两字以下太泛,不参与匹配)。
+    const splitDescTokens = (s) => foldCaption(s)
+      .split(/[\s,.!?;:、，。！？；：""''()（）\[\]【】《》…·～~\-]+/)
+      .map((t) => t.replace(/["']/g, ''))
+      .filter((t) => t.length >= 2)
+      .sort((a, b) => b.length - a.length)
+    // 分词兜底的 haystack:caption/关键词/文件名的折叠与紧凑形态 + 分词。
+    const buildMemeSearch = (rows, toUrl) => (rows || []).map((row) => {
+      const hay = []
+      const parts = []
+      for (const s of [row.caption, row.keywords, row.file_name]) {
+        const f = foldCaption(s)
+        if (!f) continue
+        const l = looseCaption(s)
+        hay.push(f, ...(l && l !== f ? [l] : []))
+        parts.push(s)
+      }
+      const tokens = [...new Set(splitDescTokens(parts.join(' ')))]
+      return { hay, tokens, url: toUrl(row) }
+    })
+    // 组合匹配:精确(原文/折叠/紧凑三级)→ 分词在 caption/关键词里双向包含。
+    const matchDesc = (desc, index, search) => {
+      if (index) {
+        const raw = String(desc || '').trim()
+        const exact = index.get(raw) || index.get(foldCaption(raw)) || index.get(looseCaption(raw))
+        if (exact) return exact
+      }
+      for (const token of splitDescTokens(desc)) {
+        const needle = looseCaption(token)
+        if (!needle) continue
+        for (const row of search || []) {
+          if (row.hay.some((hay) => hay.includes(needle))) return row.url
+          if ((row.tokens || []).some((t) => { const lt = looseCaption(t); return lt && (needle.includes(lt) || lt.includes(needle)) })) return row.url
+        }
+      }
+      return null
+    }
+
+    function apply(ctx) {
+      const styleEl = document.createElement('style')
+      styleEl.textContent = CSS
+      document.head.appendChild(styleEl)
+      ctx.effect(() => () => { styleEl.remove() }, 'dsh-expression-entry: styles')
+
+      const pickerStyle = document.createElement('style')
+      pickerStyle.textContent = memePickerCSS
+      document.head.appendChild(pickerStyle)
+      ctx.effect(() => () => { pickerStyle.remove() }, 'dsh-expression-entry: meme-picker styles')
+
+      // 表情文本渲染:[表情: 描述] 或旧格式 [表情: 描述](url) → 图片。
+      // 无 url 时先按描述精确匹配图库;失败再按分词在 caption/关键词里做包含匹配
+      // 兜底(模型偶尔不抄候选原文、自己编描述);仍无命中显示描述原文,
+      // 不把 [表情: ...] 标记裸露在气泡里(历史教训:社区反馈「表情显示不出来」)。
+      const MEME_TEXT_RE = /\[表情:\s*([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/g
+      // acceptNode 用不带 g 的副本。带 g 的正则 test() 会推进 lastIndex,下一个文本节点从
+      // 上次的位置往后找——于是「这一条运气不好」的消息被静默跳过、永远不出图,还得等下一轮
+      // 扫描碰巧把游标绕回 0(历史 bug:表现就是「表情有时显示不出来」)。
+      const MEME_TEXT_TEST = /\[表情:\s*([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/
+      let memeIndex = null
+      let memeSearch = [] // 分词兜底用的 haystack:[{hay:[...], url}]
+      let memeIndexLoading = false
+      let memeIndexRetryAfter = 0 // 失败后的冷却截止时刻(ms):冷却期内不再发请求
+      let memeIndexAttempts = 0
+      let memeIndexWarned = false
+      // 索引拉取失败必须保持「可重试」状态。早先失败会往 memeIndex 写一个空 Map 兜底,
+      // 而入口守卫是 `if (memeIndex || memeIndexLoading) return`——空 Map 也是真值,
+      // 于是这个会话剩下的 [表情: x] 全部退化成描述文字,无报错、无提示,只能靠刷新恢复。
+      // 现在失败就保持 null:之后再扫描到未装饰的 [表情: x] 会自然重试(指数退避,
+      // 后端起来了自愈)。不另起定时器——扫描本身就是触发点,少一个要清理的生命周期。
+      const MEME_INDEX_TIMEOUT = 15000
+      const MEME_INDEX_RETRY_BASE = 2000
+      const MEME_INDEX_RETRY_MAX = 30000
+      const absMemeUrl = (u, path) => {
+        if (u && /^https?:\/\//.test(u)) return u
+        const rel = u || (path ? '/dsh-memes/' + path : '')
+        try { return new URL(rel, window.location.origin).href } catch (e) { return rel }
+      }
+      const addCaptionKey = (map, key, url) => {
+        const raw = String(key || '').trim()
+        if (!raw) return
+        map.set(raw, url)
+        map.set(foldCaption(raw), url)
+        const loose = looseCaption(raw)
+        if (loose) map.set(loose, url)
+      }
+      const findMemeUrl = (desc) => matchDesc(desc, memeIndex, memeSearch)
+      const loadMemeIndex = () => {
+        if (memeIndex || memeIndexLoading) return
+        if (Date.now() < memeIndexRetryAfter) return // 冷却中:上一次失败还没到重试时刻
+        memeIndexLoading = true
+        memeIndexAttempts++
+        // fetch 挂起(既不 resolve 也不 reject)时连 catch 都不走,超时自己 abort 兜底
+        const controller = typeof AbortController === 'function' ? new AbortController() : null
+        const timeoutTimer = controller ? setTimeout(() => controller.abort(), MEME_INDEX_TIMEOUT) : 0
+        // 拉全部包(带包前缀 URL),任意组的 [表情: 描述] 都能配图
+        fetch('/dsh-memes-api?packId=all', controller ? { signal: controller.signal } : undefined)
+          .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
+          .then((res) => {
+            const rows = (res && res.memes) || []
+            memeIndex = new Map()
+            for (const row of rows) {
+              const url = absMemeUrl(row.url, row.path)
+              addCaptionKey(memeIndex, row.caption, url)
+              addCaptionKey(memeIndex, row.file_name, url)
+              addCaptionKey(memeIndex, row.keywords, url)
+              addCaptionKey(memeIndex, String(row.caption || '').slice(0, 80), url)
+              addCaptionKey(memeIndex, String(row.caption || '').slice(0, 100), url)
+            }
+            memeSearch = buildMemeSearch(rows, (row) => absMemeUrl(row.url, row.path))
+            memeIndexAttempts = 0
+            memeIndexRetryAfter = 0
+            decorateMemeText()
+          })
+          .catch((error) => {
+            // 失败保持 null(下次扫描还能重试),退避到下次重试时刻;提示只打一次,别刷屏
+            const backoff = Math.min(MEME_INDEX_RETRY_MAX, MEME_INDEX_RETRY_BASE * Math.pow(2, Math.max(0, memeIndexAttempts - 1)))
+            memeIndexRetryAfter = Date.now() + backoff
+            if (!memeIndexWarned) {
+              memeIndexWarned = true
+              console.warn('[dsh-expression] 表情索引加载失败,' + Math.round(backoff / 1000) + 's 后自动重试:', error && error.message ? error.message : error)
+            }
+          })
+          .finally(() => {
+            if (timeoutTimer) clearTimeout(timeoutTimer)
+            memeIndexLoading = false
+          })
+      }
+      // 把 [表情: x] 换成 <img> 之后,气泡里的 textContent 就变了。有些插件(注入记忆条那类)
+      // 靠比对 textContent 判断「消息被改过」,于是重写 DOM → img 被打回文字 → 我们再装饰,
+      // 来回打回闪个不停(issue #22 第 2 条)。所以每处替换都在 img 后面挂一个 display:none
+      // 的 ghost span 装回原文标记:整段 textContent 与替换前逐字一致,谁来比都不觉得变过。
+      const ghostFor = (raw) => {
+        const ghost = document.createElement('span')
+        ghost.setAttribute('data-meme-hidden', '1')
+        ghost.style.cssText = 'display:none'
+        ghost.textContent = raw
+        return ghost
+      }
+      // 判断「这层是不是已经空了、要不要隐藏」必须无视 ghost:ghost 里装着原文标记,
+      // 拿 textContent 判空会永远非空,气泡里会留一块空白。
+      const textWithoutGhosts = (el) => {
+        let out = ''
+        for (const child of el.childNodes) {
+          if (child.nodeType === 3) { out += child.nodeValue || ''; continue }
+          if (child.nodeType !== 1) continue
+          if (child.dataset && child.dataset.memeHidden) continue
+          out += textWithoutGhosts(child)
+        }
+        return out
+      }
+      // 流式渲染会覆盖我们的注入,同一个 [表情: x] 可能被装饰两次 → 同一消息行挂两张相同的图
+      // (issue #22 第 3 条:刷新后稳态只剩一张,说明是竞态而不是双注入)。按「消息行 + 描述」
+      // 幂等去重:没有重复时零副作用,所以每轮扫描完无脑跑一次就行。
+      const dedupeMemeImages = () => {
+        const seenByRow = new Map()
+        for (const img of document.querySelectorAll('img[data-meme-img]')) {
+          const row = img.closest('[data-time-hover-root],[data-chat-flow-key]') || img.parentElement
+          if (!row) continue
+          let seen = seenByRow.get(row)
+          if (!seen) seenByRow.set(row, seen = new Set())
+          const caption = img.getAttribute('data-meme-img') || ''
+          if (seen.has(caption)) { img.remove(); continue } // 留先出现的那张(已被提到行首的)
+          seen.add(caption)
+        }
+      }
+      const decorateMemeText = () => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            const parent = node.parentElement
+            if (!parent) return NodeFilter.FILTER_REJECT
+            // 只渲染「对话」气泡。轨迹 / Think / 工具卡 / 输入框保持纯文本。
+            // 容器标记认两个:老版本是 data-chat-flow,DSH 0.1.2 起消息行是 data-chat-flow-key
+            // (issue #22 附录,使用者在新版上实测)。只认前者的话新版上 TreeWalker 一个节点都
+            // 扫不到、表情永不转图;多认一个纯增益。
+            if (!parent.closest('[data-chat-flow],[data-chat-flow-key]')) return NodeFilter.FILTER_REJECT
+            if (parent.closest('input,textarea,[contenteditable="true"],[data-variant="think"],[data-variant="others"],pre,code')) {
+              return NodeFilter.FILTER_REJECT
+            }
+            // 自己的 ghost 里装着 [表情: x] 原文,不排掉就会被反复装饰
+            if (parent.closest('[data-meme-hidden]')) return NodeFilter.FILTER_REJECT
+            if (parent.dataset && parent.dataset.memeDecorated) return NodeFilter.FILTER_REJECT
+            return MEME_TEXT_TEST.test(node.nodeValue || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+          },
+        })
+        const nodes = []
+        let n
+        while ((n = walker.nextNode())) nodes.push(n)
+        for (const node of nodes) {
+          const parent = node.parentElement
+          if (!parent || parent.dataset.memeDecorated) continue
+          const text = node.nodeValue || ''
+          MEME_TEXT_RE.lastIndex = 0
+          const matches = []
+          let m
+          while ((m = MEME_TEXT_RE.exec(text))) matches.push(m)
+          if (matches.length === 0) continue
+          const needsLookup = matches.some((hit) => !hit[2])
+          if (needsLookup && !memeIndex) {
+            loadMemeIndex()
+            continue
+          }
+          parent.dataset.memeDecorated = '1'
+          const frag = document.createDocumentFragment()
+          const imgs = []
+          let last = 0
+          for (const hit of matches) {
+            if (hit.index > last) frag.appendChild(document.createTextNode(text.slice(last, hit.index)))
+            const src = hit[2] || findMemeUrl(hit[1])
+            if (src) {
+              const img = document.createElement('img')
+              img.src = src
+              img.alt = hit[0].slice(0, 60)
+              img.title = hit[0].slice(0, 60)
+              img.dataset.memeImg = foldCaption(hit[1]) // 去重用的描述标记
+              img.style.cssText = 'max-width:180px;max-height:180px;border-radius:10px;display:block;margin:8px 0'
+              frag.appendChild(img)
+              frag.appendChild(ghostFor(hit[0]))
+              imgs.push(img)
+            } else {
+              // 无命中:降级只显示描述原文,不把 [表情: ...] 标记裸露给用户。方括号单独用 ghost
+              // 藏起来——可见的只有描述本身,而 textContent 仍是替换前那个 [表情: x] 逐字不差,
+              // 否则比对 textContent 的插件照样会把这条打回(issue #22 第 2 条)。
+              const at = hit[0].indexOf(']') - hit[1].length
+              frag.appendChild(ghostFor(hit[0].slice(0, at)))
+              frag.appendChild(document.createTextNode(hit[1]))
+              frag.appendChild(ghostFor(hit[0].slice(at + hit[1].length)))
+            }
+            last = hit.index + hit[0].length
+          }
+          if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)))
+          parent.replaceChild(frag, node)
+          const row = parent.closest('[data-time-hover-root],[data-chat-flow-key]')
+          if (row && imgs.length > 0) {
+            for (const img of imgs) row.insertBefore(img, row.firstChild)
+            let el = parent
+            while (el && el !== row) {
+              if (!textWithoutGhosts(el).trim()) el.style.display = 'none'
+              el = el.parentElement
+            }
+          }
+        }
+        dedupeMemeImages()
+      }
+      // 设置侧边栏「表情包」行的齿轮图标替换成笑脸(dsh navIcon 硬编码,不支持自定义)
+      const decorateNavIcon = () => {
+        const nav = document.querySelector('[role="dialog"] nav')
+        if (!nav) return
+        for (const btn of nav.querySelectorAll('button')) {
+          if (btn.dataset.memeNav) continue
+          if (!btn.textContent || !btn.textContent.includes('表情包')) continue
+          const icon = btn.firstElementChild
+          if (!icon || icon.tagName === 'IMG') { btn.dataset.memeNav = '1'; continue }
+          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+          svg.setAttribute('viewBox', '0 0 24 24')
+          svg.style.cssText = 'width:16px;height:16px;flex:none'
+          const mk = (tag, attrs) => {
+            const el = document.createElementNS('http://www.w3.org/2000/svg', tag)
+            for (const k in attrs) el.setAttribute(k, attrs[k])
+            return el
+          }
+          svg.appendChild(mk('path', { d: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z', fill: 'currentColor' }))
+          icon.replaceWith(svg)
+          btn.dataset.memeNav = '1'
+        }
+      }
+      // 扫描是「全文档 TreeWalker + 每个文本节点跑一遍正则」,不便宜;流式输出期间
+      // mutation 密集,每来一条就整篇扫一遍会在长会话里雪崩(点进去明显卡顿)。
+      // 防抖 300ms,但必须有 maxWait 兜底:纯 trailing 防抖在 mutation 连续不断时会被
+      // 无限重排(每次 mutation 都清掉重排 300ms),页面从此不再扫描、[表情: x] 一路
+      // 裸露,刷新也不自愈——这是比卡顿更难查的一层。
+      const SCAN_DEBOUNCE = 300
+      const SCAN_MAX_WAIT = 1200
+      let scanTimer = 0
+      let scanDeadline = 0
+      let scanning = false
+      const runScan = () => {
+        if (scanning) return // 重入保护:装饰本身改 DOM,会再触发 observer
+        scanning = true
+        try {
+          decorateMemeText()
+          decorateNavIcon()
+        } catch (error) {
+          // 装饰失败不该打断宿主渲染:最多是这一轮表情不转图
+          console.warn('[dsh-expression] 表情装饰失败:', error && error.message ? error.message : error)
+        } finally {
+          scanning = false
+        }
+      }
+      const scheduleScan = () => {
+        const now = Date.now()
+        if (scanDeadline === 0) scanDeadline = now + SCAN_MAX_WAIT
+        clearTimeout(scanTimer)
+        scanTimer = setTimeout(() => {
+          scanTimer = 0
+          scanDeadline = 0
+          runScan()
+        }, Math.max(0, Math.min(SCAN_DEBOUNCE, scanDeadline - now)))
+      }
+      const observer = new MutationObserver((records) => {
+        // 只认真正影响文本的变动;纯属性变化(宿主的 hover/动画很吵)不值得重扫
+        for (const record of records) {
+          if (record.type === 'characterData' || record.addedNodes.length || record.removedNodes.length) {
+            scheduleScan()
+            return
+          }
+        }
+      })
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      runScan()
+      ctx.effect(() => () => {
+        observer.disconnect()
+        clearTimeout(scanTimer)
+        scanTimer = 0
+        scanDeadline = 0
+      }, 'dsh-expression-entry: meme text observer')
+
+      const slots = ctx.get('slots')
+      if (slots === undefined) return
+      slots.inject('settings.section', () => slots.register(
+        { name: 'settings.section', id: 'memes', order: 25, label: '表情包' },
+        () => React.createElement(MemePanel, { ctx }),
+      ))
+
+      // 输入框快捷发图(QQ 式)。
+      const store = makeMemeStore()
+      // Hoisted out of the render callback on purpose: makeMemeButton() returns a fresh
+      // function component on every call, so creating it inside the slot render callback
+      // hands React a new component type on every re-render → the trigger button is
+      // unmounted and remounted each time (measured 20+ rebuilds/second while a turn is
+      // streaming), which in turn wakes every full-body MutationObserver in the host.
+      const MemeButton = makeMemeButton(store)
+      slots.inject('conversation.input.left', () => slots.register(
+        { name: 'conversation.input.left', id: 'meme-picker', order: 5, label: '表情包' },
+        () => React.createElement(MemeButton),
+      ))
+      slots.inject('conversation.input.overlay', () => slots.register(
+        { name: 'conversation.input.overlay', id: 'meme-picker', order: 5, label: '表情包' },
+        (props) => React.createElement(MemeBoard, {
+          store,
+          inputActions: props.inputActions,
+          useInput: props.useInput,
+          getConversation: () => ctx.get('conversation'),
+        }),
+      ))
+    }
+
+    exports.apply = apply
+    exports.inject = inject
+    // 纯函数导出仅用于回归测试(node --test),宿主/打包不消费
+    exports.__test = { foldCaption, looseCaption, splitDescTokens, buildMemeSearch, matchDesc, compareVersions }
+    return module.exports
+  },
+})

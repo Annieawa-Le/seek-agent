@@ -62,6 +62,20 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <RemoteBootstrap />
   </React.StrictMode>,
 );
+/**
+ * 远程模式下，DOM 注入型扩展的宿主地址由宿主端（配对后随能力清单下发）提供。
+ * 这里只做 API 形状补全——内容扩展点自身「无宿主即不生效」，不影响远程模式原有行为。
+ */
+declare global {
+  interface Window {
+    /** 由远程 transport 在配对成功后注入的本地扩展宿主根地址（未注入 = 无扩展宿主） */
+    __SEEK_EXT_HOST?: string;
+  }
+}
+
+
+
+
 
 
 

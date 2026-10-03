@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  CSP 说明（沙箱内的第二道墙）：
+  - default-src 'none' 起步，逐项开白：只允许内联样式、本插件源的脚本/字体/样式、远程图片。
+  - script-src 必须含 'unsafe-eval'：卡内/页内 <script> 是靠 new Function 执行的，
+    没有它脚本会被直接拒绝。这是可接受的——本页已被 sandbox="allow-scripts" 放进
+    opaque origin（父页 DOM / localStorage / electronAPI 全部不可达），
+    'unsafe-eval' 只能在这个孤岛内生效，够不到宿主。
+  - connect-src 'none'：脚本不能发网络请求（数据外泄面归零）。
+  - frame-src 'none'：不能再套子帧绕开隔离。
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data: blob:; media-src https: data: blob:; style-src 'unsafe-inline' {{HOST}}; font-src {{HOST}} data:; script-src 'unsafe-inline' 'unsafe-eval' {{HOST}}; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
+<title>VCP 沙箱</title>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body { font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color: #1a1a1a; }
+  #sandbox-host { box-sizing: border-box; width: 100%; }
+  img, svg, video, canvas { max-width: 100%; }
+</style>
+</head>
+<body>
+<script src="{{HOST}}/client/sandbox-frame.js"></script>
+</body>
+</html>

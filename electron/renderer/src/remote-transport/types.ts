@@ -14,6 +14,215 @@
 /** 退订函数（与 preload 的 onXxx 返回一致） */
 export type Unsubscribe = () => void;
 
+/* ---------- 事件负载（与 renderer 契约 types/index.ts 同形） ---------- */
+
+/** 远程配对码（remote:pair-code 事件载荷） */
+export interface RemotePairCode {
+  code: string;
+  expiresIn: number;
+}
+
+/** 远程连接状态（remote:status 事件载荷） */
+export interface RemoteStatus {
+  connected: boolean;
+}
+
+/** 信任设备信息（getRemoteDevices 返回项；与 renderer 契约同形，不含 token） */
+export interface RemoteDeviceInfo {
+  remoteId: string;
+  label: string;
+  /** 在线状态（来自最近 trust-list 的 items 合并；未收到 trust-list 时默认离线） */
+  online: boolean;
+  /** 信任时间（ISO 字符串） */
+  trustedAt?: string | null;
+}
+
+/** 信任设备列表载荷（remote:devices） */
+export interface RemoteDevicesPayload {
+  devices: RemoteDeviceInfo[];
+}
+
+/** 跨会话协作通信记录条目（getCollabLog 返回项） */
+export interface CollabLogEntry {
+  from: string;
+  to: string;
+  content: string;
+  direction: 'out' | 'reply';
+  ts: number;
+  fromName?: string;
+  toName?: string;
+  time?: string;
+}
+/** 主进程读取的静态数据（Skills/Instructions/Agents/MCP 配置；与 renderer 契约同形） */
+export interface SidebarStaticData {
+  skills: Array<{ name: string; description: string; enabled: boolean }>;
+  instructions: Array<{ name: string; kind: 'core' | 'addon' | 'platform'; file: string }>;
+  addonAgents: Array<{ name: string; kind: string; file: string }>;
+  mcpConfig: Array<{ name: string; command: string }>;
+}
+
+export interface ActiveSession {
+  sessionId: string;
+  ready: boolean;
+  [key: string]: unknown;
+}
+
+export interface WorkdirResult {
+  success: boolean;
+  error?: string;
+  path?: string;
+  roots?: string[];
+  active?: string;
+}
+
+export interface SwitchSessionResult {
+  success: boolean;
+  error?: string;
+  sessionId?: string;
+  created?: boolean;
+}
+
+export interface NewSessionResult {
+  success: boolean;
+  sessionId?: string;
+  error?: string;
+}
+
+export interface CloseSessionResult {
+  success: boolean;
+  error?: string;
+}
+
+export interface CurrentSessionResult {
+  sessionId: string;
+  [key: string]: unknown;
+}
+
+
+export interface InstructionResult {
+  content?: string;
+  error?: string;
+}
+
+/** B 类降级：移动端无桌面目录选择框 */
+export interface SelectFolderResult {
+  canceled: boolean;
+  path?: string;
+}
+
+/** B 类降级：移动端无桌面文件选择框 */
+export interface OpenFileDialogResult {
+  canceled: boolean;
+  files?: string[];
+}
+
+// ---------- electronAPI 同形接口（transport 返回对象） ----------
+
+export interface ElectronAPI {
+  // ---- 事件订阅（8 个，返回退订函数） ----
+  onAgentMessage(cb: (payload: AgentMessagePayload) => void): Unsubscribe;
+  onAgentStatus(cb: (payload: AgentStatusPayload) => void): Unsubscribe;
+  onAgentStderr(cb: (payload: unknown) => void): Unsubscribe;
+  onWorkdirChanged(cb: (payload: WorkdirChangedPayload) => void): Unsubscribe;
+  onSessionError(cb: (payload: unknown) => void): Unsubscribe;
+  onCollabEvent(cb: (payload: unknown) => void): Unsubscribe;
+  onRemotePairCode?(cb: (payload: RemotePairCode) => void): Unsubscribe;
+  onRemoteStatus?(cb: (payload: RemoteStatus) => void): Unsubscribe;
+  onRemoteDevices?(cb: (payload: RemoteDevicesPayload) => void): Unsubscribe;
+  onMaximizedChange(cb: (payload: unknown) => void): Unsubscribe;
+
+  // ---- 发送（A 直通，经 RPC） ----
+  sendInput(content: string): Promise<number>;
+  sendCommand(cmd: string): Promise<number>;
+  abort(): Promise<void>;
+  restart(): Promise<void>;
+
+  // ---- 查询（A 直通） ----
+  getAgentStatus(): Promise<AgentStatusPayload>;
+
+  // ---- 工作区（A 直通 + B 降级 1 个） ----
+  getWorkdir(): Promise<{ roots: string[]; active: string }>;
+  setWorkdir(dirPath: string): Promise<WorkdirResult>;
+  setWorkspaceRoots(payload: { roots: string[]; active?: string }): Promise<WorkdirResult>;
+  addWorkspaceRoot(dirPath: string): Promise<WorkdirResult>;
+  removeWorkspaceRoot(dirPath: string): Promise<WorkdirResult>;
+  selectFolder(): Promise<SelectFolderResult>;
+  getRecentDirs(): Promise<string[]>;
+
+  // ---- 文件系统（A 直通 3 个 + B 降级 1 个） ----
+  readFileTree(dirPath?: string): Promise<FileTreeNode[]>;
+  readGitStatus(): Promise<GitChange[]>;
+  readFile(filePath: string): Promise<ReadFileResult>;
+  writeFile(payload: { path: string; content: string }): Promise<WriteFileResult>;
+  listPatches(payload?: { since?: number; limit?: number }): Promise<ListPatchesResult>;
+  undoPatch(payload?: { recordId?: string }): Promise<UndoPatchResult>;
+  openFileDialog(): Promise<OpenFileDialogResult>;
+  getSkillsList(): Promise<Array<{ name: string; description: string }>>;
+  // ---- 会话 / 协作（A 直通 9 个） ----
+  listSessions(): Promise<SessionInfo[]>;
+  getCollabLog(): Promise<CollabLogEntry[]>;
+  /** 读取挂件插件清单（设置面板「插件」板块；远程模式无此数据源时返回空列表） */
+  getPlugins?(): Promise<{ ok: boolean; plugins: Array<{ name: string; label: string; description: string; enabled: boolean; running: boolean; port: number }> }>;
+  setPluginEnabled?(name: string, enabled: boolean): Promise<{ ok: boolean; plugins?: Array<{ name: string; label: string; description: string; enabled: boolean; running: boolean; port: number }>; error?: string }>;
+  /** 改写某插件的次级选项（远程模式下宿主端未下发则不可用） */
+  setPluginOption?(name: string, key: string, value: boolean): Promise<{ ok: boolean; config?: Record<string, unknown>; restartRequired?: boolean; error?: string }>;
+  /** 桌宠配置（仅桌面端存在） */
+  getPetConfig?(): Promise<{ ok: boolean; config: Record<string, unknown>; schema: Record<string, unknown>; skillDir: string }>;
+  setPetConfig?(patch: Record<string, unknown>): Promise<{ ok: boolean; config?: Record<string, unknown>; error?: string }>;
+  saveSubagentSession(data: Record<string, unknown>): Promise<{ ok: boolean; path?: string; error?: string }>;
+  switchSession(sessionId: string, name?: string): Promise<SwitchSessionResult>;
+  newSession(): Promise<NewSessionResult>;
+  closeSession(sessionId: string): Promise<CloseSessionResult>;
+  getCurrentSession(): Promise<{ sessionId: string }>;
+  listActiveSessions(): Promise<ActiveSession[]>;
+  getSidebarStatic(): Promise<SidebarStaticData>;
+  readInstruction(kind: string, file: string): Promise<InstructionResult>;
+  getEnvConfig(): Promise<{ ok: boolean; path: string; items: Array<{ key: string; value: string; line: number }>; error?: string }>;
+  saveEnvConfig(updates: Array<{ key: string; value: string }>): Promise<{ ok: boolean; path: string; written: string[]; error?: string }>;
+  // ---- 窗口控制（C 忽略，空实现） ----
+  minimizeWindow(): Promise<void>;
+  maximizeWindow(): Promise<void>;
+  closeWindow(): Promise<void>;
+  isMaximized(): Promise<boolean>;
+
+  // ---- 信任：renderer 契约要求的信任设备查询 / 撤销（配对后对端即被信任） ----
+  getRemoteDevices(): Promise<RemoteDeviceInfo[]>;
+  revokeRemoteDevice(remoteId: string): Promise<{ ok?: boolean; sent?: boolean; error?: string }>;
+
+  // ---- transport 生命周期扩展（renderer 不使用，不破坏同形） ----
+  connect(): void;
+  disconnect(): void;
+  setCode(code: string): void;
+  getStatus(): ConnectionStatus;
+  onStatusChange(cb: StatusListener): Unsubscribe;
+  sendTrustRequest(relayDeviceId: string, remoteId: string, label?: string): void;
+  sendTrustRevoke(relayDeviceId: string, remoteId: string): void;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ---------- 业务 payload / 契约类型（与 renderer types/index.ts 同名同形） ----------
+
 /** 任意 JSON 值（中继对 payload 不解析，transport 原样透传） */
 export type JsonValue =
   | string
@@ -233,162 +442,31 @@ export interface SessionInfo {
   [key: string]: unknown;
 }
 
-export interface CollabLogEntry {
-  ts?: number;
-  [key: string]: unknown;
-}
 
-export interface SidebarStaticData {
-  skills?: unknown[];
-  agents?: unknown[];
-  instructions?: unknown[];
-  mcp?: unknown;
-  [key: string]: unknown;
-}
-
-export interface ActiveSession {
-  sessionId: string;
-  ready: boolean;
-}
-
-export interface WorkdirResult {
-  success: boolean;
-  error?: string;
-  path?: string;
-  roots?: string[];
-  active?: string;
-}
-
-export interface SwitchSessionResult {
-  success: boolean;
-  error?: string;
-  sessionId?: string;
-  created?: boolean;
-}
-
-export interface NewSessionResult {
-  success: boolean;
-  sessionId?: string;
-  error?: string;
-}
-
-export interface CloseSessionResult {
-  success: boolean;
-  error?: string;
-}
-
-export interface CurrentSessionResult {
-  sessionId?: string;
-}
-
-
+/** 读取 Instruction / Agent 描述文件的结果 */
 export interface InstructionResult {
   content?: string;
   error?: string;
 }
 
-/** B 类降级：移动端无桌面目录选择框 */
-export interface SelectFolderResult {
-  canceled: boolean;
-  path?: string;
+/** 读取文本文件树的结果（与 renderer 契约一致的路径解析） */
+export interface ReadFileTreeResult {
+  ok: boolean;
+  nodes?: FileTreeNode[];
+  error?: string;
 }
 
-/** B 类降级：移动端无桌面文件选择框 */
-export interface OpenFileDialogResult {
-  canceled: boolean;
-  files?: string[];
+/** 跨会话协作通信记录条目（与 renderer 契约同形） */
+export interface CollabLogEntry {
+  from: string;
+  to: string;
+  content: string;
+  direction: 'out' | 'reply';
+  ts: number;
+  fromName?: string;
+  toName?: string;
+  time?: string;
 }
-
-// ---------- electronAPI 同形接口（transport 返回对象） ----------
-
-export interface ElectronAPI {
-  // ---- 事件订阅（8 个，返回退订函数） ----
-  onAgentMessage(cb: (payload: AgentMessagePayload) => void): Unsubscribe;
-  onAgentStatus(cb: (payload: AgentStatusPayload) => void): Unsubscribe;
-  onAgentStderr(cb: (payload: unknown) => void): Unsubscribe;
-  onWorkdirChanged(cb: (payload: WorkdirChangedPayload) => void): Unsubscribe;
-  onSessionError(cb: (payload: unknown) => void): Unsubscribe;
-  onSessionError(cb: (payload: unknown) => void): Unsubscribe;
-  onCollabEvent(cb: (payload: unknown) => void): Unsubscribe;
-  onRemotePairCode?(cb: (payload: { code: string; expiresIn: number }) => void): Unsubscribe;
-  onRemoteStatus?(cb: (payload: { connected: boolean }) => void): Unsubscribe;
-  onRemoteDevices?(cb: (payload: { devices: unknown[] }) => void): Unsubscribe;
-  onMaximizedChange(cb: (payload: unknown) => void): Unsubscribe;
-
-  // ---- 发送（A 直通，经 RPC） ----
-  sendInput(content: string): Promise<number>;
-  sendCommand(cmd: string): Promise<number>;
-  abort(): Promise<void>;
-  restart(): Promise<void>;
-
-  // ---- 查询（A 直通） ----
-  getAgentStatus(): Promise<AgentStatusPayload>;
-
-  // ---- 工作区（A 直通 + B 降级 1 个） ----
-  getWorkdir(): Promise<{ roots: string[]; active: string }>;
-  setWorkdir(dirPath: string): Promise<WorkdirResult>;
-  setWorkspaceRoots(payload: { roots: string[]; active?: string }): Promise<WorkdirResult>;
-  addWorkspaceRoot(dirPath: string): Promise<WorkdirResult>;
-  removeWorkspaceRoot(dirPath: string): Promise<WorkdirResult>;
-  selectFolder(): Promise<SelectFolderResult>;
-  getRecentDirs(): Promise<string[]>;
-
-  // ---- 文件系统（A 直通 3 个 + B 降级 1 个） ----
-  readFileTree(dirPath?: string): Promise<FileTreeNode[]>;
-  readGitStatus(): Promise<GitChange[]>;
-  readFile(filePath: string): Promise<ReadFileResult>;
-  writeFile(payload: { path: string; content: string }): Promise<WriteFileResult>;
-  listPatches(payload?: { since?: number; limit?: number }): Promise<ListPatchesResult>;
-  undoPatch(payload?: { recordId?: string }): Promise<UndoPatchResult>;
-  openFileDialog(): Promise<OpenFileDialogResult>;
-  getSkillsList(): Promise<Skill[]>;
-
-  // ---- 会话 / 协作（A 直通 9 个） ----
-  listSessions(): Promise<SessionInfo[]>;
-  getCollabLog(): Promise<CollabLogEntry[]>;
-  saveSubagentSession(data: Record<string, unknown>): Promise<{ ok: boolean; path?: string; error?: string }>;
-  switchSession(sessionId: string, name?: string): Promise<SwitchSessionResult>;
-  newSession(): Promise<NewSessionResult>;
-  closeSession(sessionId: string): Promise<CloseSessionResult>;
-  getCurrentSession(): Promise<CurrentSessionResult>;
-  listActiveSessions(): Promise<ActiveSession[]>;
-  getSidebarStatic(): Promise<SidebarStaticData>;
-  readInstruction(kind: string, file: string): Promise<InstructionResult>;
-  getEnvConfig(): Promise<{ ok: boolean; path: string; items: Array<{ key: string; value: string; line: number }>; error?: string }>;
-  saveEnvConfig(updates: Array<{ key: string; value: string }>): Promise<{ ok: boolean; path: string; written: string[]; error?: string }>;
-  // ---- 窗口控制（C 忽略，空实现） ----
-  minimizeWindow(): Promise<void>;
-  maximizeWindow(): Promise<void>;
-  closeWindow(): Promise<void>;
-  isMaximized(): Promise<boolean>;
-
-  // ---- transport 生命周期扩展（renderer 不使用，不破坏同形） ----
-  connect(): void;
-  disconnect(): void;
-  setCode(code: string): void;
-  getStatus(): ConnectionStatus;
-  onStatusChange(cb: StatusListener): Unsubscribe;
-  // ---- 信任（trust）扩展：配对后 remote 主动发起 / 撤销信任 ----
-  getRemoteDevices(): Promise<unknown[] | { error?: string; devices?: unknown[] }>;
-  revokeRemoteDevice(remoteId: string): Promise<{ ok?: boolean; sent?: boolean; error?: string }>;
-  sendTrustRequest(relayDeviceId: string, remoteId: string, label?: string): void;
-  sendTrustRevoke(relayDeviceId: string, remoteId: string): void;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

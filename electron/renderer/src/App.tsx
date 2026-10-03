@@ -82,14 +82,21 @@ export function App() {
     setInjected({ id: injectedSeqRef.current, prompt: def.prompt, ctx });
   }, []);
 
+  /** 右侧栏 Tab 的镜像：下面那个 effect 要读它的最新值，但不该把它当依赖（否则每次切 Tab 都重跑一遍） */
+  const panelTabRef = useRef(panelTab);
+  panelTabRef.current = panelTab;
+
   /**
    * 进入文件编辑器时的两件事：
    *   1. 右侧栏切到「会话」——编辑器占住了主区，会话得挪到右边继续可见可发
    *   2. 离开编辑器时退出审查模式，避免下次打开文件时突兀地直接进入审查
+   *
+   * 例外：用户正停在「改动」Tab 就不抢它——从改动列表点文件进来的人多半还要接着点下一条，
+   * 把 Tab 拨走等于每次都得再点一次回程。
    */
   useEffect(() => {
     if (activeFilePath) {
-      setPanelTab('session');
+      if (panelTabRef.current !== 'changes') setPanelTab('session');
       // 右侧栏默认可能是关的（窄窗口），编辑器打开时补开，否则会话就没地方显示了
       setRightOpen(true);
     } else {
@@ -366,6 +373,16 @@ export function App() {
     setActiveFilePath(absPath);
   }, [activeFilePath, tabs, openFile]);
 
+  /**
+   * 右侧栏「改动」列表点某条变更：打开它并直接进入审查模式。
+   * 走 openFileInPlace 而非 openFile —— 沿用审查浮球那套槽位复用，
+   * 连着点几条不会把标签栏塞满。
+   */
+  const openFileForReview = useCallback((absPath: string) => {
+    openFileInPlace(absPath);
+    setReviewMode(true);
+  }, [openFileInPlace]);
+
   /** 文件标签内容变化（脏标记/显示名）：同步到标签样式与关闭确认表 */
   const handleFileMetaChange = useCallback((path: string, info: { dirty: boolean; name: string }) => {
     if (info.dirty) dirtyFilesRef.current.add(path);
@@ -606,6 +623,8 @@ export function App() {
             runtimeData={runtimeData}
             open={rightOpen}
             onOpenFile={openFile}
+            /* 「改动」Tab 的条目：打开文件并直接进审查（与浮球翻页同一套槽位逻辑） */
+            onOpenFileInReview={openFileForReview}
             onSwitchToSession={() => setActiveFilePath(null)}
             /* 文件编辑器占了主区时，会话才挪到右侧栏；这个 Tab 由 App 拨动，故受控 */
             tab={panelTab}
@@ -624,6 +643,7 @@ export function App() {
     </div>
   );
 }
+
 
 
 

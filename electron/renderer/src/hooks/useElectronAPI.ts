@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentStatus, CollabLogEntry, FileTreeNode, GitChange, ListPatchesResult, ReadFileResult, RemoteDeviceInfo, RemotePairCode, RemoteStatus, SessionInfo, UndoPatchResult, WorkdirState, WriteFileResult } from '@/types/index.ts';
+import type { AgentMessage, AgentStatus, GitChange, ListPatchesResult, ReadFileResult, RemoteDeviceInfo, RemotePairCode, RemoteStatus, SessionInfo, UndoPatchResult, WorkdirState, WriteFileResult } from '@/types/index.ts';
 import { useEffect, useRef, useCallback, useMemo } from 'react';
 
 export function isElectron(): boolean {
@@ -88,6 +88,46 @@ export function useElectronAPI() {
   const getSkillsList = useCallback(async (): Promise<Array<{ name: string; description: string }>> => {
     if (!api) return [];
     return api.getSkillsList();
+  }, [api]);
+
+  /** 读取挂件插件清单（设置面板「插件」板块） */
+  const getPlugins = useCallback(async (): Promise<Array<{ name: string; label: string; description: string; enabled: boolean; running: boolean; port: number }>> => {
+    if (!api) return [];
+    try {
+      const res = await api.getPlugins();
+      return res?.ok ? (res.plugins || []) : [];
+    } catch {
+      return [];
+    }
+  }, [api]);
+
+  /** 启用/禁用某挂件插件（写回 enable.json，重启生效） */
+  const setPluginEnabled = useCallback(async (name: string, enabled: boolean) => {
+    if (!api) return { ok: false, error: 'API 不可用' };
+    return api.setPluginEnabled(name, enabled);
+  }, [api]);
+
+  /** 改写某插件的次级选项（如 dsh-raw-html 的可信模式，重启生效） */
+  const setPluginOption = useCallback(async (name: string, key: string, value: boolean) => {
+    if (!api?.setPluginOption) return { ok: false, error: '当前通道不支持该操作' };
+    return api.setPluginOption(name, key, value);
+  }, [api]);
+
+  /** 读桌宠配置（含可调项 schema） */
+  const getPetConfig = useCallback(async () => {
+    if (!api?.getPetConfig) return null;
+    try {
+      const res = await api.getPetConfig();
+      return res?.ok ? res : null;
+    } catch {
+      return null;
+    }
+  }, [api]);
+
+  /** 写桌宠配置（增量 patch），保存后立即下发生效 */
+  const setPetConfig = useCallback(async (patch: Record<string, unknown>) => {
+    if (!api?.setPetConfig) return { ok: false, error: 'API 不可用' };
+    return api.setPetConfig(patch);
   }, [api]);
 
   const openFileDialog = useCallback(async () => {
@@ -324,6 +364,11 @@ export function useElectronAPI() {
     readInstruction,
     getEnvConfig,
     saveEnvConfig,
+    getPlugins,
+    setPluginEnabled,
+    setPluginOption,
+    getPetConfig,
+    setPetConfig,
     minimizeWindow,
     maximizeWindow,
     closeWindow,
@@ -331,6 +376,9 @@ export function useElectronAPI() {
     onMaximizedChange,
   }), [api]);
 }
+
+
+
 
 
 

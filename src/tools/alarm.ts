@@ -9,6 +9,8 @@
  */
 import { tool } from 'ai';
 import { z } from 'zod';
+import { ToolOutput } from './tool-output';
+import type { AlarmBulk } from './raw-bulk-types';
 
 /** 闹钟到点注入回调（CLIAAgent 注册：把消息提交给 run()） */
 let alarmListener: ((msg: string) => void) | null = null;
@@ -77,7 +79,11 @@ export const alarmSetTool = tool({
     const lbl = label?.trim() || '等待';
     alarmManager.set(lbl, duration * 1000);
     const at = new Date(Date.now() + duration * 1000).toLocaleTimeString();
-    return `⏰ 闹钟设定成功：${duration} 秒后（${at}）注入 "[闹钟]${lbl}计时器已归零！"。期间可继续其他工作，到点自动打断提醒；若提前完成可用 alarm_cancel(label="${lbl}") 取消。`;
+    const bulk: AlarmBulk = { type: 'alarm', action: 'set', label: lbl, durationSec: duration, fireAt: at };
+    return new ToolOutput(
+      bulk,
+      `⏰ 闹钟设定成功：${duration} 秒后（${at}）注入 "[闹钟]${lbl}计时器已归零！"。期间可继续其他工作，到点自动打断提醒；若提前完成可用 alarm_cancel(label="${lbl}") 取消。`
+    );
   },
 });
 
@@ -88,9 +94,13 @@ export const alarmCancelTool = tool({
   }),
   execute: async ({ label }) => {
     const ok = alarmManager.cancel(label);
-    return ok
-      ? `✅ 已取消闹钟 "${label}"。`
-      : `⚠ 未找到闹钟 "${label}"（可能已到点或从未设定）。`;
+    const bulk: AlarmBulk = { type: 'alarm', action: 'cancel', label, ok };
+    return new ToolOutput(
+      bulk,
+      ok
+        ? `✅ 已取消闹钟 "${label}"。`
+        : `⚠ 未找到闹钟 "${label}"（可能已到点或从未设定）。`
+    );
   },
 });
 
@@ -99,11 +109,12 @@ export const alarmListTool = tool({
   inputSchema: z.object({}),
   execute: async () => {
     const all = alarmManager.list();
-    if (all.length === 0) return '📭 当前没有任何未到点的闹钟。';
+    const bulk: AlarmBulk = { type: 'alarm', action: 'list', alarms: all };
+    if (all.length === 0) return new ToolOutput(bulk, '📭 当前没有任何未到点的闹钟。');
     const lines = all.map((a, i) => {
       const sec = (a.remainingMs / 1000).toFixed(1);
       return `${i + 1}. ${a.label}（还剩 ${sec} 秒）`;
     });
-    return `⏰ 未到点的闹钟（${all.length} 个）：\n${lines.join('\n')}`;
+    return new ToolOutput(bulk, `⏰ 未到点的闹钟（${all.length} 个）：\n${lines.join('\n')}`);
   },
 });

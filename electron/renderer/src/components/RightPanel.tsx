@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
 import type { ChatThreadData, CollabLogEntry, FileTreeNode, GitChange, RemoteDeviceInfo, SidebarRuntimeData, SubagentStreamMsg } from '@/types/index.ts';
 import { SubagentNotePanel } from './SubagentNotePanel.tsx';
@@ -6,6 +6,19 @@ import { MemoryPanel } from './MemoryPanel.tsx';
 
 const tagClassMap: Record<string, string> = { js: 'tag-yellow', ts: 'tag-blue', json: 'tag-yellow', npm: 'tag-red', mjs: 'tag-yellow', cjs: 'tag-yellow' };
 const tagLabelMap: Record<string, string> = { json: '{}', npmrc: 'npm' };
+
+/* ═══════════════════════════════════════════════════════════
+   右侧栏宽度拖拽
+   - 宽度以 CSS 变量 --right-panel-width 注入面板自身（而非直接写 width）：
+     收起态的 width: 0 由 info-panel-closed 的 class 规则接管，两者不打架
+   - 上限 = 窗口宽度的一半
+   ═══════════════════════════════════════════════════════════ */
+const PANEL_WIDTH_KEY = 'seek-agent-right-panel-width';
+const PANEL_WIDTH_DEFAULT = 320;
+const PANEL_WIDTH_MIN = 260;
+/** 宽度上限：窗口的一半（窄窗口下不至于顶破下限） */
+const panelWidthMax = () => Math.max(PANEL_WIDTH_MIN, Math.floor(window.innerWidth * 0.5));
+const clampPanelWidth = (w: number) => Math.min(panelWidthMax(), Math.max(PANEL_WIDTH_MIN, Math.round(w)));
 
 let dragImageEl: HTMLElement | null = null;
 
@@ -55,11 +68,13 @@ function handleNodeDragStart(e: React.DragEvent, node: FileTreeNode) {
 }
 
 export type PanelTab = 'session' | 'files' | 'changes' | 'collab' | 'devices' | 'memory';
-export function RightPanel({ runtimeData, open, onOpenFile, onSwitchToSession, sessionPanel, tab, onTabChange }: {
+export function RightPanel({ runtimeData, open, onOpenFile, onOpenFileInReview, onSwitchToSession, sessionPanel, tab, onTabChange }: {
   runtimeData: SidebarRuntimeData | null;
   open?: boolean;
   /** 双击文件：在内嵌编辑器中打开（新标签页） */
   onOpenFile?: (absPath: string) => void;
+  /** 「改动」Tab 点击某条变更：打开该文件并直接进入审查模式 */
+  onOpenFileInReview?: (absPath: string) => void;
   /** 面板内切换视图时收回编辑器（点文件才回到编辑器） */
   onSwitchToSession?: () => void;
   /**
@@ -80,6 +95,54 @@ export function RightPanel({ runtimeData, open, onOpenFile, onSwitchToSession, s
   const [gitChanges, setGitChanges] = useState<GitChange[]>([]);
   const [loading, setLoading] = useState(false);
 
+  /* ── 右栏宽度：可拖动调整（上限为窗口一半），宽度跨会话持久化 ── */
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY));
+    return clampPanelWidth(Number.isFinite(saved) && saved > 0 ? saved : PANEL_WIDTH_DEFAULT);
+  });
+  /** 拖拽中：面板自身禁用宽度过渡、全局统一光标 */
+  const [resizing, setResizing] = useState(false);
+  /** 拖拽基准（按下时的鼠标 x 与面板实测宽度） */
+  const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
+
+  useEffect(() => { localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth)); }, [panelWidth]);
+
+  // 窗口尺寸变化后重新夹取：窗口变窄时，旧宽度可能已越过上限
+  useEffect(() => {
+    const onWindowResize = () => setPanelWidth(w => clampPanelWidth(w));
+    window.addEventListener('resize', onWindowResize);
+    return () => window.removeEventListener('resize', onWindowResize);
+  }, []);
+
+  // 拖拽：mousemove/mouseup 挂在 document 上，鼠标移出把手也能跟手
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: MouseEvent) => {
+      const start = resizeStartRef.current;
+      if (!start) return;
+      // 向左拖 → 变宽：宽度 = 基准宽度 - 水平位移
+      setPanelWidth(clampPanelWidth(start.width - (e.clientX - start.x)));
+    };
+    const onUp = () => setResizing(false);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.classList.add('panel-resizing');
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('panel-resizing');
+    };
+  }, [resizing]);
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    // 以实测宽度为基准（收起动画中途、或被夹取过，状态值未必等于实际值）
+    const measured = document.getElementById('info-panel')?.getBoundingClientRect().width ?? panelWidth;
+    resizeStartRef.current = { x: e.clientX, width: measured };
+    setResizing(true);
+  };
+
   const loadGitChanges = useCallback(async () => {
     setLoading(true);
     const data = await readGitStatus();
@@ -91,30 +154,46 @@ export function RightPanel({ runtimeData, open, onOpenFile, onSwitchToSession, s
     if (currentTab === 'changes') loadGitChanges();
   }, [currentTab, loadGitChanges]);
 
+  const openClass = open === false ? 'info-panel-closed' : open ? 'info-panel-open' : '';
+  const panelClass = [openClass, resizing ? 'panel-resizing' : ''].filter(Boolean).join(' ') || undefined;
+
   return (
-    <aside id="info-panel" className={open === false ? 'info-panel-closed' : open ? 'info-panel-open' : undefined}>
-      <div className="panel-tabs">
-        {/* 「会话」Tab：把主消息界面搬到这里（切到文件编辑器后仍能看会话进展/继续发消息） */}
-        <span className={`panel-tab${currentTab === 'session' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('session'); onSwitchToSession?.(); }}>会话</span>
-        <span className={`panel-tab${currentTab === 'files' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('files'); onSwitchToSession?.(); }}>文件</span>
-        <span className={`panel-tab${currentTab === 'changes' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('changes'); onSwitchToSession?.(); }}>改动</span>
-        <span className={`panel-tab${currentTab === 'collab' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('collab'); onSwitchToSession?.(); }}>协作</span>
-        <span className={`panel-tab${currentTab === 'devices' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('devices'); onSwitchToSession?.(); }}>设备</span>
-        <span className={`panel-tab${currentTab === 'memory' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('memory'); onSwitchToSession?.(); }}>记忆</span>
-        <div className="panel-tab-actions">
-          <button className="panel-tab-btn" title="搜索"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
-          <button className="panel-tab-btn" title="面板布局"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button>
+    <>
+      {/* 宽度把手：0 宽占位（不参与 #body-row 布局），热区由 ::before 跨在边界上 */}
+      {open !== false && (
+        <div
+          className={`panel-resizer${resizing ? ' dragging' : ''}`}
+          onMouseDown={handleResizeStart}
+          onDoubleClick={() => setPanelWidth(clampPanelWidth(PANEL_WIDTH_DEFAULT))}
+          title="拖动调整宽度（双击复位）"
+          role="separator"
+          aria-orientation="vertical"
+        />
+      )}
+      <aside id="info-panel" className={panelClass} style={{ '--right-panel-width': `${panelWidth}px` } as React.CSSProperties}>
+        <div className="panel-tabs">
+          {/* 「会话」Tab：把主消息界面搬到这里（切到文件编辑器后仍能看会话进展/继续发消息） */}
+          <span className={`panel-tab${currentTab === 'session' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('session'); onSwitchToSession?.(); }}>会话</span>
+          <span className={`panel-tab${currentTab === 'files' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('files'); onSwitchToSession?.(); }}>文件</span>
+          <span className={`panel-tab${currentTab === 'changes' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('changes'); onSwitchToSession?.(); }}>改动</span>
+          <span className={`panel-tab${currentTab === 'collab' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('collab'); onSwitchToSession?.(); }}>协作</span>
+          <span className={`panel-tab${currentTab === 'devices' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('devices'); onSwitchToSession?.(); }}>设备</span>
+          <span className={`panel-tab${currentTab === 'memory' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('memory'); onSwitchToSession?.(); }}>记忆</span>
+          <div className="panel-tab-actions">
+            <button className="panel-tab-btn" title="搜索"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+            <button className="panel-tab-btn" title="面板布局"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button>
+          </div>
         </div>
-      </div>
-      <div id="panel-content" className={currentTab === 'session' ? 'panel-content-session' : undefined}>
-        {currentTab === 'session' && sessionPanel}
-        {currentTab === 'files' && <FileTabContent onOpenFile={onOpenFile} />}
-        {currentTab === 'changes' && (loading ? <div className="file-tree-loading">加载中…</div> : <GitChangesContent changes={gitChanges} />)}
-        {currentTab === 'collab' && <CollabContent runtimeData={runtimeData} />}
-        {currentTab === 'devices' && <DevicesContent />}
-        {currentTab === 'memory' && <MemoryPanel runtimeData={runtimeData} />}
-      </div>
-    </aside>
+        <div id="panel-content" className={currentTab === 'session' ? 'panel-content-session' : undefined}>
+          {currentTab === 'session' && sessionPanel}
+          {currentTab === 'files' && <FileTabContent onOpenFile={onOpenFile} />}
+          {currentTab === 'changes' && (loading ? <div className="file-tree-loading">加载中…</div> : <GitChangesContent changes={gitChanges} onOpen={onOpenFileInReview} />)}
+          {currentTab === 'collab' && <CollabContent runtimeData={runtimeData} />}
+          {currentTab === 'devices' && <DevicesContent />}
+          {currentTab === 'memory' && <MemoryPanel runtimeData={runtimeData} />}
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -308,15 +387,40 @@ function FileTabContent({ onOpenFile }: { onOpenFile?: (absPath: string) => void
 
 const statusClassMap: Record<string, string> = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed' };
 
-function GitChangesContent({ changes }: { changes: GitChange[] }) {
+function GitChangesContent({ changes, onOpen }: { changes: GitChange[]; onOpen?: (absPath: string) => void }) {
+  const { getWorkdir } = useElectronAPI();
+  /**
+   * 活跃工作区根：git 给的是相对路径（相对仓库 cwd），拼成绝对路径才交得出编辑器。
+   * 拿不到根时条目退化为纯展示，不会拼出半截路径去打开。
+   */
+  const [root, setRoot] = useState('');
+  useEffect(() => {
+    let alive = true;
+    getWorkdir()
+      .then(wd => { if (alive && wd?.active) setRoot(wd.active); })
+      .catch(() => { /* 保留空根：条目不可点 */ });
+    return () => { alive = false; };
+  }, [getWorkdir]);
+
   if (changes.length === 0) return <div className="panel-empty">工作区干净，无变更</div>;
   return <div className="changes-list">
-    {changes.map((ch, i) => (
-      <div key={i} className={`change-item ${statusClassMap[ch.status] || 'untracked'}`} title={ch.file}>
-        <span className="change-status">{ch.status}</span>
-        <span className="change-file">{ch.file}</span>
-      </div>
-    ))}
+    {changes.map((ch, i) => {
+      // 重命名条目形如 `old -> new`：磁盘上真实存在的是新路径那一半
+      const rel = ch.file.includes(' -> ') ? ch.file.split(' -> ').pop()! : ch.file;
+      // 删除态（D / AD / MD…）磁盘上已无此文件，点开只会撞上「无法打开」，索性不接点击
+      const abs = root && onOpen && !ch.status.includes('D') ? `${root}/${rel}` : '';
+      return (
+        <div
+          key={i}
+          className={`change-item ${statusClassMap[ch.status] || 'untracked'}${abs ? ' openable' : ''}`}
+          title={abs || ch.file}
+          onClick={abs ? () => onOpen?.(abs) : undefined}
+        >
+          <span className="change-status">{ch.status}</span>
+          <span className="change-file">{ch.file}</span>
+        </div>
+      );
+    })}
   </div>;
 }
 
@@ -613,6 +717,10 @@ function ChatView({ peer, peerType, thread, streams, api, onBack }: {
     </div>
   );
 }
+
+
+
+
 
 
 

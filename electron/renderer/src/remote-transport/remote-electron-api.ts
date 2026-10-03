@@ -26,6 +26,11 @@
 import type {
   ConnectionStatus,
   ElectronAPI,
+  RemoteStatus,
+  RemotePairCode,
+  RemoteDevicesPayload,
+  RemoteDeviceInfo,
+  SidebarStaticData,
   ListPatchesResult,
   UndoPatchResult,
   ReadFileResult,
@@ -561,6 +566,10 @@ class RemoteTransport {
       onSessionError: (cb) => this.on('agent:session-error', cb),
       onCollabEvent: (cb) => this.on('collab:event', cb),
       onMaximizedChange: () => () => {},
+      // 远程通道的配对码 / 连接状态 / 设备列表由中继事件下发，renderer 契约要求这三个订阅
+      onRemotePairCode: (cb) => this.on<RemotePairCode>('remote:pair-code', cb),
+      onRemoteStatus: (cb) => this.on<RemoteStatus>('remote:status', cb),
+      onRemoteDevices: (cb) => this.on<RemoteDevicesPayload>('remote:devices', cb),
 
       // ---- A 直通：发送 ----
       sendInput: (content: string) => invoke<number>('sendInput', [content]),
@@ -599,9 +608,9 @@ class RemoteTransport {
         invoke('switchSession', name === undefined ? [sessionId] : [sessionId, name]),
       newSession: () => invoke('newSession'),
       closeSession: (sessionId: string) => invoke('closeSession', [sessionId]),
-      getCurrentSession: () => invoke('getCurrentSession'),
-      listActiveSessions: () => invoke('listActiveSessions'),
-      getSidebarStatic: () => invoke('getSidebarStatic'),
+      getCurrentSession: () => invoke<{ sessionId: string }>('getCurrentSession'),
+      listActiveSessions: () => invoke<Array<{ sessionId: string; ready: boolean }>>('listActiveSessions'),
+      getSidebarStatic: () => invoke<SidebarStaticData>('getSidebarStatic'),
       readInstruction: (kind: string, file: string) => invoke('readInstruction', [kind, file]),
 
       // ---- .env 配置（env:read / env:write；handler 为同步返回，invoke 按 RPC 透传） ----
@@ -635,10 +644,9 @@ class RemoteTransport {
         }),
       sendTrustRevoke: (relayDeviceId: string, remoteId: string) =>
         this.sendRaw({ type: 'trust-revoke', relayDeviceId, remoteId }),
-      // ---- Windows 端信任设备（手机端无此数据源，降级返回；保持与桌面契约同形） ----
-      getRemoteDevices: async () => [],
+      // ---- Windows 端信任设备（手机端无此数据源，降级返回空列表；保持与桌面契约同形） ----
+      getRemoteDevices: async (): Promise<RemoteDeviceInfo[]> => [],
       revokeRemoteDevice: async () => ({ ok: false, error: 'remote 端不支持撤销 Windows 端信任设备' }),
-      onRemoteDevices: () => () => {},
 
     };
   }

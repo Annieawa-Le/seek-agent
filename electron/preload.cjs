@@ -222,6 +222,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('env:write', { updates });
   },
 
+  /** 读取挂件插件清单（设置面板「插件」板块用） */
+  getPlugins: async () => {
+    return ipcRenderer.invoke('plugins:list');
+  },
+
+  /** 启用/禁用某挂件插件（写回其 enable.json；重启后生效） */
+  setPluginEnabled: async (name, enabled) => {
+    return ipcRenderer.invoke('plugins:setEnabled', name, enabled);
+  },
+
+  /** 改写某插件的次级选项（如 dsh-raw-html 的可信模式；重启后生效） */
+  setPluginOption: async (name, key, value) => {
+    return ipcRenderer.invoke('plugins:setOption', name, key, value);
+  },
+
+  /** 读桌宠配置（含可调项 schema，设置面板「插件」板块用） */
+  getPetConfig: async () => {
+    return ipcRenderer.invoke('pet:getConfig');
+  },
+
+  /** 写桌宠配置（增量 patch），保存后立即下发给运行中的桌宠窗 */
+  setPetConfig: async (patch) => {
+    return ipcRenderer.invoke('pet:setConfig', patch);
+  },
+
+
+
   /** 跨会话协作：通信记录（最新在前） */
   getCollabLog: async () => {
     return ipcRenderer.invoke('collab:log');
@@ -299,6 +326,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('window:isMaximized');
   },
 });
+
 
 
 

@@ -1,0 +1,6 @@
+{
+  "enable": true,
+  "trusted": true,
+  "label": "视觉卡片",
+  "description": "dsh-raw-html（移植版）：AI 在回复正文直接输出裸 HTML 卡片（<div id=\"vcp-root\">），前端渲染成视觉卡片——杂志风排版、书法字体、KaTeX 公式、Mermaid 图表、SVG 动画，流式逐段长出。宿主半区（host.mjs，本地资源托管）由 Electron 主进程按本目录开关托管；把 enable 设为 false 或删除本目录即可整体卸载。"
+}

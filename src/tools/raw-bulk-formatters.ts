@@ -6,7 +6,7 @@
  *   toTUIText → 终端显示（带 ANSI 颜色、摘要、省略）
  *   toWebUI   → Electron 结构化数据
  */
-import type { RawBulk, ReadFileBulk, SearchBulk, SearchContentBulk, ExecBulk, FileWriteBulk, PatchBulk, DeskBulk, TaskBulk, TodoBulk, MemoryBulk, MissionBulk, CmdLogBulk } from './raw-bulk-types';
+import type { RawBulk, ReadFileBulk, SearchBulk, SearchContentBulk, ExecBulk, FileWriteBulk, PatchBulk, DeskBulk, TaskBulk, TodoBulk, MemoryBulk, MissionBulk, CmdLogBulk, WorklogBulk, AlarmBulk, CollabBulk } from './raw-bulk-types';
 
 
 // ═════════════════════════════════════════════════════
@@ -27,6 +27,9 @@ export function toAIText(bulk: RawBulk): string {
     case 'memory': return formatMemoryAIText(bulk);
     case 'mission': return formatMissionAIText(bulk);
     case 'cmd-log': return formatCmdLogAIText(bulk);
+    case 'worklog': return formatWorklogAIText(bulk);
+    case 'alarm': return formatAlarmAIText(bulk);
+    case 'collab': return formatCollabAIText(bulk);
     default: return JSON.stringify(bulk);
   }
 }
@@ -175,6 +178,38 @@ function formatCmdLogAIText(bulk: CmdLogBulk): string {
   return bulk.content ?? '';
 }
 
+function formatWorklogAIText(bulk: WorklogBulk): string {
+  // 两个 worklog 工具的 aiText 由工具自身拼装，此处仅作兜底
+  return bulk.msg;
+}
+
+function formatAlarmAIText(bulk: AlarmBulk): string {
+  if (bulk.error) return `❌ ${bulk.error}`;
+  if (bulk.action === 'set') {
+    return `⏰ 闹钟设定成功：${bulk.durationSec} 秒后（${bulk.fireAt}）注入 "[闹钟]${bulk.label}计时器已归零！"。` +
+      `期间可继续其他工作，到点自动打断提醒；若提前完成可用 alarm_cancel(label="${bulk.label}") 取消。`;
+  }
+  if (bulk.action === 'cancel') {
+    return bulk.ok
+      ? `✅ 已取消闹钟 "${bulk.label}"。`
+      : `⚠ 未找到闹钟 "${bulk.label}"（可能已到点或从未设定）。`;
+  }
+  const all = bulk.alarms ?? [];
+  if (all.length === 0) return '📭 当前没有任何未到点的闹钟。';
+  return `⏰ 未到点的闹钟（${all.length} 个）：\n` +
+    all.map((a, i) => `${i + 1}. ${a.label}（还剩 ${(a.remainingMs / 1000).toFixed(1)} 秒）`).join('\n');
+}
+
+function formatCollabAIText(bulk: CollabBulk): string {
+  if (bulk.error) return `❌ ${bulk.error}`;
+  if (bulk.delivered) return `✅ 协作消息已送达会话「${bulk.target}」。对方回复会自动回到本会话。`;
+  if (bulk.active === false) {
+    return `⏸ 会话「${bulk.target}」当前未活跃，未自动唤醒。\n` +
+      '如需深度协作，请先唤醒该会话（/loadsession 加载，或让用户切换到该会话），再重新发送。';
+  }
+  return `⚠️ 未知结果：${bulk.target ?? ''}`;
+}
+
 // ═════════════════════════════════════════════════════
 // TUI Renderer — 带 ANSI 颜色、摘要、截断
 // ═════════════════════════════════════════════════════
@@ -191,14 +226,27 @@ export function toTUIText(bulk: RawBulk): string {
     case 'file-write': return bulk.error
       ? `❌ ${bulk.action === 'create' ? '创建' : '写入'}失败：${bulk.error}`
       : `● ${bulk.action === 'create' ? '创建文件' : '覆写文件'}: ${bulk.filePath}`;
+    case 'patch': return formatPatchTUI(bulk);
     case 'desk': return `● ${bulk.action === 'add' ? '添加到桌面' : bulk.action === 'remove' ? '从桌面移除' : bulk.action === 'clear' ? '清空桌面' : '查看桌面'}: ${bulk.totalCount} 项`;
     case 'task': return formatTaskTUI(bulk);
     case 'todo': return formatTodoTUI(bulk);
     case 'memory': return formatMemoryTUI(bulk);
     case 'mission': return formatMissionTUI(bulk);
     case 'cmd-log': return formatCmdLogTUI(bulk);
+    case 'worklog': return formatWorklogTUI(bulk);
+    case 'alarm': return formatAlarmTUI(bulk);
+    case 'collab': return formatCollabTUI(bulk);
     default: return JSON.stringify(bulk);
   }
+}
+
+function formatPatchTUI(bulk: PatchBulk): string {
+  if (bulk.error) return `❌ 操作失败: ${bulk.error}`;
+  const label = bulk.action === 'undo'
+    ? '已撤销'
+    : bulk.action === 'history' ? '撤销历史' : `[${bulk.action.toUpperCase()}]`;
+  const target = bulk.filePath ? ` ${PURPLE}${bulk.filePath}\x1b[0m` : '';
+  return `● ${label} ${bulk.description}${target}`;
 }
 
 function formatReadTUI(bulk: ReadFileBulk): string {
@@ -312,6 +360,28 @@ function formatCmdLogTUI(bulk: CmdLogBulk): string {
   return `● 命令日志: ${bulk.filePath}（${PURPLE}${bulk.size}\x1b[0m 字符）`;
 }
 
+function formatWorklogTUI(bulk: WorklogBulk): string {
+  if (!bulk.found) return `● 未找到 Worklog: ${bulk.query}`;
+  if (bulk.action === 'recall-original') {
+    return `● Worklog ${PURPLE}${bulk.id ?? '?'}\x1b[0m 原文（${PURPLE}${bulk.size ?? 0}\x1b[0m 字符）`;
+  }
+  return `● Worklog ${PURPLE}${bulk.id ?? '?'}\x1b[0m「${bulk.title ?? ''}」`;
+}
+
+function formatAlarmTUI(bulk: AlarmBulk): string {
+  if (bulk.error) return `● 错误: ${bulk.error}`;
+  if (bulk.action === 'set') return `● 设定闹钟: ${PURPLE}${bulk.label}\x1b[0m（${bulk.durationSec}s → ${bulk.fireAt}）`;
+  if (bulk.action === 'cancel') return bulk.ok ? `● 已取消闹钟: ${bulk.label}` : `● 未找到闹钟: ${bulk.label}`;
+  const all = bulk.alarms ?? [];
+  return `● 未到点的闹钟: ${PURPLE}${all.length}\x1b[0m 个`;
+}
+
+function formatCollabTUI(bulk: CollabBulk): string {
+  if (bulk.error) return `● 协作失败: ${bulk.error}`;
+  if (bulk.delivered) return `● 协作消息已送达: ${bulk.target}`;
+  return `● 协作消息未送达: ${bulk.target ?? ''}（目标会话未活跃）`;
+}
+
 // ═════════════════════════════════════════════════════
 // WebUI Renderer — 生成 HTML 供 Electron 前端渲染
 // ═════════════════════════════════════════════════════
@@ -335,6 +405,9 @@ export function toWebUI(bulk: RawBulk): Record<string, unknown> {
     case 'memory': return formatMemoryWebUI(bulk);
     case 'mission': return formatMissionWebUI(bulk);
     case 'cmd-log': return formatCmdLogWebUI(bulk);
+    case 'worklog': return formatWorklogWebUI(bulk);
+    case 'alarm': return formatAlarmWebUI(bulk);
+    case 'collab': return formatCollabWebUI(bulk);
     default: return { html: `<pre>${esc(JSON.stringify(bulk))}</pre>` };
   }
 }
@@ -409,7 +482,7 @@ function formatFileWriteWebUI(bulk: FileWriteBulk): Record<string, unknown> {
 function formatPatchWebUI(bulk: PatchBulk): Record<string, unknown> {
   if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
   switch (bulk.action) {
-    case 'add': case 'del': case 'modify':
+    case 'add': case 'del': case 'modify': case 'replace':
       return {
         html: `<div class="patch-result"><span class="label">[${bulk.action.toUpperCase()}]</span> ${esc(bulk.description)}<br><pre>${esc(bulk.diff || '')}</pre></div>`
       };
@@ -576,4 +649,56 @@ function formatCmdLogWebUI(bulk: CmdLogBulk): Record<string, unknown> {
   if (!bulk.found) return { html: `<div class="empty">${esc(bulk.error ?? '暂无命令日志')}</div>` };
   return { html: `<div class="cmd-log"><div class="meta">${esc(bulk.filePath)} · ${bulk.size} 字符</div><pre class="exec-output">${esc(bulk.content ?? '')}</pre></div>` };
 }
+
+// ── WorklogBulk ──
+function formatWorklogWebUI(bulk: WorklogBulk): Record<string, unknown> {
+  if (!bulk.found) return { html: `<div class="error">${esc(bulk.msg)}</div>` };
+  if (bulk.action === 'recall-original') {
+    // 原文的 msg 自带标题行，直接整段展示，避免重复排版
+    return { html: `<div class="worklog-result"><pre class="worklog-body">${esc(bulk.msg)}</pre></div>` };
+  }
+  return {
+    html: `<div class="worklog-result"><span class="label">📋 Worklog 梗概</span><code>${esc(bulk.id ?? '?')}</code>` +
+      `<span class="meta">${esc(bulk.title ?? '')}</span>` +
+      `<pre class="worklog-body">${esc(bulk.summary ?? '')}</pre></div>`,
+  };
+}
+
+// ── AlarmBulk ──
+function formatAlarmWebUI(bulk: AlarmBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  if (bulk.action === 'set') {
+    return {
+      html: `<div class="alarm-result"><span class="label">⏰ 设定闹钟</span><code>${esc(bulk.label ?? '')}</code>` +
+        `<span class="meta">${bulk.durationSec ?? 0} 秒后 · ${esc(bulk.fireAt ?? '')}</span></div>`,
+    };
+  }
+  if (bulk.action === 'cancel') {
+    return bulk.ok
+      ? { html: `<div class="alarm-result"><span class="label">✅ 取消闹钟</span><code>${esc(bulk.label ?? '')}</code></div>` }
+      : { html: `<div class="alarm-result"><span class="label">⚠ 未找到闹钟</span><code>${esc(bulk.label ?? '')}</code><span class="meta">可能已到点或从未设定</span></div>` };
+  }
+  const all = bulk.alarms ?? [];
+  if (all.length === 0) return { html: '<div class="empty">当前没有任何未到点的闹钟</div>' };
+  const rows = all.map(a =>
+    `<div class="alarm-row"><span class="alarm-row-label">${esc(a.label)}</span><span class="meta">还剩 ${(a.remainingMs / 1000).toFixed(1)} 秒</span></div>`
+  ).join('');
+  return { html: `<div class="alarm-result"><span class="label">⏰ 未到点的闹钟</span><span class="meta">共 ${all.length} 个</span>${rows}</div>` };
+}
+
+// ── CollabBulk ──
+function formatCollabWebUI(bulk: CollabBulk): Record<string, unknown> {
+  if (bulk.error) return { html: `<div class="error">${esc(bulk.error)}</div>` };
+  const target = esc(bulk.target ?? '');
+  if (bulk.delivered) {
+    return { html: `<div class="collab-result"><span class="label">✅ 协作消息</span><code>${target}</code><span class="meta">已送达，对方回复会自动回到本会话</span></div>` };
+  }
+  if (bulk.active === false) {
+    return { html: `<div class="collab-result"><span class="label">⏸ 协作消息</span><code>${target}</code><span class="meta">目标会话未活跃，未自动唤醒</span></div>` };
+  }
+  return { html: `<div class="collab-result"><span class="label">⚠️ 协作消息</span><code>${target}</code></div>` };
+}
+
+
+
 

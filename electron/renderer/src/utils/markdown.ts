@@ -1,3 +1,5 @@
+import { renderKatexInHtml } from './katex-math.ts';
+
 /** 简单的 Markdown → HTML 渲染 */
 export function renderMarkdown(text: string): string {
   if (!text) return '';
@@ -88,6 +90,17 @@ export function renderMarkdown(text: string): string {
   return html;
 }
 
+/**
+ * markdown + KaTeX 公式渲染。
+ *
+ * 普通消息（助手/思考/子模型/用户）走这条路径：先 markdown 出 HTML，
+ * 再把公式换成 KaTeX 片段。公式替换在字符串层完成，挂载即最终态，
+ * 不存在「DOM 后处理还要等 KaTeX 就绪」的时序坑。
+ */
+export function renderMarkdownWithMath(text: string): string {
+  return renderKatexInHtml(renderMarkdown(text));
+}
+
 /** ANSI 转 HTML */
 export function renderAnsi(text: string): string {
   let html = text
@@ -127,4 +140,6 @@ export function escapeHtml(str: string): string {
 export function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
 }
+
+
 

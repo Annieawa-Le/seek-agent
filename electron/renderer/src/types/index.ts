@@ -37,7 +37,7 @@ export interface ElectronAPI {
   /** 打开系统对话框选择附件文件（支持多选） */
   openFileDialog: () => Promise<{ canceled: boolean; files: string[]; error?: string }>;
   getRecentDirs: () => Promise<string[]>;
-  readFileTree: (dirPath: string) => Promise<FileTreeNode[]>;
+  readFileTree: (dirPath?: string) => Promise<FileTreeNode[]>;
   readGitStatus: () => Promise<GitChange[]>;
   /** 读取文本文件内容（内嵌编辑器用） */
   readFile: (filePath: string) => Promise<ReadFileResult>;
@@ -64,6 +64,16 @@ export interface ElectronAPI {
   /** 监听信任设备列表变化（remote:devices 事件，设备面板实时刷新用） */
   onRemoteDevices?: (callback: (data: { devices: RemoteDeviceInfo[] }) => void) => () => void;
   getSkillsList: () => Promise<Array<{ name: string; description: string }>>;
+  /** 读取挂件插件清单（设置面板「插件」板块） */
+  getPlugins: () => Promise<{ ok: boolean; plugins: Array<{ name: string; label: string; description: string; enabled: boolean; running: boolean; port: number }> }>;
+  /** 启用/禁用某挂件插件（写回 enable.json，重启 seek-agent 生效） */
+  setPluginEnabled: (name: string, enabled: boolean) => Promise<{ ok: boolean; plugins?: Array<{ name: string; label: string; description: string; enabled: boolean; running: boolean; port: number }>; error?: string }>;
+  /** 改写某插件的次级选项（如 dsh-raw-html 的可信模式；重启后生效） */
+  setPluginOption: (name: string, key: string, value: boolean) => Promise<{ ok: boolean; config?: Record<string, unknown>; restartRequired?: boolean; error?: string }>;
+  /** 读桌宠配置（含可调项 schema，设置面板「插件」板块） */
+  getPetConfig: () => Promise<{ ok: boolean; config: Record<string, unknown>; schema: Record<string, PetConfigField>; skillDir: string }>;
+  /** 写桌宠配置（增量 patch），保存后立即下发给运行中的桌宠窗 */
+  setPetConfig: (patch: Record<string, unknown>) => Promise<{ ok: boolean; config?: Record<string, unknown>; error?: string }>;
   /** 把子 Agent 消息流保存为本地 json-session 文件（未完成的工具调用自动补 toolResult） */
   saveSubagentSession: (data: Record<string, unknown>) => Promise<{ ok: boolean; path?: string; error?: string }>;
   switchSession: (sessionId: string, name?: string) => Promise<{ success?: boolean; error?: string; sessionId?: string; name?: string | null; created?: boolean }>;
@@ -93,6 +103,11 @@ export interface ElectronAPI {
 declare global {
   interface Window {
     electronAPI?: ElectronAPI;
+    /**
+     * DOM 注入型扩展的本地宿主根地址（无尾斜杠），由 Electron 主进程在注入插件前端前写入；
+     * 远程模式下由远程 transport 注入。未注入 = 无扩展宿主，扩展脚本自行放弃。
+     */
+    __SEEK_EXT_HOST?: string;
   }
 }
 
@@ -359,6 +374,17 @@ export interface RemoteStatus {
   connected: boolean;
 }
 
+/** 桌宠单项配置的元信息，由主进程下发，前端按 type 渲染不同控件 */
+export interface PetConfigField {
+  type: 'number' | 'boolean' | 'enum';
+  label: string;
+  hint?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  values?: string[];
+}
+
 /** 远程信任设备（remote:devices 事件载荷 / remote:getDevices 返回条目；不含 token，避免凭证泄漏到渲染层） */
 export interface RemoteDeviceInfo {
   remoteId: string;
@@ -368,6 +394,8 @@ export interface RemoteDeviceInfo {
   /** 信任时间（ISO 字符串） */
   trustedAt?: string | null;
 }
+
+
 
 
 

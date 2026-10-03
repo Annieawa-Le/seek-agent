@@ -1,0 +1,18 @@
+{
+  "enable": false,
+  "label": "大肥鱼桌宠",
+  "description": "由 Agent 真实工作状态驱动的桌面伴侣：透明置顶窗，思考/工作/等待/完成各有动作。",
+  "scale": 0.65,
+  "bubbleScale": 1,
+  "speed": 1.5,
+  "playbackFps": 60,
+  "activityLevel": "normal",
+  "reducedMotion": false,
+  "soundEnabled": true,
+  "bubbleMode": "always",
+  "bubbleStates": [
+    "SUCCESS",
+    "ERROR",
+    "WAITING"
+  ]
+}

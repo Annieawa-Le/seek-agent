@@ -1,3 +1,265 @@
+export interface PluginInfo {
+  name: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  running: boolean;
+  port: number;
+}
+
+interface PetConfigField {
+  type: 'number' | 'boolean' | 'enum';
+  label: string;
+  hint?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  values?: string[];
+}
+
+/** 桌宠专属配置：从主进程拿 schema 动态渲染，改完立即下发到运行中的窗口。 */
+function PetConfigSection() {
+  const api = useElectronAPI();
+  const [schema, setSchema] = useState<Record<string, PetConfigField>>({});
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    api?.getPetConfig?.()
+      .then((res: any) => {
+        if (!res?.ok) return;
+        setSchema(res.schema || {});
+        setValues(res.config || {});
+      })
+      .catch(() => { /* 读不到就不渲染 */ });
+  }, [api]);
+
+  const change = useCallback((key: string, v: unknown) => {
+    setValues(prev => ({ ...prev, [key]: v }));
+    setDirty(true);
+    setMsg('');
+    setErr('');
+  }, []);
+
+  const save = useCallback(async () => {
+    try {
+      const res: any = await api?.setPetConfig?.(values);
+      if (res?.ok) {
+        setValues(res.config || values);
+        setDirty(false);
+        setMsg('已保存，桌宠立即生效');
+      } else {
+        setErr(res?.error || '保存失败');
+      }
+    } catch (e: any) {
+      setErr(e?.message || '保存失败');
+    }
+  }, [api, values]);
+
+  const entries = Object.entries(schema);
+  if (entries.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 18, borderTop: '1px dashed #e5e7eb', paddingTop: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#1f2328', marginBottom: 4 }}>大肥鱼桌宠选项</div>
+      <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 14, lineHeight: 1.7 }}>
+        改动保存后立即下发给桌宠窗口，无需重启。
+      </div>
+
+      {entries.map(([key, field]) => (
+        <div key={key} style={{ marginBottom: 14 }}>
+          <label style={{ display: 'block', fontSize: 13, color: '#444', marginBottom: 6 }}>
+            {field.label}
+            <span style={{ color: '#b0b3b8', marginLeft: 8, fontSize: 12 }}>{key}</span>
+          </label>
+          {field.type === 'boolean' ? (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={values[key] === true}
+                onChange={e => change(key, e.target.checked)}
+                style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
+              />
+              {field.hint && <span style={{ fontSize: 12, color: '#8c8c8c', lineHeight: 1.6 }}>{field.hint}</span>}
+            </label>
+          ) : field.type === 'enum' ? (
+            <div>
+              <select
+                value={String(values[key] ?? '')}
+                onChange={e => change(key, e.target.value)}
+                style={{ width: '100%', padding: '8px 10px', border: '1px solid #d0d3d6', borderRadius: 6, fontSize: 13, color: '#1f2328' }}
+              >
+                {(field.values || []).map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+              {field.hint && <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6, lineHeight: 1.6 }}>{field.hint}</div>}
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <input
+                  type="range"
+                  min={field.min}
+                  max={field.max}
+                  step={field.step}
+                  value={Number(values[key] ?? field.min ?? 0)}
+                  onChange={e => change(key, Number(e.target.value))}
+                  style={{ flex: 1, cursor: 'pointer' }}
+                />
+                <input
+                  type="number"
+                  min={field.min}
+                  max={field.max}
+                  step={field.step}
+                  value={Number(values[key] ?? field.min ?? 0)}
+                  onChange={e => change(key, Number(e.target.value))}
+                  style={{ width: 76, padding: '5px 8px', border: '1px solid #d0d3d6', borderRadius: 6, fontSize: 13 }}
+                />
+              </div>
+              {field.hint && <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6, lineHeight: 1.6 }}>{field.hint}</div>}
+            </div>
+          )}
+        </div>
+      ))}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button
+          type="button"
+          onClick={save}
+          disabled={!dirty}
+          style={{
+            background: dirty ? '#3370ff' : '#c9d6f5', color: '#fff', border: 'none', borderRadius: 6,
+            padding: '7px 16px', fontSize: 13, cursor: dirty ? 'pointer' : 'default',
+          }}
+        >保存桌宠设置</button>
+        {msg && <span style={{ color: '#2e7d32', fontSize: 13 }}>{msg}</span>}
+        {err && <span style={{ color: '#d93026', fontSize: 13 }}>{err}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** 插件板块：列出挂件插件，开关写回各自 enable.json（重启 seek-agent 生效）。 */
+function PluginsSection() {
+  const api = useElectronAPI();
+  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [busy, setBusy] = useState('');
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    api?.getPlugins?.()
+      .then((list) => setPlugins(list || []))
+      .catch(() => { /* 读取失败保持空列表 */ });
+  }, [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = useCallback(async (p: PluginInfo, next: boolean) => {
+    setBusy(p.name);
+    setNotice('');
+    setError('');
+    try {
+      const res: any = await api?.setPluginEnabled?.(p.name, next);
+      if (res?.ok) {
+        setPlugins(res.plugins || []);
+        setNotice(`「${p.label}」已${next ? '启用' : '禁用'}，重启 seek-agent 生效`);
+      } else {
+        setError(res?.error || '操作失败');
+      }
+    } catch (e: any) {
+      setError(e?.message || '操作失败');
+    } finally {
+      setBusy('');
+    }
+  }, [api]);
+
+  // 次级选项（现仅「视觉卡片」的可信模式）：写回 enable.json，同样重启生效
+  const toggleOption = useCallback(async (p: PluginInfo, key: string, next: boolean) => {
+    setBusy(p.name + ':' + key);
+    setNotice('');
+    setError('');
+    try {
+      const res: any = await api?.setPluginOption?.(p.name, key, next);
+      if (res?.ok) {
+        setNotice(`「${p.label}」的可信模式已${next ? '开启' : '关闭'}，重启 seek-agent 生效`);
+      } else {
+        setError(res?.error || '操作失败');
+      }
+    } catch (e: any) {
+      setError(e?.message || '操作失败');
+    } finally {
+      setBusy('');
+    }
+  }, [api]);
+
+  if (plugins.length === 0) {
+    return <div style={{ fontSize: 13, color: '#8c8c8c' }}>没有可管理的挂件插件。</div>;
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 14, lineHeight: 1.7 }}>
+        挂件插件由 Electron 主进程托管：开关写回各自 inner_skill 目录下的 enable.json，重启 seek-agent 后生效。
+      </div>
+      {plugins.map((p) => (
+        <div
+          key={p.name}
+          style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#1f2328', display: 'flex', alignItems: 'center', gap: 8 }}>
+                {p.label}
+                <span style={{ fontSize: 11, fontWeight: 400, color: '#8c8c8c' }}>{p.name}</span>
+                <span style={{
+                  fontSize: 11, padding: '1px 7px', borderRadius: 10,
+                  color: p.running ? '#2e7d32' : '#8c8c8c',
+                  background: p.running ? '#e8f5e9' : '#f0f0f0',
+                }}>{p.running ? `运行中 :${p.port}` : '未启动'}</span>
+              </div>
+              {p.description && (
+                <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6, lineHeight: 1.6 }}>{p.description}</div>
+              )}
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={p.enabled}
+                disabled={busy === p.name}
+                onChange={(e) => toggle(p, e.target.checked)}
+                style={{ width: 16, height: 16, cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: 13, color: '#444' }}>{p.enabled ? '已启用' : '已禁用'}</span>
+            </label>
+          </div>
+          {p.name === 'dsh-raw-html' && p.enabled && (
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                defaultChecked={false}
+                disabled={busy === p.name + ':trusted'}
+                onChange={(e) => toggleOption(p, 'trusted', e.target.checked)}
+                style={{ width: 15, height: 15, marginTop: 2, cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: 12, color: '#555', lineHeight: 1.6 }}>
+                可信模式（允许卡片内 &lt;script&gt; 执行）
+                <span style={{ color: '#8c8c8c' }}>
+                  {' '}— 脚本被关在 iframe 沙箱里，拿不到界面与本机能力；默认关闭
+                </span>
+              </span>
+            </label>
+          )}
+        </div>
+      ))}
+      {notice && <div style={{ color: '#2e7d32', fontSize: 13, marginTop: 4 }}>{notice}</div>}
+      {error && <div style={{ color: '#d93026', fontSize: 13, marginTop: 4 }}>{error}</div>}
+      <PetConfigSection />
+    </div>
+  );
+}
+
 // WebUI 设置面板（VSCode 式叠加窗口），配置 seek-agent/.env 各项
 // 独立组件：仅负责展示与编辑 .env 配置项，接线（Header 入口）由后续任务完成。
 import { useEffect, useState, useCallback } from 'react';
@@ -32,6 +294,7 @@ const GROUPS: Array<{ name: string; fields: Array<{ key: string; label: string; 
     { key: 'COMPRESS_TARGET_RATIO', label: '压缩目标比例', type: 'number' },
     { key: 'ROUND_RATIO_THRESHOLD', label: '轮次比例阈值', type: 'number' },
   ]},
+  { name: '插件', fields: [] },
   { name: '远程连接', fields: [
     { key: 'SEEK_RELAY_URL', label: '中继地址 (SEEK_RELAY_URL)' },
     { key: 'SEEK_DEVICE_ID', label: '设备 ID (SEEK_DEVICE_ID)' },
@@ -215,6 +478,7 @@ export function SettingsPanel({ onClose }: Props) {
           </div>
 
           <div key={activeGroup} style={{ flex: 1, overflow: 'auto', padding: '16px 20px', animation: 'sp-slide-in 0.18s ease-out' }}>
+            {activeGroup === '插件' ? <PluginsSection /> : null}
             {activeFields.map(field => (
               <div key={field.key} style={{ marginBottom: 16 }}>
                 <label style={{ display: 'block', fontSize: 13, color: '#444', marginBottom: 6 }}>
@@ -289,6 +553,7 @@ export function SettingsPanel({ onClose }: Props) {
     </>
   );
 }
+
 
 
 
