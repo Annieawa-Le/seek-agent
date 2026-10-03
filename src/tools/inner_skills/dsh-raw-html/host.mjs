@@ -48,10 +48,7 @@ const FONT_FACES = [
   { file: 'Lanxi-HeiTiLight.woff2', family: 'Lanxi-HeiTiLight', weight: 400 },
   { file: 'Lanxi-HeiTiBold.woff2', family: 'Lanxi-HeiTiBold', weight: 400 },
   { file: 'Lanxi-WenKai.woff2', family: 'Lanxi-WenKai', weight: 400 },
-  { file: 'Lanxi-朗宋.woff2', family: 'Lanxi-朗宋', weight: 400 },
-  { file: 'Lanxi-颜宋.woff2', family: 'Lanxi-颜宋', weight: 400 },
   { file: 'Lanxi-MaShanZheng.woff2', family: 'Lanxi-MaShanZheng', weight: 400 },
-  { file: 'Lanxi-鱼尾行书.woff2', family: 'Lanxi-鱼尾行书', weight: 400 },
   { file: 'Lanxi-GreatVibes.woff2', family: 'Lanxi-GreatVibes', weight: 400 },
 ]
 
@@ -255,3 +252,4 @@ export function createRawHtmlHost({ skillDir, trusted = false }) {
     },
   }
 }
+

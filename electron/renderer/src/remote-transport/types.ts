@@ -166,6 +166,10 @@ export interface ElectronAPI {
   setPluginEnabled?(name: string, enabled: boolean): Promise<{ ok: boolean; plugins?: Array<{ name: string; label: string; description: string; enabled: boolean; running: boolean; port: number }>; error?: string }>;
   /** 改写某插件的次级选项（远程模式下宿主端未下发则不可用） */
   setPluginOption?(name: string, key: string, value: boolean): Promise<{ ok: boolean; config?: Record<string, unknown>; restartRequired?: boolean; error?: string }>;
+  /** 统一写插件配置（远程模式下宿主端未下发则不可用） */
+  setPluginConfig?(name: string, patch: Record<string, unknown>): Promise<{ ok: boolean; config?: Record<string, unknown>; restartRequired?: boolean; plugins?: Array<{ name: string; label: string; description: string; enabled: boolean; running: boolean; port: number }>; error?: string }>;
+  /** 取插件动态字段候选项（远程模式下宿主端未下发则不可用） */
+  getPluginFieldOptions?(name: string, key: string): Promise<{ ok: boolean; options?: Array<{ value: string; label: string }>; error?: string }>;
   /** 桌宠配置（仅桌面端存在） */
   getPetConfig?(): Promise<{ ok: boolean; config: Record<string, unknown>; schema: Record<string, unknown>; skillDir: string }>;
   setPetConfig?(patch: Record<string, unknown>): Promise<{ ok: boolean; config?: Record<string, unknown>; error?: string }>;

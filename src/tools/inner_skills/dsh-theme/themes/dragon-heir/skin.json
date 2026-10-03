@@ -1,0 +1,35 @@
+{
+  "id": "dragon-heir",
+  "name": "龙的传人",
+  "nameEn": "Dragon Heir",
+  "version": "0.1.11",
+  "description": "龙的传人 — 一面是不屈龙魂（墨龙穿云、朱砂印章、不屈锋芒），一面是万里长城（青黛山色、金晖镀墙、苍茫暮色）。亮暗主题各自配一幅画与一枚龙印 favicon，面板半透明磨砂，让画透出来。",
+  "author": "dsh-web-ui",
+  "license": "BSD-3-Clause",
+  "source": "DSH-Desktop-EAC dsh-desktop/assets/skins/dragon-heir · 上游包 @linxin666/dsh-client-ui-skin-dragon-heir",
+  "tags": [
+    "dragon",
+    "loong",
+    "chinese",
+    "ink-wash",
+    "great-wall",
+    "dual-theme"
+  ],
+  "palette": {
+    "background": "#faf7f057",
+    "panel": "#ede5d56e",
+    "text": "#262319",
+    "accent": "#c3272b"
+  },
+  "css": "skin.css",
+  "script": "skin.js",
+  "scope": {
+    "owner": "ui-skin-dragon-heir",
+    "bodyAttribute": "data-dsh-dragon-heir"
+  },
+  "upstream": {
+    "package": "@linxin666/dsh-client-ui-skin-dragon-heir",
+    "wiringId": "ui-skin-dragon-heir",
+    "repository": "https://github.com/zhu1090093659/dsh-web-ui.git"
+  }
+}

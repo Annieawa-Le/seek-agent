@@ -1,0 +1,34 @@
+{
+  "id": "xp",
+  "name": "Windows XP (Luna)",
+  "nameEn": "Windows XP Luna",
+  "version": "0.1.11",
+  "description": "Windows XP (Luna) 复古主题：蓝色渐变窗口条带窗口按钮、米色状态栏（大写/数字/滚动指示灯）、侧边栏任务栏上的绿色「开始」按钮、资源管理器风格树行和 Bliss 蓝天桌面，全局直角。",
+  "author": "dsh-web-ui",
+  "license": "BSD-3-Clause",
+  "source": "DSH-Desktop-EAC dsh-desktop/assets/skins/xp · 上游包 @linxin666/dsh-client-ui-skin-xp",
+  "tags": [
+    "retro",
+    "xp",
+    "luna",
+    "windows",
+    "start-button"
+  ],
+  "palette": {
+    "background": "#fff",
+    "panel": "#ece9d8",
+    "text": "#000",
+    "accent": "#316ac5"
+  },
+  "css": "skin.css",
+  "script": "skin.js",
+  "scope": {
+    "owner": "ui-skin-xp",
+    "bodyAttribute": "data-dsh-xp"
+  },
+  "upstream": {
+    "package": "@linxin666/dsh-client-ui-skin-xp",
+    "wiringId": "ui-skin-xp",
+    "repository": "https://github.com/zhu1090093659/dsh-web-ui.git"
+  }
+}

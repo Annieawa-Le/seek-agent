@@ -70,6 +70,10 @@ export interface ElectronAPI {
   setPluginEnabled: (name: string, enabled: boolean) => Promise<{ ok: boolean; plugins?: Array<{ name: string; label: string; description: string; enabled: boolean; running: boolean; port: number }>; error?: string }>;
   /** 改写某插件的次级选项（如 dsh-raw-html 的可信模式；重启后生效） */
   setPluginOption: (name: string, key: string, value: boolean) => Promise<{ ok: boolean; config?: Record<string, unknown>; restartRequired?: boolean; error?: string }>;
+  /** 统一写插件配置（patch 按插件声明的 configSchema 校验与夹取） */
+  setPluginConfig?: (name: string, patch: Record<string, unknown>) => Promise<{ ok: boolean; config?: Record<string, unknown>; restartRequired?: boolean; plugins?: Array<{ name: string; label: string; description: string; enabled: boolean; running: boolean; port: number; configSchema?: unknown[]; config?: Record<string, unknown> }>; error?: string }>;
+  /** 取某插件动态字段候选项（如主题皮肤列表） */
+  getPluginFieldOptions?: (name: string, key: string) => Promise<{ ok: boolean; options?: Array<{ value: string; label: string }>; error?: string }>;
   /** 读桌宠配置（含可调项 schema，设置面板「插件」板块） */
   getPetConfig: () => Promise<{ ok: boolean; config: Record<string, unknown>; schema: Record<string, PetConfigField>; skillDir: string }>;
   /** 写桌宠配置（增量 patch），保存后立即下发给运行中的桌宠窗 */

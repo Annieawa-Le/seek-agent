@@ -388,8 +388,11 @@ function installLocalHostRequestRewrite(port) {
   if (localHostRewriteInstalled) return;
   localHostRewriteInstalled = true;
   try {
+    // match pattern 里写不了端口，且 onBeforeSendHeaders 只认一条监听器——按 host 通配
+    // 一次装全，后起的挂件端口才不会被漏掉（早期按端口枚举是在安装那一刻快照的，
+    // 排在后面的挂件端口永远进不了过滤器）。
     session.defaultSession.webRequest.onBeforeSendHeaders(
-      { urls: [...localHostRewritePorts].map((p) => `http://127.0.0.1:${p}/*`) },
+      { urls: ['http://127.0.0.1/*'] },
       (details, callback) => {
         const headers = details.requestHeaders;
         delete headers['Sec-Fetch-Site'];
@@ -676,6 +679,157 @@ async function injectRawHtmlWhenReady(win) {
   } catch (err) {
     console.error('[raw-html] 等待渲染层就绪失败，改用直接注入：', err);
     void injectRawHtml(win);
+  }
+}
+
+
+
+// ═════════════════════════════════════════════════════
+// 主题皮肤（dsh-theme 移植）：DSH 皮肤加载器
+//
+// 把为 DSH（DeepSeek Harness）编写的第三方皮肤包原样加载进 seek-agent。
+// 皮肤 CSS 依赖 DSH 的 DOM 契约（CSS Modules 局部名子串 + data-slot/data-* 钩子
+// + --dsw-* 令牌），而 seek-agent 的 DOM 是另一套 id 体系——中间那层翻译由插件
+// 的转义层（client/escape-layer.js + client/tokens.js）负责，皮肤本身一行不改。
+//
+// 与其它挂件同一套约定：宿主逻辑全在 skill 目录（host.mjs），这里只做
+// 「读 enable.json → 动态 import → 起本地服务 → 注入前端」。删目录 = 整体卸载。
+// ═════════════════════════════════════════════════════
+const THEME_SKILL_DIR = join(__dirname, '..', 'src', 'tools', 'inner_skills', 'dsh-theme');
+let themeHost = null;
+
+/** 按 skill 的 enable.json 开关启动皮肤宿主；返回是否启动。 */
+async function startDshTheme() {
+  try {
+    const enablePath = join(THEME_SKILL_DIR, 'enable.json');
+    if (!existsSync(enablePath)) return false;
+    let cfg = {};
+    try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏按默认处理 */ }
+    if (cfg.enable === false) {
+      console.log('[dsh-theme] 已禁用（enable.json: enable=false）');
+      return false;
+    }
+    const { createDshThemeHost } = await import(pathToFileURL(join(THEME_SKILL_DIR, 'host.mjs')).href);
+    themeHost = createDshThemeHost({ skillDir: THEME_SKILL_DIR, autoActivate: cfg.theme || '' });
+    const { port } = await themeHost.start();
+    installLocalHostRequestRewrite(port);
+    const skins = await themeHost.listSkins();
+    console.log(`[dsh-theme] 宿主已启动：http://127.0.0.1:${port}（皮肤 ${skins.length} 套：${skins.map(s => s.id).join(', ') || '无'}）`);
+    return true;
+  } catch (err) {
+    console.error('[dsh-theme] 启动失败：', err);
+    themeHost = null;
+    return false;
+  }
+}
+
+/**
+ * 把皮肤加载器注入渲染层。
+ * 渲染层需要两样东西：宿主地址（取皮肤包）与要激活的皮肤 id。
+ * 加载器自身会装令牌层 + 转义层，因此注入时机须晚于渲染层首帧——
+ * 否则打标目标还不存在（由 injectDshThemeWhenReady 负责等待）。
+ */
+async function injectDshTheme(win) {
+  if (!themeHost || !win || win.isDestroyed()) return;
+  try {
+    const port = themeHost.getPort();
+    let wanted = '';
+    try {
+      wanted = JSON.parse(readFileSync(join(THEME_SKILL_DIR, 'enable.json'), 'utf8')).theme || '';
+    } catch { /* 读不到则不指定，加载器自选第一套 */ }
+    const prelude = [
+      // 专职变量，不复用共享的 __SEEK_EXT_HOST：那是「最后注入者胜」的槽，
+      // 视觉卡片宿主（dsh-raw-html）也往里写自己的端口，谁晚注入谁把对方顶掉，
+      // 皮肤加载器就会拿着卡片端口去要 /skins（404）。
+      `window.__SEEK_THEME_HOST = 'http://127.0.0.1:${port}';`,
+      `window.__SEEK_THEME_BOOT = ${JSON.stringify(wanted)};`,
+    ].join('\n');
+    await win.webContents.executeJavaScript(prelude, true);
+    // 加载器是 ESM 模块图（theme-loader → escape-layer/tokens 互相 import），
+    // 不能用 executeJavaScript 直接跑源码（非模块上下文里 import 会抛 SyntaxError）。
+    // 宿主已把 client/ 目录挂成 /client/*，这里用动态 import 从宿主地址加载整个模块图。
+    const handler = await win.webContents.executeJavaScript(
+      `import('http://127.0.0.1:${port}/client/theme-loader.js')
+         .then(function (mod) {
+           window.__seekTheme = {
+             list: mod.listSkins,
+             activate: mod.activateSkin,
+             deactivate: mod.deactivateSkin,
+             current: mod.currentSkin,
+             boot: mod.boot
+           };
+           return mod.boot();
+         })
+         .catch(function (err) { return { ok: false, error: String(err && err.message ? err.message : err) }; })`,
+      true);
+    const result = handler;
+    // 皮肤加载链路的运行时可观测性：把宿主地址、要激活的 id、加载结果一并落日志，
+    // 免得「404 / 未就绪」这类失败只剩一句无头无尾的报错。
+    console.log('[dsh-theme] 注入完成', {
+      host: `http://127.0.0.1:${port}`,
+      wanted,
+      result,
+    });
+    // 设置面板「主题」栏目：注册到渲染层的设置扩展点（与皮肤加载解耦，失败不影响皮肤）
+    try {
+      const panelCode = await readFile(join(THEME_SKILL_DIR, 'client', 'settings-panel.js'), 'utf8');
+      // 脚本自带「等扩展点就绪再注册」逻辑（幂等）；这里执行完再回读状态做自检，
+      // 把「到底注没注上」变成可观测事实，而不是靠一句无条件的「已注册」日志。
+      await win.webContents.executeJavaScript(panelCode, true);
+      const probe = await win.webContents.executeJavaScript(
+        `(function () {
+           var ext = window.__SEEK_SETTINGS_EXTENSION;
+           var registered = !!window.__seekThemePanelUnregister;
+           var ready = !!(ext && typeof ext.register === 'function' && ext.react);
+           var list = [];
+           try { list = ext && ext.list ? ext.list().map(function (s) { return s.id; }) : []; } catch (e) {}
+           return { registered: registered, ready: ready, sections: list };
+         })()`, true);
+      if (probe && probe.registered) {
+        console.log(`[dsh-theme] 设置栏目「主题」已注册（当前栏目：${(probe.sections || []).join(', ') || '无'}）`);
+      } else if (probe && probe.ready) {
+        console.warn('[dsh-theme] 设置扩展点就绪但栏目未注册——请检查 settings-panel.js 是否报错');
+      } else {
+        console.warn('[dsh-theme] 设置扩展点尚未就绪，栏目待其就绪后自行补注册（ready=' + (probe && probe.ready) + '）');
+      }
+    } catch (err) {
+      console.warn('[dsh-theme] 设置栏目注入失败（皮肤仍正常）：', err);
+    }
+    if (result && result.ok) {
+      console.log(`[dsh-theme] 皮肤已激活：${result.name}（打标 ${result.stats ? result.stats.marked : 0} 处）`);
+    } else {
+      console.warn('[dsh-theme] 皮肤激活失败：', result && result.error);
+    }
+  } catch (err) {
+    console.error('[dsh-theme] 注入失败：', err);
+  }
+}
+
+/**
+ * 等渲染层首帧就绪再注入皮肤。
+ * 打标目标是 React 渲染出来的 DOM（#app / #left-sidebar / .input-bar-body …），
+ * 过早注入会打到空容器上。这里轮询 #app 出现（上限 5s），就绪后立即注入。
+ */
+async function injectDshThemeWhenReady(win) {
+  if (!themeHost || !win || win.isDestroyed()) return;
+  try {
+    await win.webContents.executeJavaScript(
+      `new Promise(function (resolve) {
+         if (document.getElementById('app')) return resolve(true);
+         var waited = 0;
+         var timer = setInterval(function () {
+           waited += 100;
+           if (document.getElementById('app') || waited >= 5000) {
+             clearInterval(timer); resolve(true);
+           }
+         }, 100);
+       })`,
+      true,
+    );
+    if (!win.isDestroyed()) await injectDshTheme(win);
+  } catch (err) {
+    console.error('[dsh-theme] 等待渲染层就绪失败，改用直接注入：', err);
+    void injectDshTheme(win);
   }
 }
 
@@ -1039,6 +1193,8 @@ function createWindow() {
     void injectWorktable(mainWindow);
     // 视觉卡片：等渲染层广播「扩展点已提名」再注入（内容扩展点注册表就绪是硬前置）
     void injectRawHtmlWhenReady(mainWindow);
+    // 主题皮肤：等首帧 DOM 渲染出来再注入（打标目标是 React 产出的真实节点）
+    void injectDshThemeWhenReady(mainWindow);
   });
   // dev.mjs 用 vite build --watch，其 emptyOutDir 会瞬时清空 dist；首帧可能撞上而 ERR_FILE_NOT_FOUND。
   // 这里对 index.html 做有限重试，避免开发时白屏。
@@ -1838,7 +1994,7 @@ registerRpc('skills:list', async () => {
 // ── 挂件插件管理（设置面板「插件」板块）──
 
 /** 挂件插件清单：只列带 host.mjs 的 inner_skill（即需要主进程托管的插件）。 */
-const WIDGET_PREFIXES = ['dsh-whale-widget', 'dsh-meme', 'dsh-dafeiyu', 'dsh-worktable', 'dsh-raw-html'];
+const WIDGET_PREFIXES = ['dsh-whale-widget', 'dsh-meme', 'dsh-dafeiyu', 'dsh-worktable', 'dsh-raw-html', 'dsh-theme'];
 function listWidgetPlugins() {
   const skillsDir = join(ROOT, isPackaged ? 'agent' : 'src', 'tools', 'inner_skills');
   const out = [];
@@ -1848,19 +2004,30 @@ function listWidgetPlugins() {
     if (!existsSync(enablePath)) continue;
     let cfg = {};
     try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏按默认处理 */ }
+    // 配置值：剔除保留键（enable / label / description / configSchema / always_detectable）
+    const RESERVED = new Set(['enable', 'label', 'description', 'configSchema', 'always_detectable']);
+    const config = {};
+    for (const [k, v] of Object.entries(cfg)) {
+      if (!RESERVED.has(k)) config[k] = v;
+    }
     out.push({
       name,
       label: cfg.label || name,
       description: cfg.description || '',
+      // 插件自声明的配置项 schema（enable.json 的 configSchema）；无声明则为空数组
+      configSchema: Array.isArray(cfg.configSchema) ? cfg.configSchema : [],
+      config,
       enabled: cfg.enable !== false,
       running: name === 'dsh-meme' ? !!memeHost
         : name === 'dsh-dafeiyu' ? !!(petHost && petHost.isOpen())
         : name === 'dsh-worktable' ? !!worktableHost
         : name === 'dsh-raw-html' ? !!rawHtmlHost
+        : name === 'dsh-theme' ? !!themeHost
         : !!whaleHost,
       port: name === 'dsh-meme' ? (memeHost ? memeHost.getPort() : 0)
         : name === 'dsh-worktable' ? (worktableHost ? worktableHost.getPort() : 0)
         : name === 'dsh-raw-html' ? (rawHtmlHost ? rawHtmlHost.getPort() : 0)
+        : name === 'dsh-theme' ? (themeHost ? themeHost.getPort() : 0)
         : name === 'dsh-dafeiyu' ? 0
         : (whaleHost ? whaleHost.getPort() : 0),
     });
@@ -1922,10 +2089,160 @@ registerRpc('plugins:setOption', async (name, key, value) => {
   }
 });
 
+/**
+ * 动态选项提供者：类型为 'skin' / 'enum' 等的字段，其候选值可能在运行时才可知
+ * （如主题皮肤列表由 host 扫描得出）。这里按 key 给出候选项，前端据此渲染下拉。
+ */
+async function resolveFieldOptions(name, field) {
+  if (field.type === 'skin') {
+    if (!themeHost) return [];
+    try {
+      const skins = await themeHost.listSkins();
+      return skins.map(s => ({ value: s.id, label: s.name || s.id }));
+    } catch { return []; }
+  }
+  if (field.type === 'enum' && Array.isArray(field.values)) {
+    return field.values.map(v => ({ value: v, label: v }));
+  }
+  return [];
+}
+
+/**
+ * 统一插件配置写入。
+ *
+ * 校验只认插件自己声明的 configSchema：键必须在 schema 里、且按声明的类型/范围夹取，
+ * 避免前端传入任意键污染 enable.json。返回值含 restartRequired 供前端提示。
+ *
+ * 副作用分发：某些插件的配置改动需要即时下发（桌宠改大小、主题换皮肤），
+ * 这些「热应用」由本函数按插件名分派，写盘与生效是一体的，不给调用方留半吊子状态。
+ */
+async function applyPluginConfig(name, patch) {
+  const skillsDir = join(ROOT, isPackaged ? 'agent' : 'src', 'tools', 'inner_skills');
+  const enablePath = join(skillsDir, name, 'enable.json');
+  if (!existsSync(enablePath)) throw new Error('插件不存在: ' + name);
+  let cfg = {};
+  try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 配置损坏则重建 */ }
+  const schema = Array.isArray(cfg.configSchema) ? cfg.configSchema : [];
+  const byKey = new Map(schema.map(f => [f.key, f]));
+
+  for (const [key, raw] of Object.entries(patch && typeof patch === 'object' ? patch : {})) {
+    const field = byKey.get(key);
+    if (!field) throw new Error(`插件「${name}」无此配置项: ${key}`);
+    if (field.type === 'boolean') {
+      cfg[key] = raw === true || raw === 'true';
+    } else if (field.type === 'number') {
+      let n = Number(raw);
+      if (!Number.isFinite(n)) throw new Error(`配置项 ${key} 需要数字`);
+      if (typeof field.min === 'number') n = Math.max(field.min, n);
+      if (typeof field.max === 'number') n = Math.min(field.max, n);
+      cfg[key] = n;
+    } else {
+      cfg[key] = raw === null || raw === undefined ? '' : String(raw);
+    }
+  }
+  writeFileSync(enablePath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+
+  // ── 热应用分派 ──
+  let restartRequired = false;
+  if (name === 'dsh-dafeiyu' && petHost) {
+    // applyConfig 会在 scale 变化时一并重算窗口尺寸
+    try { petHost.applyConfig(readPetConfig()); } catch { /* 窗口未起时无碍 */ }
+  } else if (name === 'dsh-theme' && typeof patch?.theme === 'string') {
+    // 皮肤是纯前端资源：直接驱动渲染层加载器热切换，无需重启宿主
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        await mainWindow.webContents.executeJavaScript(
+          patch.theme
+            ? `window.__seekTheme ? window.__seekTheme.activate(${JSON.stringify(patch.theme)}) : {ok:false,error:'加载器未就绪'}`
+            : `window.__seekTheme ? window.__seekTheme.deactivate() : {ok:true}`,
+          true);
+      } catch { restartRequired = true; }
+    } else {
+      restartRequired = true;
+    }
+  } else {
+    // 其余插件的配置在宿主启动时读取，需重启才会生效
+    restartRequired = true;
+  }
+  return { config: cfg, restartRequired };
+}
+
+registerRpc('plugins:setConfig', async (name, patch) => {
+  try {
+    const res = await applyPluginConfig(String(name || ''), patch);
+    return { ok: true, config: res.config, restartRequired: res.restartRequired, plugins: listWidgetPlugins() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/** 取某插件的动态字段候选项（如主题皮肤列表）；前端渲染下拉前调用。 */
+registerRpc('plugins:fieldOptions', async (name, key) => {
+  try {
+    const skillsDir = join(ROOT, isPackaged ? 'agent' : 'src', 'tools', 'inner_skills');
+    const enablePath = join(skillsDir, String(name || ''), 'enable.json');
+    const cfg = JSON.parse(readFileSync(enablePath, 'utf8'));
+    const field = (cfg.configSchema || []).find(f => f.key === String(key || ''));
+    if (!field) return { ok: false, error: '字段不存在' };
+    return { ok: true, options: await resolveFieldOptions(String(name || ''), field) };
+  } catch (err) {
+    return { ok: false, error: err.message, options: [] };
+  }
+});
+
 registerRpc('plugins:setEnabled', async (name, enabled) => {
   try {
     const plugins = setWidgetEnabled(String(name || ''), !!enabled);
     return { ok: true, plugins };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+
+// ── 主题皮肤（dsh-theme）──
+// 提供给设置面板「主题」栏：列皮肤、切皮肤。
+// 切换写回 enable.json 并热切换渲染层皮肤（无需重启——皮肤是纯前端资源）。
+
+registerRpc('theme:list', async () => {
+  try {
+    if (!themeHost) return { ok: true, enabled: false, skins: [], active: null };
+    let cfg = {};
+    try { cfg = JSON.parse(readFileSync(join(THEME_SKILL_DIR, 'enable.json'), 'utf8')); } catch { /* 配置缺失 */ }
+    const skins = await themeHost.listSkins();
+    return { ok: true, enabled: cfg.enable !== false, skins, active: cfg.theme || null };
+  } catch (err) {
+    return { ok: false, error: err.message, skins: [] };
+  }
+});
+
+registerRpc('theme:activate', async (id) => {
+  try {
+    const skinId = String(id || '');
+    if (!themeHost) return { ok: false, error: '主题宿主未启动（检查 dsh-theme 是否启用）' };
+    const skins = await themeHost.listSkins();
+    if (skinId && !skins.some(s => s.id === skinId)) return { ok: false, error: '皮肤不存在: ' + skinId };
+    // 写回 enable.json（下次启动仍生效）
+    const enablePath = join(THEME_SKILL_DIR, 'enable.json');
+    let cfg = {};
+    try { cfg = JSON.parse(readFileSync(enablePath, 'utf8')); } catch { /* 重建 */ }
+    cfg.theme = skinId;
+    writeFileSync(enablePath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+    // 热切换：直接驱动渲染层加载器（皮肤全在前端，不需要重启宿主）
+    if (skinId) {
+      const result = await mainWindow.webContents.executeJavaScript(
+        `window.__seekTheme ? window.__seekTheme.activate(${JSON.stringify(skinId)}) : {ok:false,error:'加载器未就绪'}`,
+        true);
+      if (!result || !result.ok) {
+        return { ok: false, error: (result && result.error) || '皮肤激活失败', saved: true };
+      }
+      return { ok: true, active: skinId, name: result.name, stats: result.stats };
+    }
+    // 空 id = 卸载皮肤，恢复默认外观
+    const off = await mainWindow.webContents.executeJavaScript(
+      `window.__seekTheme ? window.__seekTheme.deactivate() : {ok:true}`
+      , true);
+    return { ok: true, active: '', deactivated: !!(off && off.ok) };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -2093,6 +2410,7 @@ app.whenReady().then(async () => {
   await startMemeWidget();
   await startWorktable();
   await startRawHtml();
+  await startDshTheme();
   createWindow();
   // 桌宠是独立窗口，须在主窗口之后拉起（不依赖 webSecurity 放宽）
   await startPetWidget();
@@ -2135,6 +2453,10 @@ if (process.env.SEEK_RELAY_URL) {
     trustedDevicesFile: TRUSTED_DEVICES_FILE,
   });
 }
+
+
+
+
 
 
 

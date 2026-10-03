@@ -1,5 +1,5 @@
 {
-  "enable": false,
+  "enable": true,
   "label": "大肥鱼桌宠",
   "description": "由 Agent 真实工作状态驱动的桌面伴侣：透明置顶窗，思考/工作/等待/完成各有动作。",
   "scale": 0.65,
@@ -14,5 +14,77 @@
     "SUCCESS",
     "ERROR",
     "WAITING"
+  ],
+  "configSchema": [
+    {
+      "key": "scale",
+      "type": "number",
+      "min": 0.3,
+      "max": 1.6,
+      "step": 0.05,
+      "label": "大小",
+      "hint": "桌宠显示比例"
+    },
+    {
+      "key": "speed",
+      "type": "number",
+      "min": 0.25,
+      "max": 3,
+      "step": 0.05,
+      "label": "动作速度",
+      "hint": "动画播放倍率：1 为素材原速（42ms/帧），2 为快一倍"
+    },
+    {
+      "key": "playbackFps",
+      "type": "number",
+      "min": 24,
+      "max": 144,
+      "step": 1,
+      "label": "刷新帧率",
+      "hint": "换帧时机的精度上限；只影响画面顺滑度，不影响动作快慢"
+    },
+    {
+      "key": "bubbleScale",
+      "type": "number",
+      "min": 0.6,
+      "max": 1.6,
+      "step": 0.05,
+      "label": "气泡大小",
+      "hint": "对话气泡的缩放"
+    },
+    {
+      "key": "activityLevel",
+      "type": "enum",
+      "values": [
+        "quiet",
+        "normal",
+        "lively"
+      ],
+      "label": "活跃度",
+      "hint": "空闲时做小动作的频率"
+    },
+    {
+      "key": "bubbleMode",
+      "type": "enum",
+      "values": [
+        "always",
+        "custom",
+        "hidden"
+      ],
+      "label": "气泡模式",
+      "hint": "always 始终显示 / custom 仅特定状态 / hidden 不显示"
+    },
+    {
+      "key": "reducedMotion",
+      "type": "boolean",
+      "label": "减少动态",
+      "hint": "关闭拖拽、摸头等交互动画"
+    },
+    {
+      "key": "soundEnabled",
+      "type": "boolean",
+      "label": "提示音",
+      "hint": "交互时是否发声"
+    }
   ]
 }

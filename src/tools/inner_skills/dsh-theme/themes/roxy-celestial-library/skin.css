@@ -1,0 +1,369 @@
+/*
+ * 洛琪希·星穹水神书库 —— DSH 皮肤（转义版）
+ *
+ * 原包：https://github.com/mingdaok/deep-Roxy-Migurdia (MIT)
+ * 本文件是原版 roxy-skin.module.css 的忠实移植：视觉、配色、贴图技法全部保留，
+ * 只把选择器从 DSH 的私有钩子改写到 dsh-theme 转义层提供的钩子上。
+ *
+ * 锚点对照（详见 docs/dsh-dom-contract.md）：
+ *   [class*='_sidebarCol']      → dsh-theme 贴在 #left-sidebar 上的影子类
+ *   [class*='_frame']           → #app
+ *   [data-composer-card]        → .input-bar-body
+ *   [data-conversation-scroll]  → #message-area
+ *   [class*='_primary']         → .send-btn
+ *   --dsw-*                     → dsh-theme 补齐的令牌（tokens.js）
+ */
+
+/* ── 皮肤调色板 ───────────────────────────────────────────── */
+body[data-roxy-skin='roxy-migurdia'] {
+  --roxy-ink: #e9f4ff;
+  --roxy-muted: #9aafd0;
+  --roxy-ice: #82d9ff;
+  --roxy-gold: #d9b95f;
+  --roxy-deep: #030817;
+  --roxy-panel: rgba(5, 16, 38, 0.84);
+
+  background: var(--roxy-deep) !important;
+  color: var(--roxy-ink) !important;
+
+  /* 兼容层令牌换血（皮肤原文用的 --dsw-color-* 是 antd 体系命名） */
+  --dsw-color-bg: transparent;
+  --dsw-color-bg-base: transparent;
+  --dsw-color-bg-elevated: rgba(5, 16, 38, 0.9);
+  --dsw-color-bg-container: rgba(8, 24, 54, 0.78);
+  --dsw-color-bg-layout: transparent;
+  --dsw-color-border: rgba(128, 190, 233, 0.34);
+  --dsw-color-border-secondary: rgba(217, 185, 95, 0.27);
+  --dsw-color-text: var(--roxy-ink);
+  --dsw-color-text-secondary: var(--roxy-muted);
+  --dsw-color-primary: var(--roxy-ice);
+}
+
+/* 应用根：让皮肤装饰层透出来 */
+body[data-roxy-skin='roxy-migurdia'] #app {
+  position: relative;
+  z-index: 1;
+  background: transparent !important;
+}
+
+body[data-roxy-skin='roxy-migurdia'] #body-content,
+body[data-roxy-skin='roxy-migurdia'] #body-row,
+body[data-roxy-skin='roxy-migurdia'] #main-content {
+  background: transparent !important;
+}
+
+/* ── 装饰层（背景 + 立绘） ────────────────────────────────── */
+.roxy-scene {
+  position: fixed;
+  inset: 0 0 0 var(--dsh-sidebar-width, 260px);
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: #040d20;
+}
+
+.roxy-scene__background {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0.94;
+  filter: saturate(0.92) brightness(0.8) contrast(1.06);
+}
+
+.roxy-scene__character {
+  position: absolute;
+  z-index: 1;
+  right: clamp(12px, 2.8vw, 52px);
+  bottom: -5vh;
+  width: clamp(380px, 42vw, 660px);
+  max-height: 98vh;
+  object-fit: contain;
+  object-position: right bottom;
+  filter: drop-shadow(0 16px 34px rgba(0, 0, 0, 0.5));
+}
+
+/* ── 顶栏 ─────────────────────────────────────────────────── */
+body[data-roxy-skin='roxy-migurdia'] #header {
+  position: relative;
+  z-index: 4;
+  background: rgba(3, 10, 28, 0.9) !important;
+  border-bottom: 1px solid rgba(217, 185, 95, 0.68) !important;
+  box-shadow: 0 9px 28px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(16px);
+}
+
+/* ── 侧边栏 ───────────────────────────────────────────────── */
+body[data-roxy-skin='roxy-migurdia'] #left-sidebar {
+  --dsw-alias-label-primary: #f8fbff;
+  --dsw-alias-label-secondary: #d8e5f6;
+  --dsw-alias-label-tertiary: #b8c9e1;
+  --dsw-alias-label-caption: #91a8c8;
+  --dsw-alias-button-elevated-fill: rgba(17, 48, 88, 0.8);
+  --dsw-alias-button-floating-hover: rgba(33, 70, 118, 0.76);
+  --dsw-alias-interactive-bg-hover: rgba(130, 217, 255, 0.1);
+  --dsw-alias-interactive-bg-active: rgba(217, 185, 95, 0.2);
+  position: relative !important;
+  overflow: hidden;
+  background: #030b1e !important;
+  border-right: 1px solid rgba(217, 185, 95, 0.58) !important;
+  box-shadow: 10px 0 38px rgba(0, 0, 0, 0.35);
+}
+
+/* 全高纹样图（原版是 prepend 的 <img class="roxy-sidebar-plate">） */
+.roxy-sidebar-plate {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  opacity: 0.92;
+}
+
+body[data-roxy-skin='roxy-migurdia'] #left-sidebar > *:not(.roxy-sidebar-plate) {
+  position: relative;
+  z-index: 1;
+}
+
+body[data-roxy-skin='roxy-migurdia'] #left-sidebar button {
+  color: var(--roxy-ink);
+}
+
+/* 品牌区 */
+body[data-roxy-skin='roxy-migurdia'] #left-sidebar .sidebar-section-header {
+  margin: 15px 14px 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(130, 217, 255, 0.38);
+  border-radius: 10px;
+  background: rgba(4, 13, 35, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(217, 185, 95, 0.1);
+}
+
+body[data-roxy-skin='roxy-migurdia'] #left-sidebar .section-title {
+  color: #b8c9e1 !important;
+  letter-spacing: 0.08em;
+}
+
+body[data-roxy-skin='roxy-migurdia'] #left-sidebar .section-action-btn {
+  color: #c5d8ee !important;
+}
+
+/* 新建会话按钮 */
+body[data-roxy-skin='roxy-migurdia'] #new-session-btn {
+  margin: 10px 20px 16px !important;
+  border: 1px solid rgba(217, 185, 95, 0.72) !important;
+  border-radius: 999px !important;
+  background: rgba(11, 39, 72, 0.9) !important;
+  color: #f5fbff !important;
+  box-shadow: 0 7px 22px rgba(0, 0, 0, 0.28), inset 0 0 0 3px rgba(5, 18, 42, 0.08) !important;
+}
+
+body[data-roxy-skin='roxy-migurdia'] #new-session-btn:hover {
+  background: #12365e !important;
+  border-color: #f1d98b !important;
+}
+
+/* 会话条目 */
+body[data-roxy-skin='roxy-migurdia'] #left-sidebar .session-item {
+  margin-inline: 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #cbdaf0;
+}
+
+body[data-roxy-skin='roxy-migurdia'] #left-sidebar .session-item.active {
+  border-color: rgba(130, 217, 255, 0.36);
+  background: rgba(31, 62, 111, 0.64) !important;
+  color: #ffffff;
+  box-shadow: inset 3px 0 0 var(--roxy-gold);
+}
+
+/* 底部设置区 */
+body[data-roxy-skin='roxy-migurdia'] #sidebar-spacer {
+  border-top: 1px solid rgba(217, 185, 95, 0.2);
+  background: transparent;
+}
+
+body[data-roxy-skin='roxy-migurdia'] #remote-connect-btn {
+  border: 1px solid rgba(217, 185, 95, 0.2) !important;
+  border-radius: 9px !important;
+  color: #dbe8f7 !important;
+  background: rgba(8, 27, 57, 0.3) !important;
+  text-shadow: 0 1px 7px rgba(130, 217, 255, 0.14);
+}
+
+/* ── 会话流 ───────────────────────────────────────────────── */
+body[data-roxy-skin='roxy-migurdia'] #message-area {
+  position: relative;
+  z-index: 2;
+  background: rgba(3, 10, 28, 0.38) !important;
+  color: var(--roxy-ink);
+  scrollbar-color: rgba(130, 217, 255, 0.45) transparent;
+}
+
+body[data-roxy-skin='roxy-migurdia'] #message-area ::selection {
+  background: rgba(88, 189, 238, 0.38);
+  color: #ffffff;
+}
+
+body[data-roxy-skin='roxy-migurdia'] #message-area h1,
+body[data-roxy-skin='roxy-migurdia'] #message-area h2,
+body[data-roxy-skin='roxy-migurdia'] #message-area h3 {
+  color: #f5fbff;
+  font-family: Georgia, 'Noto Serif SC', 'Songti SC', serif;
+  letter-spacing: 0.025em;
+}
+
+body[data-roxy-skin='roxy-migurdia'] #message-area pre,
+body[data-roxy-skin='roxy-migurdia'] #message-area code {
+  border-color: rgba(130, 217, 255, 0.25);
+  background: rgba(2, 9, 24, 0.82);
+}
+
+body[data-roxy-skin='roxy-migurdia'] #message-list {
+  /* 阅读列比宿主默认（1200）窄。
+     宽度交给容器算：原版拿 100vw 减侧栏推列宽，可 seek-agent 的右侧栏也是活的——
+     栏宽从内容列里扣，100vw 并不扣，于是宽窗被钉死在 748、窄窗列会伸到右栏底下被裁掉。
+     宿主自己就是「max-width + margin: 0 auto」，皮肤只需收窄这一件事。 */
+  max-width: 748px;
+}
+
+/* ── 输入卡（皮肤主战场） ─────────────────────────────────── */
+body[data-roxy-skin='roxy-migurdia'] .input-bar-body {
+  position: relative !important;
+  isolation: isolate;
+  overflow: visible !important;
+  padding-top: 30px;
+  border: 0 !important;
+  border-radius: 22px !important;
+  background: rgba(6, 18, 43, 0.88) !important;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.42) !important;
+  backdrop-filter: blur(16px);
+  margin-block-end: 12px !important;
+}
+
+/* 九宫格金框（border-image 技法，与原版一致） */
+body[data-roxy-skin='roxy-migurdia'] .input-bar-body::before {
+  content: '';
+  position: absolute;
+  box-sizing: border-box;
+  inset: -28px -18px -16px;
+  z-index: 1;
+  border-style: solid;
+  border-width: 64px 44px 38px;
+  /* 兜底：图片缺失或解码失败时 border-image 不生效，边框会按 currentColor 实心绘制——
+     那就是一整块「大白框」。此处把边框色置透明，让图没就位时这块装饰干脆消失。 */
+  border-color: transparent;
+  border-image-source: var(--roxy-composer-frame-art);
+  border-image-slice: 132 110 92 110;
+  border-image-width: 64px 44px 38px 44px;
+  border-image-repeat: stretch;
+  pointer-events: none;
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.3));
+}
+
+body[data-roxy-skin='roxy-migurdia'] .input-bar-body > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* 输入区微调：工具行高度、按钮尺寸 */
+body[data-roxy-skin='roxy-migurdia'] .input-toolbar {
+  min-height: 48px;
+  padding: 2px 14px 10px;
+  align-items: center;
+}
+
+body[data-roxy-skin='roxy-migurdia'] .input-toolbar-left,
+body[data-roxy-skin='roxy-migurdia'] .input-actions {
+  gap: 9px;
+  align-items: center;
+}
+
+body[data-roxy-skin='roxy-migurdia'] .input-bar textarea {
+  color: #edf7ff !important;
+  caret-color: var(--roxy-ice);
+}
+
+body[data-roxy-skin='roxy-migurdia'] .input-bar textarea::placeholder {
+  color: #8196b8 !important;
+}
+
+body[data-roxy-skin='roxy-migurdia'] .input-bar button {
+  color: #c6dbf4;
+}
+
+/* 发送按钮（原版 [class*='_primary']） */
+body[data-roxy-skin='roxy-migurdia'] .send-btn {
+  border: 1px solid rgba(130, 217, 255, 0.75) !important;
+  background: #184c78 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 18px rgba(84, 193, 255, 0.27);
+}
+
+body[data-roxy-skin='roxy-migurdia'] .send-btn:hover:not(:disabled) {
+  background: #1d5f92 !important;
+  border-color: #a8e4ff !important;
+}
+
+/* ── 浮动层 / 弹窗 ────────────────────────────────────────── */
+body[data-roxy-skin='roxy-migurdia'] [role='dialog'],
+body[data-roxy-skin='roxy-migurdia'] [role='menu'] {
+  color: var(--roxy-ink);
+}
+
+body[data-roxy-skin='roxy-migurdia'] [role='dialog'] {
+  --dsw-color-bg-elevated: rgba(8, 16, 34, 0.98);
+  --dsw-color-bg-container: rgba(12, 23, 45, 0.98);
+  color: var(--roxy-ink) !important;
+  border-color: rgba(130, 217, 255, 0.28) !important;
+}
+
+/* ── 右侧栏 ───────────────────────────────────────────────── */
+body[data-roxy-skin='roxy-migurdia'] #info-panel {
+  background: rgba(4, 13, 33, 0.86) !important;
+  border-left: 1px solid rgba(217, 185, 95, 0.38) !important;
+  color: var(--roxy-ink);
+}
+
+/* ── 滚动条 ───────────────────────────────────────────────── */
+body[data-roxy-skin='roxy-migurdia'] ::-webkit-scrollbar-thumb {
+  background: rgba(130, 217, 255, 0.28);
+}
+
+body[data-roxy-skin='roxy-migurdia'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(130, 217, 255, 0.45);
+}
+
+/* ── 响应式 ───────────────────────────────────────────────── */
+@media (max-width: 1180px) {
+  .roxy-scene__character {
+    width: clamp(280px, 31vw, 420px);
+    opacity: 0.82;
+  }
+}
+
+@media (max-width: 900px) {
+  .roxy-scene__character {
+    display: none;
+  }
+
+  body[data-roxy-skin='roxy-migurdia'] .input-bar-body::before {
+    inset-inline: -10px;
+    border-right-width: 36px;
+    border-left-width: 36px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-roxy-skin='roxy-migurdia'] * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

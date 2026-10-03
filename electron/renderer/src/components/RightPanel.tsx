@@ -100,12 +100,23 @@ export function RightPanel({ runtimeData, open, onOpenFile, onOpenFileInReview, 
     const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY));
     return clampPanelWidth(Number.isFinite(saved) && saved > 0 ? saved : PANEL_WIDTH_DEFAULT);
   });
-  /** 拖拽中：面板自身禁用宽度过渡、全局统一光标 */
+  /** 拖拽中：面板自身禁用宽度过渡，光标交给遮罩层 */
   const [resizing, setResizing] = useState(false);
   /** 拖拽基准（按下时的鼠标 x 与面板实测宽度） */
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
+  /** 面板元素：拖拽中绕开 React，直接改它身上的 CSS 变量 */
+  const panelRef = useRef<HTMLElement | null>(null);
+  /** 拖拽中的实时宽度（松手时才提交给 state） */
+  const liveWidthRef = useRef<number | null>(null);
+  /** 待应用的帧：同一帧内的多次 mousemove 只写一次 DOM */
+  const resizeRafRef = useRef<number | null>(null);
 
-  useEffect(() => { localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth)); }, [panelWidth]);
+  // 宽度落盘：挂在 panelWidth 上的同步 localStorage 写，在拖拽中等于"每个像素一次磁盘 IO"。
+  // 拖拽期间跳过，松手提交 state 后由这次 effect 统一写一遍。
+  useEffect(() => {
+    if (resizing) return;
+    localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth));
+  }, [panelWidth, resizing]);
 
   // 窗口尺寸变化后重新夹取：窗口变窄时，旧宽度可能已越过上限
   useEffect(() => {
@@ -114,23 +125,48 @@ export function RightPanel({ runtimeData, open, onOpenFile, onOpenFileInReview, 
     return () => window.removeEventListener('resize', onWindowResize);
   }, []);
 
-  // 拖拽：mousemove/mouseup 挂在 document 上，鼠标移出把手也能跟手
+  // 拖拽：mousemove/mouseup 挂在 document 上，鼠标移出把手也能跟手。
+  //
+  // 这里刻意不走 state：面板宽度直接决定 #body-row 两个 flex 子项（主区 + 右栏）的尺寸，
+  // 走 state 等于每个 mousemove 都要渲染一遍 React 树、再让两边的大 DOM 各重排一次
+  //（左边是每行两个节点的编辑器，右边是整棵消息树）。改成直接写 CSS 变量，
+  // 并用 rAF 合并同帧的多次事件（mousemove 的派发频率可以远高于屏幕刷新率），
+  // 松手才把最终值提交给 state。
   useEffect(() => {
     if (!resizing) return;
+    /** 把待应用宽度写进 DOM（不经 React） */
+    const apply = () => {
+      resizeRafRef.current = null;
+      const w = liveWidthRef.current;
+      if (w != null) panelRef.current?.style.setProperty('--right-panel-width', `${w}px`);
+    };
     const onMove = (e: MouseEvent) => {
       const start = resizeStartRef.current;
       if (!start) return;
       // 向左拖 → 变宽：宽度 = 基准宽度 - 水平位移
-      setPanelWidth(clampPanelWidth(start.width - (e.clientX - start.x)));
+      liveWidthRef.current = clampPanelWidth(start.width - (e.clientX - start.x));
+      if (resizeRafRef.current == null) resizeRafRef.current = requestAnimationFrame(apply);
     };
-    const onUp = () => setResizing(false);
+    const onUp = () => {
+      if (resizeRafRef.current != null) {
+        cancelAnimationFrame(resizeRafRef.current);
+        resizeRafRef.current = null;
+      }
+      const w = liveWidthRef.current;
+      liveWidthRef.current = null;
+      // 提交给 state：此后样式重新由 React 接管，值与刚手写的一致，不会跳
+      if (w != null) setPanelWidth(w);
+      setResizing(false);
+    };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
-    document.body.classList.add('panel-resizing');
     return () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      document.body.classList.remove('panel-resizing');
+      if (resizeRafRef.current != null) {
+        cancelAnimationFrame(resizeRafRef.current);
+        resizeRafRef.current = null;
+      }
     };
   }, [resizing]);
 
@@ -138,8 +174,9 @@ export function RightPanel({ runtimeData, open, onOpenFile, onOpenFileInReview, 
     if (e.button !== 0) return;
     e.preventDefault();
     // 以实测宽度为基准（收起动画中途、或被夹取过，状态值未必等于实际值）
-    const measured = document.getElementById('info-panel')?.getBoundingClientRect().width ?? panelWidth;
+    const measured = panelRef.current?.getBoundingClientRect().width ?? panelWidth;
     resizeStartRef.current = { x: e.clientX, width: measured };
+    liveWidthRef.current = null;
     setResizing(true);
   };
 
@@ -159,6 +196,10 @@ export function RightPanel({ runtimeData, open, onOpenFile, onOpenFileInReview, 
 
   return (
     <>
+      {/* 拖拽遮罩：接管整屏光标与鼠标事件。替代原先的 body.panel-resizing * 通配符规则——
+          那条规则会让浏览器对全文档每个元素重算一次样式（cursor/user-select 还是继承属性），
+          拖拽起手与松手各卡一下 */}
+      {resizing && <div className="panel-resize-shield" />}
       {/* 宽度把手：0 宽占位（不参与 #body-row 布局），热区由 ::before 跨在边界上 */}
       {open !== false && (
         <div
@@ -170,7 +211,7 @@ export function RightPanel({ runtimeData, open, onOpenFile, onOpenFileInReview, 
           aria-orientation="vertical"
         />
       )}
-      <aside id="info-panel" className={panelClass} style={{ '--right-panel-width': `${panelWidth}px` } as React.CSSProperties}>
+      <aside id="info-panel" ref={panelRef} className={panelClass} style={{ '--right-panel-width': `${panelWidth}px` } as React.CSSProperties}>
         <div className="panel-tabs">
           {/* 「会话」Tab：把主消息界面搬到这里（切到文件编辑器后仍能看会话进展/继续发消息） */}
           <span className={`panel-tab${currentTab === 'session' ? ' active' : ' inactive'}`} onClick={() => { setCurrentTab('session'); onSwitchToSession?.(); }}>会话</span>

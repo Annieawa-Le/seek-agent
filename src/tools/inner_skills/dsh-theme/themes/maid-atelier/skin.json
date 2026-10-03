@@ -1,0 +1,36 @@
+{
+  "id": "maid-atelier",
+  "name": "深海女仆工坊",
+  "nameEn": "Abyssal Maid Atelier",
+  "version": "0.0.1",
+  "description": "一套面向 DeepSeek Harness WebUI 的高定制动漫角色皮肤。它使用双女仆工坊场景作为对话区背景，以深海蓝、陶瓷白、长春花蓝和柔金构成可热切换的 UI 覆盖层，并为加载、思考和工具运行状态预留稳定动画钩子。",
+  "author": "Small-tailqwq",
+  "license": "CC-BY-NC-SA-4.0",
+  "source": "DSH-Desktop-EAC dsh-desktop/assets/skins/maid-atelier · 上游包 @dsh-external/dsh-client-ui-skin-maid-atelier",
+  "tags": [
+    "anime",
+    "maid",
+    "whale",
+    "navy",
+    "ornate",
+    "glass"
+  ],
+  "palette": {
+    "background": "transparent",
+    "panel": "#ebf0fad6",
+    "text": "#172347",
+    "accent": "#c5a468"
+  },
+  "css": "skin.css",
+  "script": "skin.js",
+  "colorScheme": "dark",
+  "scope": {
+    "owner": "ui-skin-maid-atelier",
+    "bodyAttribute": "data-dsh-maid-atelier"
+  },
+  "upstream": {
+    "package": "@dsh-external/dsh-client-ui-skin-maid-atelier",
+    "wiringId": "ui-skin-maid-atelier",
+    "repository": ""
+  }
+}

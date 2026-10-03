@@ -99,7 +99,9 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
   };
 
   return (
-    <aside id="left-sidebar" className={open ? 'open' : ''}>
+    // div 而非 aside：dsh-theme 的转义层要在外面套一层 [data-pane=sidebar] 的 slot 包装，
+    // 皮肤按 DSH 契约写的 [data-pane=sidebar] > div 需要命中这个真实盒子（aside 匹配不到）
+    <div id="left-sidebar" className={open ? 'open' : ''}>
       <div className="sidebar-section-header">
         <span className="section-title">Sessions</span>
         <div className="section-actions">
@@ -174,7 +176,7 @@ export function LeftSidebar({ open, currentSessionId, runtimeData, onNewSession,
         </div>
       )}
 
-    </aside>
+    </div>
   );
 }
 

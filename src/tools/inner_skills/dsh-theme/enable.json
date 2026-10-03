@@ -1,0 +1,14 @@
+{
+  "enable": true,
+  "label": "主题皮肤",
+  "description": "dsh-theme：DSH 皮肤加载器。为 DeepSeek Harness 编写的第三方主题皮肤包（skin.json + CSS + 素材）可直接加载——转义层把 seek-agent 的 DOM 伪装成 DSH 结构（影子类名 + data-slot/data-* 钩子 + --dsw-* 令牌表），皮肤 CSS 一行不改即生效。宿主半区（host.mjs，皮肤包托管）由 Electron 主进程按本目录开关托管；把 enable 设为 false 或删除本目录即可整体卸载。",
+  "theme": "",
+  "configSchema": [
+    {
+      "key": "theme",
+      "type": "skin",
+      "label": "主题皮肤",
+      "hint": "从已安装皮肤中切换；切换立即生效，无需重启"
+    }
+  ]
+}

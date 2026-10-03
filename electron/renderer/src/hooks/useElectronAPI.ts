@@ -107,10 +107,16 @@ export function useElectronAPI() {
     return api.setPluginEnabled(name, enabled);
   }, [api]);
 
-  /** 改写某插件的次级选项（如 dsh-raw-html 的可信模式，重启生效） */
-  const setPluginOption = useCallback(async (name: string, key: string, value: boolean) => {
-    if (!api?.setPluginOption) return { ok: false, error: '当前通道不支持该操作' };
-    return api.setPluginOption(name, key, value);
+  /** 统一写插件配置（patch 按插件声明的 configSchema 校验与夹取） */
+  const setPluginConfig = useCallback(async (name: string, patch: Record<string, unknown>) => {
+    if (!api?.setPluginConfig) return { ok: false, error: '当前通道不支持该操作' };
+    return api.setPluginConfig(name, patch);
+  }, [api]);
+
+  /** 取某插件动态字段候选项（如主题皮肤列表） */
+  const getPluginFieldOptions = useCallback(async (name: string, key: string) => {
+    if (!api?.getPluginFieldOptions) return { ok: false, options: [], error: '当前通道不支持该操作' };
+    return api.getPluginFieldOptions(name, key);
   }, [api]);
 
   /** 读桌宠配置（含可调项 schema） */
@@ -366,7 +372,8 @@ export function useElectronAPI() {
     saveEnvConfig,
     getPlugins,
     setPluginEnabled,
-    setPluginOption,
+    setPluginConfig,
+    getPluginFieldOptions,
     getPetConfig,
     setPetConfig,
     minimizeWindow,

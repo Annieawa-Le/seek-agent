@@ -74,3 +74,13 @@ tmp/
 
 # 技能内测试产物（dsh 技能测试脚本用的临时 DSH_HOME）
 .test-data*/
+
+
+
+# 再分发许可不明确的第三方素材（不进公开仓库）
+# 造字工房「朗宋/颜宋」为免费非商用字体，字体文件再分发未获授权；「鱼尾行书」来源不明无许可声明
+src/tools/inner_skills/dsh-raw-html/assets/fonts/Lanxi-朗宋.woff2
+src/tools/inner_skills/dsh-raw-html/assets/fonts/Lanxi-颜宋.woff2
+src/tools/inner_skills/dsh-raw-html/assets/fonts/Lanxi-鱼尾行书.woff2
+# dsh-meme 内置表情图库 manifest 声明 license: personal（仅个人使用，不可再分发）
+src/tools/inner_skills/dsh-meme/memes/dafeiyu-001/

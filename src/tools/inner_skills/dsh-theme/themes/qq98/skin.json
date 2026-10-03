@@ -1,0 +1,34 @@
+{
+  "id": "qq98",
+  "name": "QQ2008 怀旧版",
+  "nameEn": "QQ2008 Retro",
+  "version": "0.1.11",
+  "description": "dsh web ui 家族收录的第一个皮肤：QQ2008 水晶蓝年代。深蓝渐变桌面、玻璃质感标题栏、浅蓝状态栏和圆角高光控件，配一只戴围巾的企鹅。",
+  "author": "dsh-web-ui",
+  "license": "BSD-3-Clause",
+  "source": "DSH-Desktop-EAC dsh-desktop/assets/skins/qq98 · 上游包 @linxin666/dsh-client-ui-skin-qq98",
+  "tags": [
+    "retro",
+    "qq",
+    "2008",
+    "crystal-blue",
+    "nostalgia"
+  ],
+  "palette": {
+    "background": "#fff",
+    "panel": "#e8f1fa",
+    "text": "#17293c",
+    "accent": "#2b7cd9"
+  },
+  "css": "skin.css",
+  "script": "skin.js",
+  "scope": {
+    "owner": "ui-skin-qq98",
+    "bodyAttribute": "data-dsh-retro"
+  },
+  "upstream": {
+    "package": "@linxin666/dsh-client-ui-skin-qq98",
+    "wiringId": "ui-skin-qq98",
+    "repository": "https://github.com/zhu1090093659/dsh-web-ui.git"
+  }
+}

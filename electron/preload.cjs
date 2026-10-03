@@ -237,6 +237,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('plugins:setOption', name, key, value);
   },
 
+  /** 统一写插件配置（patch 形如 {key: value}，按插件声明的 configSchema 校验与夹取） */
+  setPluginConfig: async (name, patch) => {
+    return ipcRenderer.invoke('plugins:setConfig', name, patch);
+  },
+
+  /** 取某插件动态字段的候选项（如主题皮肤列表） */
+  getPluginFieldOptions: async (name, key) => {
+    return ipcRenderer.invoke('plugins:fieldOptions', name, key);
+  },
+
+  /** 读取已安装主题皮肤清单（设置面板「主题」栏目用） */
+  themeList: async () => {
+    return ipcRenderer.invoke('theme:list');
+  },
+
+  /** 切换主题皮肤（写回 enable.json 并热切换，立即生效；传空串恢复默认） */
+  themeActivate: async (id) => {
+    return ipcRenderer.invoke('theme:activate', id);
+  },
+
   /** 读桌宠配置（含可调项 schema，设置面板「插件」板块用） */
   getPetConfig: async () => {
     return ipcRenderer.invoke('pet:getConfig');
@@ -326,6 +346,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('window:isMaximized');
   },
 });
+
 
 
 

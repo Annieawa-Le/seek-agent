@@ -1,3 +1,17 @@
+/** 插件配置项的字段声明（由插件在 enable.json 的 configSchema 里自报）。 */
+export interface PluginConfigField {
+  key: string;
+  label: string;
+  /** boolean / number / enum / skin / text */
+  type?: 'boolean' | 'number' | 'enum' | 'skin' | 'text';
+  hint?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  /** enum 的候选值（skin 类型的候选项由主进程动态提供） */
+  values?: string[];
+}
+
 export interface PluginInfo {
   name: string;
   label: string;
@@ -5,142 +19,272 @@ export interface PluginInfo {
   enabled: boolean;
   running: boolean;
   port: number;
+  /** 插件自声明的配置项；空数组表示该插件没有可配项 */
+  configSchema?: PluginConfigField[];
+  /** 当前配置值 */
+  config?: Record<string, unknown>;
 }
 
-interface PetConfigField {
-  type: 'number' | 'boolean' | 'enum';
-  label: string;
-  hint?: string;
-  min?: number;
-  max?: number;
-  step?: number;
-  values?: string[];
-}
 
-/** 桌宠专属配置：从主进程拿 schema 动态渲染，改完立即下发到运行中的窗口。 */
-function PetConfigSection() {
-  const api = useElectronAPI();
-  const [schema, setSchema] = useState<Record<string, PetConfigField>>({});
-  const [values, setValues] = useState<Record<string, unknown>>({});
-  const [msg, setMsg] = useState('');
-  const [err, setErr] = useState('');
-  const [dirty, setDirty] = useState(false);
+/** 单个配置项的编辑器：按 field.type 渲染对应控件（写回由父组件统一处理）。 */
+function PluginFieldEditor({
+  field, value, disabled, options, onChange,
+}: {
+  field: PluginConfigField;
+  value: unknown;
+  disabled: boolean;
+  /** 动态候选项（skin 等类型由主进程下发） */
+  options: Array<{ value: string; label: string }>;
+  onChange: (v: unknown) => void;
+}) {
+  const type = field.type || 'text';
+  const labelRow = (
+    <label style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>
+      {field.label}
+      {field.hint && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> — {field.hint}</span>}
+    </label>
+  );
 
-  useEffect(() => {
-    api?.getPetConfig?.()
-      .then((res: any) => {
-        if (!res?.ok) return;
-        setSchema(res.schema || {});
-        setValues(res.config || {});
-      })
-      .catch(() => { /* 读不到就不渲染 */ });
-  }, [api]);
+  if (type === 'boolean') {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: disabled ? 'default' : 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={value === true || value === 'true'}
+            disabled={disabled}
+            onChange={(e) => onChange(e.target.checked)}
+            style={{ width: 15, height: 15, marginTop: 2, cursor: 'pointer' }}
+          />
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            {field.label}
+            {field.hint && <span style={{ color: 'var(--text-muted)' }}> — {field.hint}</span>}
+          </span>
+        </label>
+      </div>
+    );
+  }
 
-  const change = useCallback((key: string, v: unknown) => {
-    setValues(prev => ({ ...prev, [key]: v }));
-    setDirty(true);
-    setMsg('');
-    setErr('');
-  }, []);
+  if (type === 'number') {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        {labelRow}
+        <input
+          type="number"
+          value={value === undefined || value === null ? '' : String(value)}
+          min={field.min} max={field.max} step={field.step}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+          style={{ ...inputStyle, width: 160 }}
+        />
+        {field.min !== undefined && field.max !== undefined && (
+          <span style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 8 }}>{field.min} ~ {field.max}</span>
+        )}
+      </div>
+    );
+  }
 
-  const save = useCallback(async () => {
-    try {
-      const res: any = await api?.setPetConfig?.(values);
-      if (res?.ok) {
-        setValues(res.config || values);
-        setDirty(false);
-        setMsg('已保存，桌宠立即生效');
-      } else {
-        setErr(res?.error || '保存失败');
-      }
-    } catch (e: any) {
-      setErr(e?.message || '保存失败');
-    }
-  }, [api, values]);
-
-  const entries = Object.entries(schema);
-  if (entries.length === 0) return null;
+  if (type === 'enum' || type === 'skin') {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        {labelRow}
+        <select
+          value={String(value ?? '')}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ ...inputStyle, width: 240 }}
+        >
+          {type === 'skin' && <option value="">（不使用皮肤）</option>}
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        {options.length === 0 && (
+          <span style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 8 }}>暂无可选项</span>
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div style={{ marginTop: 18, borderTop: '1px dashed #e5e7eb', paddingTop: 16 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#1f2328', marginBottom: 4 }}>大肥鱼桌宠选项</div>
-      <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 14, lineHeight: 1.7 }}>
-        改动保存后立即下发给桌宠窗口，无需重启。
-      </div>
-
-      {entries.map(([key, field]) => (
-        <div key={key} style={{ marginBottom: 14 }}>
-          <label style={{ display: 'block', fontSize: 13, color: '#444', marginBottom: 6 }}>
-            {field.label}
-            <span style={{ color: '#b0b3b8', marginLeft: 8, fontSize: 12 }}>{key}</span>
-          </label>
-          {field.type === 'boolean' ? (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={values[key] === true}
-                onChange={e => change(key, e.target.checked)}
-                style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
-              />
-              {field.hint && <span style={{ fontSize: 12, color: '#8c8c8c', lineHeight: 1.6 }}>{field.hint}</span>}
-            </label>
-          ) : field.type === 'enum' ? (
-            <div>
-              <select
-                value={String(values[key] ?? '')}
-                onChange={e => change(key, e.target.value)}
-                style={{ width: '100%', padding: '8px 10px', border: '1px solid #d0d3d6', borderRadius: 6, fontSize: 13, color: '#1f2328' }}
-              >
-                {(field.values || []).map(v => <option key={v} value={v}>{v}</option>)}
-              </select>
-              {field.hint && <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6, lineHeight: 1.6 }}>{field.hint}</div>}
-            </div>
-          ) : (
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <input
-                  type="range"
-                  min={field.min}
-                  max={field.max}
-                  step={field.step}
-                  value={Number(values[key] ?? field.min ?? 0)}
-                  onChange={e => change(key, Number(e.target.value))}
-                  style={{ flex: 1, cursor: 'pointer' }}
-                />
-                <input
-                  type="number"
-                  min={field.min}
-                  max={field.max}
-                  step={field.step}
-                  value={Number(values[key] ?? field.min ?? 0)}
-                  onChange={e => change(key, Number(e.target.value))}
-                  style={{ width: 76, padding: '5px 8px', border: '1px solid #d0d3d6', borderRadius: 6, fontSize: 13 }}
-                />
-              </div>
-              {field.hint && <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6, lineHeight: 1.6 }}>{field.hint}</div>}
-            </div>
-          )}
-        </div>
-      ))}
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <button
-          type="button"
-          onClick={save}
-          disabled={!dirty}
-          style={{
-            background: dirty ? '#3370ff' : '#c9d6f5', color: '#fff', border: 'none', borderRadius: 6,
-            padding: '7px 16px', fontSize: 13, cursor: dirty ? 'pointer' : 'default',
-          }}
-        >保存桌宠设置</button>
-        {msg && <span style={{ color: '#2e7d32', fontSize: 13 }}>{msg}</span>}
-        {err && <span style={{ color: '#d93026', fontSize: 13 }}>{err}</span>}
-      </div>
+    <div style={{ marginBottom: 12 }}>
+      {labelRow}
+      <input
+        type="text"
+        value={String(value ?? '')}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={inputStyle}
+      />
     </div>
   );
 }
 
-/** 插件板块：列出挂件插件，开关写回各自 enable.json（重启 seek-agent 生效）。 */
+/** 单张插件卡片：头部信息 + 启用开关；有配置项时可展开编辑。 */
+function PluginCard({
+  plugin, busy, onToggle, onSave,
+}: {
+  plugin: PluginInfo;
+  busy: string;
+  onToggle: (p: PluginInfo, next: boolean) => void;
+  onSave: (p: PluginInfo, patch: Record<string, unknown>) => Promise<void>;
+}) {
+  const api = useElectronAPI();
+  const fields = plugin.configSchema || [];
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState<Record<string, unknown>>(() => ({ ...(plugin.config || {}) }));
+  const [dirty, setDirty] = useState(false);
+  // 动态候选项：skin / 未知类型在下拉前拉一次
+  const [options, setOptions] = useState<Record<string, Array<{ value: string; label: string }>>>({});
+
+  // 父组件刷新插件清单后，若本地无未保存改动，同步最新配置
+  useEffect(() => {
+    if (!dirty) setDraft({ ...(plugin.config || {}) });
+  }, [plugin.config, dirty]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    let cancelled = false;
+    const need = fields.filter((f) => f.type === 'skin');
+    (async () => {
+      const next: Record<string, Array<{ value: string; label: string }>> = {};
+      for (const f of need) {
+        try {
+          const res: any = await api?.getPluginFieldOptions?.(plugin.name, f.key);
+          if (!cancelled && res?.ok) next[f.key] = res.options || [];
+        } catch { /* 拉不到就空列表 */ }
+      }
+      if (!cancelled) setOptions(next);
+    })();
+    return () => { cancelled = true; };
+  }, [expanded, api, plugin.name, fields]);
+
+  const setField = useCallback((key: string, v: unknown) => {
+    setDraft((prev) => ({ ...prev, [key]: v }));
+    setDirty(true);
+  }, []);
+
+  const save = useCallback(async () => {
+    // 只提交变化过的键，避免无谓写盘
+    const patch: Record<string, unknown> = {};
+    for (const f of fields) {
+      const before = (plugin.config || {})[f.key];
+      const now = draft[f.key];
+      if (String(before ?? '') !== String(now ?? '')) patch[f.key] = now;
+    }
+    if (Object.keys(patch).length === 0) { setDirty(false); return; }
+    await onSave(plugin, patch);
+    setDirty(false);
+  }, [fields, plugin, draft, onSave]);
+
+  const busyKey = busy === plugin.name;
+  const hasConfig = fields.length > 0;
+
+  return (
+    <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+      {/* 卡片头：点击展开（开关与展开互不干扰，开关点击阻止冒泡） */}
+      <div
+        onClick={() => hasConfig && setExpanded((v) => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '12px 14px',
+          cursor: hasConfig ? 'pointer' : 'default',
+          background: expanded ? 'var(--accent-bg)' : 'transparent',
+        }}
+      >
+        <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+          {hasConfig && (
+            <span style={{
+              flexShrink: 0, color: 'var(--text-muted)', fontSize: 11, display: 'inline-block',
+              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .15s',
+            }}>▶</span>
+          )}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {plugin.label}
+              <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>{plugin.name}</span>
+              <span style={{
+                fontSize: 11, padding: '1px 7px', borderRadius: 10,
+                color: plugin.running ? 'var(--success)' : 'var(--text-muted)',
+                background: plugin.running ? 'var(--success-bg)' : 'var(--bg-hover)',
+              }}>{plugin.running ? `运行中 :${plugin.port}` : '未启动'}</span>
+              {hasConfig && (
+                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>{fields.length} 项配置</span>
+              )}
+            </div>
+            {plugin.description && !expanded && (
+              <div style={{
+                fontSize: 12, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 560,
+              }}>{plugin.description}</div>
+            )}
+          </div>
+        </div>
+        <label
+          onClick={(e) => e.stopPropagation()}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, cursor: 'pointer' }}
+        >
+          <input
+            type="checkbox"
+            checked={plugin.enabled}
+            disabled={busyKey}
+            onChange={(e) => onToggle(plugin, e.target.checked)}
+            style={{ width: 16, height: 16, cursor: 'pointer' }}
+          />
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{plugin.enabled ? '已启用' : '已禁用'}</span>
+        </label>
+      </div>
+
+      {/* 卡片体：展开后的配置区 */}
+      {expanded && hasConfig && (
+        <div style={{ borderTop: '1px solid var(--border-subtle)', padding: '14px 16px', background: 'var(--bg-elevated)' }}>
+          {plugin.description && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.7 }}>{plugin.description}</div>
+          )}
+          {fields.map((f) => (
+            <PluginFieldEditor
+              key={f.key}
+              field={f}
+              value={draft[f.key]}
+              disabled={busyKey}
+              options={f.type === 'skin' ? (options[f.key] || []) : (f.values || []).map((v) => ({ value: v, label: v }))}
+              onChange={(v) => setField(f.key, v)}
+            />
+          ))}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+            <button
+              type="button"
+              onClick={save}
+              disabled={!dirty || busyKey}
+              style={{
+                ...smallBtnStyle,
+                color: dirty ? 'var(--bg-base)' : 'var(--text-muted)',
+                background: dirty ? 'var(--accent)' : 'var(--bg-hover)',
+                borderColor: dirty ? 'var(--accent)' : 'var(--border-default)',
+                cursor: dirty ? 'pointer' : 'default',
+              }}
+            >{busyKey ? '保存中…' : '保存'}</button>
+            {dirty && (
+              <button
+                type="button"
+                onClick={() => { setDraft({ ...(plugin.config || {}) }); setDirty(false); }}
+                style={smallBtnStyle}
+              >撤销</button>
+            )}
+            {!dirty && <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>改动后点保存</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 插件板块：每插件一张可展开卡片（头部 = 身份/状态/开关，展开 = 该插件的配置项）。
+ *
+ * 配置项不是前端硬编码的——插件在 enable.json 里自报 configSchema，这里按 schema 渲染。
+ * 新增插件要加配置，只需在自己的 enable.json 里声明字段，前端零改动。
+ */
 function PluginsSection() {
   const api = useElectronAPI();
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
@@ -175,87 +319,43 @@ function PluginsSection() {
     }
   }, [api]);
 
-  // 次级选项（现仅「视觉卡片」的可信模式）：写回 enable.json，同样重启生效
-  const toggleOption = useCallback(async (p: PluginInfo, key: string, next: boolean) => {
-    setBusy(p.name + ':' + key);
+  // 统一配置写入：主进程按插件声明的 schema 校验与夹取，并按插件分派热应用
+  const saveConfig = useCallback(async (p: PluginInfo, patch: Record<string, unknown>) => {
+    setBusy(p.name);
     setNotice('');
     setError('');
     try {
-      const res: any = await api?.setPluginOption?.(p.name, key, next);
+      const res: any = await api?.setPluginConfig?.(p.name, patch);
       if (res?.ok) {
-        setNotice(`「${p.label}」的可信模式已${next ? '开启' : '关闭'}，重启 seek-agent 生效`);
+        setPlugins(res.plugins || []);
+        setNotice(res.restartRequired
+          ? `「${p.label}」配置已保存，重启 seek-agent 生效`
+          : `「${p.label}」配置已保存并立即生效`);
       } else {
-        setError(res?.error || '操作失败');
+        setError(res?.error || '保存失败');
       }
     } catch (e: any) {
-      setError(e?.message || '操作失败');
+      setError(e?.message || '保存失败');
     } finally {
       setBusy('');
     }
   }, [api]);
 
   if (plugins.length === 0) {
-    return <div style={{ fontSize: 13, color: '#8c8c8c' }}>没有可管理的挂件插件。</div>;
+    return <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>没有可管理的挂件插件。</div>;
   }
 
   return (
     <div>
-      <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 14, lineHeight: 1.7 }}>
-        挂件插件由 Electron 主进程托管：开关写回各自 inner_skill 目录下的 enable.json，重启 seek-agent 后生效。
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.7 }}>
+        挂件插件由 Electron 主进程托管：开关与配置写回各自 inner_skill 目录下的 enable.json。
+        点击卡片可展开该插件的配置项（配置项由插件自行声明，这里按声明渲染）。
       </div>
       {plugins.map((p) => (
-        <div
-          key={p.name}
-          style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: '#1f2328', display: 'flex', alignItems: 'center', gap: 8 }}>
-                {p.label}
-                <span style={{ fontSize: 11, fontWeight: 400, color: '#8c8c8c' }}>{p.name}</span>
-                <span style={{
-                  fontSize: 11, padding: '1px 7px', borderRadius: 10,
-                  color: p.running ? '#2e7d32' : '#8c8c8c',
-                  background: p.running ? '#e8f5e9' : '#f0f0f0',
-                }}>{p.running ? `运行中 :${p.port}` : '未启动'}</span>
-              </div>
-              {p.description && (
-                <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6, lineHeight: 1.6 }}>{p.description}</div>
-              )}
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={p.enabled}
-                disabled={busy === p.name}
-                onChange={(e) => toggle(p, e.target.checked)}
-                style={{ width: 16, height: 16, cursor: 'pointer' }}
-              />
-              <span style={{ fontSize: 13, color: '#444' }}>{p.enabled ? '已启用' : '已禁用'}</span>
-            </label>
-          </div>
-          {p.name === 'dsh-raw-html' && p.enabled && (
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                defaultChecked={false}
-                disabled={busy === p.name + ':trusted'}
-                onChange={(e) => toggleOption(p, 'trusted', e.target.checked)}
-                style={{ width: 15, height: 15, marginTop: 2, cursor: 'pointer' }}
-              />
-              <span style={{ fontSize: 12, color: '#555', lineHeight: 1.6 }}>
-                可信模式（允许卡片内 &lt;script&gt; 执行）
-                <span style={{ color: '#8c8c8c' }}>
-                  {' '}— 脚本被关在 iframe 沙箱里，拿不到界面与本机能力；默认关闭
-                </span>
-              </span>
-            </label>
-          )}
-        </div>
+        <PluginCard key={p.name} plugin={p} busy={busy} onToggle={toggle} onSave={saveConfig} />
       ))}
-      {notice && <div style={{ color: '#2e7d32', fontSize: 13, marginTop: 4 }}>{notice}</div>}
-      {error && <div style={{ color: '#d93026', fontSize: 13, marginTop: 4 }}>{error}</div>}
-      <PetConfigSection />
+      {notice && <div style={{ color: 'var(--success)', fontSize: 13, marginTop: 4 }}>{notice}</div>}
+      {error && <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 4 }}>{error}</div>}
     </div>
   );
 }
@@ -265,8 +365,38 @@ function PluginsSection() {
 import { useEffect, useState, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import { useElectronAPI } from '@/hooks/useElectronAPI.ts';
+import { listSettingsSections, type SettingsSection } from '@/utils/settings-extension.ts';
 
 interface Props { onClose: () => void; }
+/**
+ * 插件栏目的分组 key 前缀。
+ * 插件 label 可能与内置分组重名（如两份「主题」），加前缀与内置分组彻底隔开——
+ * 左列显示的是 label（无前缀），只有内部 key 带前缀。
+ */
+const PLUGIN_GROUP_PREFIX = 'plugin:';
+
+/**
+ * 插件栏目宿主：只负责挂载插件返回的 ReactNode，并兜住插件渲染异常。
+ * 插件渲染炸了不该让设置面板白屏——捕获后展示降级提示，其余分组照常可用。
+ */
+function PluginSectionHost({ section }: { section: SettingsSection }) {
+  let content: React.ReactNode = null;
+  let failed = '';
+  try {
+    content = section.render();
+  } catch (e: any) {
+    failed = e?.message || String(e);
+  }
+  if (failed) {
+    return (
+      <div style={{ fontSize: 13, color: 'var(--danger)', lineHeight: 1.7 }}>
+        栏目「{section.label}」渲染失败：{failed}
+      </div>
+    );
+  }
+  return <>{content}</>;
+}
+
 
 // 分组 schema：key 必须是真实 .env 变量名
 const GROUPS: Array<{ name: string; fields: Array<{ key: string; label: string; type?: 'text'|'password'|'number'|'checkbox'; options?: string[]; hint?: string }> }> = [
@@ -316,18 +446,19 @@ const ALL_FIELDS = GROUPS.flatMap(g => g.fields);
 const inputStyle: CSSProperties = {
   width: '100%',
   padding: '8px 10px',
-  border: '1px solid #d0d3d6',
+  border: '1px solid var(--border-default)',
   borderRadius: 6,
   fontFamily: 'inherit',
   fontSize: 13,
   boxSizing: 'border-box',
-  color: '#1f2328',
+  color: 'var(--text-primary)',
+  background: 'var(--bg-base)',
 };
 
 const smallBtnStyle: CSSProperties = {
-  border: '1px solid #d0d3d6',
-  background: '#fff',
-  color: '#444',
+  border: '1px solid var(--border-default)',
+  background: 'var(--bg-surface)',
+  color: 'var(--text-secondary)',
   borderRadius: 6,
   padding: '8px 12px',
   cursor: 'pointer',
@@ -339,12 +470,25 @@ export function SettingsPanel({ onClose }: Props) {
   const api = useElectronAPI();
 
   const [activeGroup, setActiveGroup] = useState('模型');
+  /** 插件贡献的设置栏目（dsh-theme 的「主题」等）；无插件时为空数组，走零开销原路径 */
+  const [pluginSections, setPluginSections] = useState<SettingsSection[]>(() => listSettingsSections());
   const [values, setValues] = useState<Record<string, string>>({});
   const [envPath, setEnvPath] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
   const [errMsg, setErrMsg] = useState('');
   const [showPwd, setShowPwd] = useState(false);
+
+  /**
+   * 订阅插件栏目：插件可能在面板已打开后才注册（注入时序不定），
+   * 故除初次快照外还监听扩展点的就绪/变更事件，保证栏目一注册就出现。
+   */
+  useEffect(() => {
+    const refresh = () => setPluginSections(listSettingsSections());
+    refresh();
+    window.addEventListener('seek:settings-extension-ready', refresh);
+    return () => window.removeEventListener('seek:settings-extension-ready', refresh);
+  }, []);
 
   // 挂载时读取 .env 配置，仅用 schema 中的 key 填充 values
   useEffect(() => {
@@ -432,7 +576,7 @@ export function SettingsPanel({ onClose }: Props) {
       <div
         style={{
           width: 720, maxWidth: '92vw', height: 'min(620px, 80vh)',
-          background: '#fff', borderRadius: 10,
+          background: 'var(--bg-elevated)', borderRadius: 10,
           boxShadow: '0 8px 40px rgba(0,0,0,0.3)',
           display: 'flex', flexDirection: 'column',
           overflow: 'hidden',
@@ -440,24 +584,25 @@ export function SettingsPanel({ onClose }: Props) {
         }}
       >
         {/* 顶部条：标题 + envPath 副标题 + 关闭按钮 */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid #e5e7eb' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: '#1f2328' }}>设置</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>设置</div>
             {envPath && (
-              <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2, maxWidth: 560, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{envPath}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, maxWidth: 560, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{envPath}</div>
             )}
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 20, color: '#8c8c8c', lineHeight: 1, padding: '2px 6px' }}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 20, color: 'var(--text-muted)', lineHeight: 1, padding: '2px 6px' }}
           >×</button>
         </div>
 
         {/* 主体：左列分组 + 右列表单 */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          <div style={{ width: 160, borderRight: '1px solid #e5e7eb', padding: '10px 0', overflow: 'auto', flexShrink: 0 }}>
+          <div style={{ width: 160, borderRight: '1px solid var(--border-subtle)', padding: '10px 0', overflow: 'auto', flexShrink: 0 }}>
+            {/* 内置分组 + 插件贡献栏目（后者用分隔线视觉区分） */}
             {GROUPS.map(g => {
               const active = g.name === activeGroup;
               return (
@@ -466,24 +611,46 @@ export function SettingsPanel({ onClose }: Props) {
                   onClick={() => setActiveGroup(g.name)}
                   style={{
                     padding: '9px 16px', cursor: 'pointer', fontSize: 14,
-                    color: active ? '#3370ff' : '#444',
-                    background: active ? '#e8f0ff' : 'transparent',
+                    color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                    background: active ? 'var(--accent-bg)' : 'transparent',
                     fontWeight: active ? 600 : 400,
-                    borderLeft: active ? '3px solid #3370ff' : '3px solid transparent',
+                    borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
                     transition: 'background 0.15s, color 0.15s',
                   }}
                 >{g.name}</div>
               );
             })}
+            {pluginSections.length > 0 && <div style={{ height: 1, background: 'var(--border-subtle)', margin: '8px 12px' }} />}
+            {pluginSections.map(s => {
+              const active = PLUGIN_GROUP_PREFIX + s.id === activeGroup;
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => setActiveGroup(PLUGIN_GROUP_PREFIX + s.id)}
+                  style={{
+                    padding: '9px 16px', cursor: 'pointer', fontSize: 14,
+                    color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                    background: active ? 'var(--accent-bg)' : 'transparent',
+                    fontWeight: active ? 600 : 400,
+                    borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
+                    transition: 'background 0.15s, color 0.15s',
+                  }}
+                >{s.label}</div>
+              );
+            })}
           </div>
 
           <div key={activeGroup} style={{ flex: 1, overflow: 'auto', padding: '16px 20px', animation: 'sp-slide-in 0.18s ease-out' }}>
+            {/* 插件栏目优先分派：group key 带前缀，避免与内置分组同名冲突 */}
+            {pluginSections.find(s => PLUGIN_GROUP_PREFIX + s.id === activeGroup)
+              ? <PluginSectionHost section={pluginSections.find(s => PLUGIN_GROUP_PREFIX + s.id === activeGroup)!} />
+              : null}
             {activeGroup === '插件' ? <PluginsSection /> : null}
             {activeFields.map(field => (
               <div key={field.key} style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: 13, color: '#444', marginBottom: 6 }}>
+                <label style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>
                   {field.label}
-                  <span style={{ color: '#b0b3b8', marginLeft: 8, fontSize: 12 }}>{field.key}</span>
+                  <span style={{ color: 'var(--text-dim)', marginLeft: 8, fontSize: 12 }}>{field.key}</span>
                 </label>
                 {field.type === 'checkbox' ? (
                   <div>
@@ -495,7 +662,7 @@ export function SettingsPanel({ onClose }: Props) {
                         onChange={e => handleChange(field.key, e.target.checked ? 'true' : '')}
                         style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
                       />
-                      {field.hint && <span style={{ fontSize: 12, color: '#8c8c8c', lineHeight: 1.6 }}>{field.hint}</span>}
+                      {field.hint && <span style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>{field.hint}</span>}
                     </div>
                   </div>
                 ) : field.options ? (
@@ -529,13 +696,13 @@ export function SettingsPanel({ onClose }: Props) {
         </div>
 
         {/* 底部条：保存 / 取消 + 提示信息 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderTop: '1px solid #e5e7eb' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderTop: '1px solid var(--border-subtle)' }}>
           <button
             type="button"
             onClick={handleSave}
             disabled={saving}
             style={{
-              background: '#3370ff', color: '#fff', border: 'none', borderRadius: 6,
+              background: 'var(--accent)', color: 'var(--bg-base)', border: 'none', borderRadius: 6,
               padding: '8px 20px', fontSize: 14,
               cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.7 : 1,
             }}
@@ -543,16 +710,20 @@ export function SettingsPanel({ onClose }: Props) {
           <button
             type="button"
             onClick={onClose}
-            style={{ background: '#fff', color: '#444', border: '1px solid #d0d3d6', borderRadius: 6, padding: '8px 20px', fontSize: 14, cursor: 'pointer' }}
+            style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)', border: '1px solid var(--border-default)', borderRadius: 6, padding: '8px 20px', fontSize: 14, cursor: 'pointer' }}
           >取消</button>
-          {savedMsg && <span style={{ color: '#2e7d32', fontSize: 13 }}>{savedMsg}</span>}
-          {errMsg && <span style={{ color: '#d93026', fontSize: 13 }}>{errMsg}</span>}
+          {savedMsg && <span style={{ color: 'var(--success)', fontSize: 13 }}>{savedMsg}</span>}
+          {errMsg && <span style={{ color: 'var(--danger)', fontSize: 13 }}>{errMsg}</span>}
         </div>
       </div>
       </div>
     </>
   );
 }
+
+
+
+
 
 
 

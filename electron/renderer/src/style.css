@@ -185,14 +185,14 @@
   --user-msg-bg: rgba(212, 168, 67, 0.06);
   --user-msg-border: rgba(212, 168, 67, 0.18);
   --user-msg-accent: #e5c158;
-  --agent-msg-bg: rgba(255, 255, 255, 0.03);
+  --agent-msg-bg: rgba(0, 0, 0, 0.3);
   --agent-msg-border: rgba(255, 255, 255, 0.06);
   --tool-msg-bg: rgba(255, 255, 255, 0.02);
   --tool-msg-border: rgba(255, 255, 255, 0.04);
   --system-msg-color: var(--text-dim);
   --subagent-msg-accent: var(--purple-400);
 
-  --agent-msg-bg: rgba(255, 255, 255, 0.03);
+  --agent-msg-bg: rgba(0, 0, 0, 0.3);
   --agent-msg-border: rgba(255, 255, 255, 0.06);
   --tool-msg-bg: rgba(255, 255, 255, 0.02);
   --tool-msg-border: rgba(255, 255, 255, 0.04);
@@ -204,6 +204,12 @@
   --code-border: rgba(255, 255, 255, 0.08);
   --code-inline-bg: rgba(168, 85, 247, 0.12);
   --code-inline-color: var(--purple-400);
+
+  /* 记忆面板：角色标签色（深色主题用亮调，[data-theme='light'] 覆写为深调） */
+  --role-user: #6ea8fe;
+  --role-assistant: #6dd58c;
+  --role-tool: #e0b060;
+  --role-system: #b39ddb;
 
   /* 右侧面板 */
   --panel-tab-active-border: var(--accent);
@@ -399,14 +405,19 @@ html, body {
   background: var(--accent);
 }
 
-/* 拖动期间：面板禁宽度过渡（避免跟手延迟），全局统一光标并抑制文本选中 */
+/* 拖动期间：面板禁宽度过渡（避免跟手延迟），光标交给拖拽遮罩 */
 #info-panel.panel-resizing {
   transition: none;
 }
-body.panel-resizing,
-body.panel-resizing * {
-  cursor: col-resize !important;
-  user-select: none !important;
+
+/* 拖拽遮罩：整屏接管光标与鼠标事件（顺带屏蔽文本选中与 hover 抖动）。
+   替代原先 body.panel-resizing * 的通配符覆写——那条规则会让浏览器对全文档
+   每个元素重算一次样式（cursor / user-select 都还是继承属性），起手和松手各卡一下 */
+.panel-resize-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  cursor: col-resize;
 }
 
 /* 窄屏：面板是宽度固定的浮层，不提供拖拽 */
@@ -1236,6 +1247,8 @@ body.panel-resizing * {
   flex: 1;
   min-height: 0; /* flex 子项：允许收缩，内容超高时在自身内滚动（否则撑开外层 #info-panel 整体滚动，sticky 面包屑失效） */
   overflow-y: auto;
+  /* 宽度拖拽时滚动条显隐会反过来改内容宽度，来回抖；恒留槽位把它钉住 */
+  scrollbar-gutter: stable;
 }
 
 /*
@@ -3471,12 +3484,18 @@ body.panel-resizing * {
   --user-msg-bg: rgba(57, 100, 254, 0.04);
   --user-msg-border: rgba(57, 100, 254, 0.12);
   --user-msg-accent: #3964fe;
-  --agent-msg-bg: rgba(0, 0, 0, 0.02);
+  --agent-msg-bg: rgba(255, 255, 255, 0.3);
   --agent-msg-border: rgba(0, 0, 0, 0.06);
   --tool-msg-bg: rgba(0, 0, 0, 0.01);
   --tool-msg-border: rgba(0, 0, 0, 0.04);
   --system-msg-color: var(--text-dim);
   --subagent-msg-accent: #7c3aed;
+
+  /* 记忆面板：角色标签色（浅色主题用深调） */
+  --role-user: #3370ff;
+  --role-assistant: #2e7d32;
+  --role-tool: #b26a00;
+  --role-system: #7b5ea7;
 
   /* 代码 */
   --code-bg: rgba(0, 0, 0, 0.04);
@@ -5034,6 +5053,10 @@ body.panel-resizing * {
 [data-theme='light'] .inline-diff-lineno.add { color: #15803d; }
 [data-theme='light'] .inline-diff-row.add .inline-diff-text { color: #10612d; }
 [data-theme='light'] .inline-diff-row.del .inline-diff-text { color: #9b1c1c; }
+
+
+
+
 
 
 

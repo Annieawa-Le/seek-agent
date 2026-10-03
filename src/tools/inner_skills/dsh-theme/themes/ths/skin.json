@@ -1,0 +1,33 @@
+{
+  "id": "ths",
+  "name": "同花顺风格",
+  "nameEn": "Tonghuashun Trading",
+  "version": "0.1.11",
+  "description": "同花顺风格炒股主题：品牌红标题栏带上证指数行情签，状态栏红涨绿跌，自选股风格的侧边栏和交易终端面板，写代码也像盯盘。",
+  "author": "dsh-web-ui",
+  "license": "BSD-3-Clause",
+  "source": "DSH-Desktop-EAC dsh-desktop/assets/skins/ths · 上游包 @linxin666/dsh-client-ui-skin-ths",
+  "tags": [
+    "stock",
+    "trading",
+    "terminal",
+    "red"
+  ],
+  "palette": {
+    "background": "#fff",
+    "panel": "#eef1f5",
+    "text": "#1f2733",
+    "accent": "#e60012"
+  },
+  "css": "skin.css",
+  "script": "skin.js",
+  "scope": {
+    "owner": "ui-skin-ths",
+    "bodyAttribute": "data-dsh-ths"
+  },
+  "upstream": {
+    "package": "@linxin666/dsh-client-ui-skin-ths",
+    "wiringId": "ui-skin-ths",
+    "repository": "https://github.com/zhu1090093659/dsh-web-ui.git"
+  }
+}

@@ -7,25 +7,25 @@ import { renderMarkdown } from '@/utils/markdown.ts';
 import type { PromptBlock, PromptSubNode } from '@/utils/memory-prompt-utils.ts';
 
 const roleLabel: Record<string, string> = { user: '用户', assistant: '助手', tool: '工具', system: '系统' };
-const roleColor: Record<string, string> = { user: '#3370ff', assistant: '#2e7d32', tool: '#b26a00', system: '#7b5ea7' };
+const roleColor: Record<string, string> = { user: 'var(--role-user)', assistant: 'var(--role-assistant)', tool: 'var(--role-tool)', system: 'var(--role-system)' };
 
 const blockStyle: CSSProperties = {
-  border: '1px solid #e0e3e8', borderRadius: 8, padding: '10px 12px', marginBottom: 8,
-  background: '#fff', cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s',
+  border: '1px solid var(--border-default)', borderRadius: 8, padding: '10px 12px', marginBottom: 8,
+  background: 'var(--bg-elevated)', cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s',
 };
 const selectedStyle: CSSProperties = {
-  borderColor: '#3370ff', background: '#eef4ff',
+  borderColor: 'var(--accent)', background: 'var(--accent-bg)',
 };
 const sectionTitleStyle: CSSProperties = {
-  fontSize: 12, fontWeight: 600, color: '#666', margin: '14px 0 8px',
+  fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', margin: '14px 0 8px',
   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
 };
 const smallBtn: CSSProperties = {
-  border: '1px solid #d0d3d6', background: '#fff', color: '#444', borderRadius: 6,
+  border: '1px solid var(--border-default)', background: 'var(--bg-surface)', color: 'var(--text-secondary)', borderRadius: 6,
   padding: '4px 10px', cursor: 'pointer', fontSize: 12, flexShrink: 0,
 };
 const primaryBtn: CSSProperties = {
-  border: 'none', background: '#3370ff', color: '#fff', borderRadius: 6,
+  border: 'none', background: 'var(--accent)', color: 'var(--bg-base)', borderRadius: 6,
   padding: '5px 14px', cursor: 'pointer', fontSize: 12, flexShrink: 0,
 };
 
@@ -186,8 +186,8 @@ export function MemoryPanel({ runtimeData }: { runtimeData: SidebarRuntimeData |
 
   if (!enabled) {
     return (
-      <div className="panel-empty" style={{ padding: 20, lineHeight: 1.8, color: '#888' }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: '#666', marginBottom: 8 }}>记忆面板</div>
+      <div className="panel-empty" style={{ padding: 20, lineHeight: 1.8, color: 'var(--text-muted)' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>记忆面板</div>
         <div>Prompt 本地化未开启，记忆面板不可用。</div>
         <div style={{ fontSize: 12 }}>请在设置 → 其他 → Prompt 本地化 勾选后重启 seek-agent 生效。</div>
       </div>
@@ -201,24 +201,24 @@ export function MemoryPanel({ runtimeData }: { runtimeData: SidebarRuntimeData |
   return (
     <div style={{ padding: '4px 12px 16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-        <span style={{ fontSize: 12, color: '#999' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
           快照时间：{new Date(memory.ts).toLocaleString('zh-CN', { hour12: false })}
         </span>
-        <span style={{ fontSize: 12, color: '#2e7d32' }}>{savedMsg}</span>
+        <span style={{ fontSize: 12, color: 'var(--success)' }}>{savedMsg}</span>
       </div>
 
       {/* ── System Prompt 分块条目 ── */}
       <div style={sectionTitleStyle}>
         <span>System Prompt（{blocks.length} 条 · {editMode ? '编辑模式：点击标题选中 / Ctrl 多选 / Shift 范围 / 拖动排序' : '点击标题展开 / 双击标题编辑 / 点「编辑模式」管理选择'}）</span>
         <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button style={editMode ? { ...primaryBtn, background: '#7b5ea7' } : smallBtn} onClick={toggleEditMode} title={editMode ? '退出编辑模式（清空选择）' : '进入编辑模式：点击标题可多选/拖动排序/删除'}>{editMode ? '完成' : '编辑模式'}</button>
+          <button style={editMode ? { ...primaryBtn, background: 'var(--purple-500)' } : smallBtn} onClick={toggleEditMode} title={editMode ? '退出编辑模式（清空选择）' : '进入编辑模式：点击标题可多选/拖动排序/删除'}>{editMode ? '完成' : '编辑模式'}</button>
           <button style={{ ...primaryBtn, opacity: dirty ? 1 : 0.5 }} disabled={!dirty} onClick={applyChanges} title="把编辑结果写回本地化快照，后续轮次生效">应用修改</button>
         </span>
       </div>
 
       {selected.size > 0 && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: '#666' }}>已选 {selected.size} 条：</span>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>已选 {selected.size} 条：</span>
           <button style={smallBtn} onClick={deleteSelected}>删除选中</button>
           <button style={smallBtn} onClick={copySelected}>复制选中</button>
           <button style={smallBtn} onClick={() => setSelected(new Set(blocks.map(b => b.id)))}>全选</button>
@@ -248,7 +248,7 @@ export function MemoryPanel({ runtimeData }: { runtimeData: SidebarRuntimeData |
               ...blockStyle,
               ...(isSelected ? selectedStyle : {}),
               opacity: isDragging ? 0.4 : 1,
-              borderTop: isOver ? '2px solid #3370ff' : undefined,
+              borderTop: isOver ? '2px solid var(--accent)' : undefined,
               cursor: isEditing ? 'default' : 'pointer',
             }}
           >
@@ -256,11 +256,11 @@ export function MemoryPanel({ runtimeData }: { runtimeData: SidebarRuntimeData |
               <span
                 onClick={e => { e.stopPropagation(); toggleBlock(block.id); }}
                 title={isCollapsed ? '展开' : '收起'}
-                style={{ display: 'inline-flex', color: '#9aa0a8', flexShrink: 0, cursor: 'pointer', transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 0.12s', padding: 2 }}
+                style={{ display: 'inline-flex', color: 'var(--text-muted)', flexShrink: 0, cursor: 'pointer', transform: isCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 0.12s', padding: 2 }}
               >
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
               </span>
-              <span style={{ fontSize: 11, color: '#b0b3b8', flexShrink: 0 }}>{index + 1}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>{index + 1}</span>
               {editMode && (
                 <input
                   type="checkbox"
@@ -276,10 +276,10 @@ export function MemoryPanel({ runtimeData }: { runtimeData: SidebarRuntimeData |
                   style={{ width: 13, height: 13, flexShrink: 0, cursor: 'pointer' }}
                 />
               )}
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                 {block.title}
               </span>
-              <span style={{ fontSize: 11, color: '#b0b3b8', flexShrink: 0 }}>{block.content.length} 字符</span>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>{block.content.length} 字符</span>
             </div>
             {isEditing ? (
               <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
@@ -288,7 +288,7 @@ export function MemoryPanel({ runtimeData }: { runtimeData: SidebarRuntimeData |
                   onChange={e => setEditText(e.target.value)}
                   rows={6}
                   autoFocus
-                  style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 12, border: '1px solid #3370ff', borderRadius: 6, padding: 8, resize: 'vertical' }}
+                  style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 12, border: '1px solid var(--accent)', borderRadius: 6, padding: 8, resize: 'vertical', background: 'var(--bg-base)', color: 'var(--text-primary)' }}
                 />
                 <div style={{ display: 'flex', gap: 8, marginTop: 6, justifyContent: 'flex-end' }}>
                   <button style={smallBtn} onClick={() => setEditingId(null)}>取消</button>
@@ -306,7 +306,7 @@ export function MemoryPanel({ runtimeData }: { runtimeData: SidebarRuntimeData |
       <div style={{ ...sectionTitleStyle, marginTop: 20 }}>
         <span>全部消息（{memory.messages.length} 条 · 点击展开/收起）</span>
       </div>
-      <div style={{ border: '1px solid #e0e3e8', borderRadius: 8, background: '#fff' }}>
+      <div style={{ border: '1px solid var(--border-default)', borderRadius: 8, background: 'var(--bg-elevated)' }}>
         {memory.messages.length === 0 && <div className="panel-empty">暂无消息</div>}
         {memory.messages.map((msg, i) => (
           <MessageRow key={i} msg={msg} index={i} expanded={expandedMsg === i} onToggle={() => setExpandedMsg(expandedMsg === i ? null : i)} />
@@ -323,20 +323,20 @@ function MessageRow({ msg, index, expanded, onToggle }: {
   onToggle: () => void;
 }) {
   const label = roleLabel[msg.role] || msg.role;
-  const color = roleColor[msg.role] || '#666';
+  const color = roleColor[msg.role] || 'var(--text-muted)';
   const summary = messageContentText(msg);
   const toolInfo = msg.toolName ? ` · ${msg.toolName}` : '';
   const shown = summary.length > 160 ? `${summary.slice(0, 160)}…` : summary;
   return (
-    <div style={{ borderBottom: '1px solid #f0f1f4', padding: '7px 10px', cursor: 'pointer' }} onClick={onToggle} title={expanded ? '收起' : '展开完整内容'}>
+    <div style={{ borderBottom: '1px solid var(--border-subtle)', padding: '7px 10px', cursor: 'pointer' }} onClick={onToggle} title={expanded ? '收起' : '展开完整内容'}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 10, color: color, fontWeight: 600, background: `${color}1a`, borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>{label}</span>
-        {msg.toolName && <span style={{ fontSize: 11, color: '#b26a00', flexShrink: 0 }}>{msg.toolName}</span>}
-        <span style={{ fontSize: 11, color: '#b0b3b8', flexShrink: 0 }}>#{index + 1}</span>
-        <span style={{ fontSize: 11, color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+        <span style={{ fontSize: 10, color: color, fontWeight: 600, background: `color-mix(in srgb, ${color} 14%, transparent)`, borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>{label}</span>
+        {msg.toolName && <span style={{ fontSize: 11, color: 'var(--role-tool)', flexShrink: 0 }}>{msg.toolName}</span>}
+        <span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>#{index + 1}</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
           {expanded ? '' : shown || toolInfo || `(${typeof msg.content === 'object' ? '结构化内容' : '空'})`}
         </span>
-        <span style={{ color: '#b0b3b8', flexShrink: 0, display: 'inline-flex' }}>
+        <span style={{ color: 'var(--text-dim)', flexShrink: 0, display: 'inline-flex' }}>
           {expanded ? (
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
           ) : (
@@ -345,7 +345,7 @@ function MessageRow({ msg, index, expanded, onToggle }: {
         </span>
       </div>
       {expanded && (
-        <pre style={{ fontSize: 11, color: '#555', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: '6px 0 2px', maxHeight: 240, overflow: 'auto', lineHeight: 1.5 }}>
+        <pre style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: '6px 0 2px', maxHeight: 240, overflow: 'auto', lineHeight: 1.5 }}>
           {summary || toolInfo || '(空内容)'}
         </pre>
       )}
@@ -392,7 +392,7 @@ function BlockContentView({ blockId, content, expandedSubs, onToggleSub, editing
         ) : body.trim() ? (
           <div
             className="content"
-            style={{ fontSize: 12, color: '#777', lineHeight: 1.6, cursor: 'text', maxHeight: 160, overflow: 'auto' }}
+            style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, cursor: 'text', maxHeight: 160, overflow: 'auto' }}
             title="双击编辑这段"
             onDoubleClick={preambleEdit}
             dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
@@ -409,7 +409,7 @@ function BlockContentView({ blockId, content, expandedSubs, onToggleSub, editing
         ) : (
           <div
             className="content"
-            style={{ fontSize: 12, color: '#777', lineHeight: 1.6, marginBottom: 6, padding: '6px 8px', background: '#fafafa', borderRadius: 6, cursor: 'text', maxHeight: 120, overflow: 'auto' }}
+            style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 6, padding: '6px 8px', background: 'var(--bg-surface)', borderRadius: 6, cursor: 'text', maxHeight: 120, overflow: 'auto' }}
             title="双击编辑这段"
             onDoubleClick={preambleEdit}
             dangerouslySetInnerHTML={{ __html: renderMarkdown(strippedPreamble) }}
@@ -449,22 +449,22 @@ function SubSectionNode({ blockId, node, expandedSubs, onToggleSub, editingSub, 
         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', cursor: 'pointer', borderRadius: 4, userSelect: 'none' }}
         title={`${node.title}\n${isOpen ? '收起' : '展开'}`}
       >
-        <span style={{ display: 'inline-flex', color: '#9aa0a8', flexShrink: 0, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.12s' }}>
+        <span style={{ display: 'inline-flex', color: 'var(--text-muted)', flexShrink: 0, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.12s' }}>
           <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
         </span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#444' }}>{node.title}</span>
-        <span style={{ fontSize: 11, color: '#b0b3b8', flexShrink: 0 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{node.title}</span>
+        <span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>
           {bodyLen > 0 ? `${bodyLen} 字符` : ''}{childCount > 0 ? `${bodyLen > 0 ? ' · ' : ''}${childCount} 子节` : ''}
         </span>
       </div>
       {isOpen && (
-        <div style={{ marginLeft: 8, paddingLeft: 10, borderLeft: '1px solid #e4e7ec' }}>
+        <div style={{ marginLeft: 8, paddingLeft: 10, borderLeft: '1px solid var(--border-subtle)' }}>
           {isEditing ? (
             <EditBox text={editSubText} onText={onEditSubText} onSave={onSaveEditSub} onCancel={onCancelEditSub} />
           ) : bodyLen > 0 ? (
             <div
               className="content"
-              style={{ fontSize: 12, color: '#666', lineHeight: 1.6, margin: '2px 0 6px', cursor: 'text' }}
+              style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, margin: '2px 0 6px', cursor: 'text' }}
               title="双击编辑这段"
               onDoubleClick={() => onStartEditSub(blockId, node.id, node.linesStart, node.linesEnd, body)}
               dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
@@ -494,7 +494,7 @@ function EditBox({ text, onText, onSave, onCancel }: {
         onChange={e => onText(e.target.value)}
         rows={5}
         autoFocus
-        style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 12, border: '1px solid #3370ff', borderRadius: 6, padding: 8, resize: 'vertical' }}
+        style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 12, border: '1px solid var(--accent)', borderRadius: 6, padding: 8, resize: 'vertical', background: 'var(--bg-base)', color: 'var(--text-primary)' }}
       />
       <div style={{ display: 'flex', gap: 8, marginTop: 6, justifyContent: 'flex-end' }}>
         <button style={smallBtn} onClick={onCancel}>取消</button>

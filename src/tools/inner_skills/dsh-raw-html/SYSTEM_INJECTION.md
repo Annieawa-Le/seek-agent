@@ -36,8 +36,8 @@
 - 代码块内的尖括号必须转义：`<` 写 `&lt;`、`>` 写 `&gt;`。
 
 ### 内置字体（直接写字体名，无需 @font-face）
-`Lanxi-HeiTi` · `Lanxi-HeiTiLight` · `Lanxi-HeiTiBold` · `Lanxi-WenKai`（文楷）· `Lanxi-朗宋` ·
-`Lanxi-颜宋` · `Lanxi-MaShanZheng`（马善政）· `Lanxi-鱼尾行书` · `Lanxi-GreatVibes`（英文草书）
+`Lanxi-HeiTi` · `Lanxi-HeiTiLight` · `Lanxi-HeiTiBold` · `Lanxi-WenKai`（文楷）·
+`Lanxi-MaShanZheng`（马善政）· `Lanxi-GreatVibes`（英文草书）
 写卡前若拿不准选哪款，可调 `style_get("_FONTS")` 查场景→字体速查表。
 
 ### 能力速览

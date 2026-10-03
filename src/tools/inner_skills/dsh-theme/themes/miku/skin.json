@@ -1,0 +1,35 @@
+{
+  "id": "miku",
+  "name": "初音未来 · 电子歌姬",
+  "nameEn": "Hatsune Miku",
+  "version": "0.1.11",
+  "description": "以世界第一的虚拟歌姬初音未来为灵感的主题皮肤：蓝紫洋红渐变贯穿全局，音符与声波曲线点缀在半透明面板之间，标题栏与状态栏带有 01 编号徽标与音乐波形，半透明毛玻璃面板透出背景图——沉浸式电子歌姬氛围。",
+  "author": "涂山苏苏",
+  "license": "BSD-3-Clause",
+  "source": "DSH-Desktop-EAC dsh-desktop/assets/skins/miku · 上游包 @linxin666/dsh-client-ui-skin-miku",
+  "tags": [
+    "miku",
+    "vocaloid",
+    "blue",
+    "music",
+    "idol",
+    "waveform"
+  ],
+  "palette": {
+    "background": "#fff",
+    "panel": "#e4f0ff",
+    "text": "#17302c",
+    "accent": "#2e9bff"
+  },
+  "css": "skin.css",
+  "script": "skin.js",
+  "scope": {
+    "owner": "ui-skin-miku",
+    "bodyAttribute": "data-dsh-miku"
+  },
+  "upstream": {
+    "package": "@linxin666/dsh-client-ui-skin-miku",
+    "wiringId": "ui-skin-miku",
+    "repository": "https://github.com/zhu1090093659/dsh-web-ui.git"
+  }
+}
